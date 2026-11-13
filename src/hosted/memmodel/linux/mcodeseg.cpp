@@ -147,7 +147,13 @@ TInt DWin32CodeSeg::DoCreateRam(TCodeSegCreateInfo& aInfo, DProcess* aProcess, T
 		iExeProcess = (DWin32Process*)aProcess;
 		}
 	else
+		{
 		iRamDataRun = data;
+		// large DLL data (libc 64 KB, libcrypto, iris, QtGui, WebKit on the 808): swapped by mapping each process's
+		// memory file on switch-in, not by copying out and in (13% of the CPU on the 808's home page 2). The DLL's
+		// data region is page-aligned and its own (RegionAlloc).
+		iWsdMap = data && total >= KWsdMapMin;
+		}
 	iRealDataSize = aInfo.iDataSize;
 	iRealBssSize = aInfo.iBssSize;
 	iDataDest = iRamDataRun;

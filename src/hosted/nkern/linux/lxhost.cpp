@@ -460,6 +460,9 @@ void LxDumpAllThreads()
 // 32-bit process on arm64 Linux (a stale value survives execve): the record was never set up and the
 // kernel boot crashed silently. An explicit flag now (declared with LxSelf). Regression: nk_lxinit.
 
+static void PinInit();
+static void PinSelf(TBool aNanothread);
+
 void LxInit()
 	{
 	if (LxInitDone)
@@ -470,6 +473,8 @@ void LxInit()
 	TheMainLx.iCtid = TheMainLx.iTid;	// not a clone of ours: no CLONE_CHILD_CLEARTID word, never "gone"
 	LxSetSelf(&TheMainLx);
 	Register(&TheMainLx);
+	PinInit();
+	PinSelf(ETrue);						// the main thread becomes the first nanothread
 	hsigaction(SIGUSR1, DumpHandler, SA_RESTART);
 	hsigaction(3 /* SIGQUIT */, QuitHandler, 0);
 	hsigaction(KLxSuspendSignal, SuspendHandler, SA_RESTART);
@@ -487,10 +492,43 @@ static void SetAltStack(TUint8* aBase, TUint aSize)
 	hsys(186 /* sigaltstack */, &ss, 0);
 	}
 
+// htest --env HPIN=<cpu>: every nanothread on that CPU, host helper threads (display, GL, IRQ, tick) on the others.
+// A hand-over then wakes a thread on the same CPU (no cross-CPU wake-up); future.md 2.1. Off (no env) by default.
+static TUint32 PinCpu = 0xffffffffu, AllCpus;
+// nanothreads created from now on go to CPU aCpu, host helper threads to the others; false if the process cannot
+// (one CPU, or aCpu not among its CPUs). Tests: nk_lxinit
+TBool LxPinTo(TUint32 aCpu)
+	{
+	TUint32 all = 0;
+	if (aCpu >= 32 || hsys(242 /* sched_getaffinity */, 0, sizeof all, &all) < 0 || !(all & (1u << aCpu)) ||
+	    all == (1u << aCpu))
+		return EFalse;
+	AllCpus = all;
+	PinCpu = aCpu;
+	hthread_helper_cpus = all & ~(1u << aCpu);	// host helper threads (hthread): every other CPU
+	return ETrue;
+	}
+
+static void PinInit()
+	{
+	TUint32 c = hgetenv_hex("HPIN", 0xffffffffu);
+	if (c != 0xffffffffu)
+		LxPinTo(c);
+	}
+
+static void PinSelf(TBool aNanothread)
+	{
+	if (PinCpu == 0xffffffffu)
+		return;
+	TUint32 m = aNanothread ? 1u << PinCpu : AllCpus & ~(1u << PinCpu);
+	hsys(241 /* sched_setaffinity */, 0, sizeof m, &m);
+	}
+
 static TInt LxThreadStart(TAny* aArg)
 	{
 	SLxThreadFull* me = static_cast<SLxThreadFull*>(aArg);
 	LxSetSelf(me);
+	PinSelf(me->iNThread != 0);
 	SetAltStack(me->iAltStack, KLxAltSize);
 	me->iTid = hgettid();
 	// created suspended: wait until resumed (no signal needed: we are not running anything yet)
@@ -583,7 +621,7 @@ SLxThread* LxCreateThread(TLxThreadFunction aFunc, TAny* aArg, TBool aRun, NThre
 	t->iSuspend = aRun ? 0 : 1;
 	t->iTid = -1;
 	t->iAltStack = m + 0x1000 + KLxStackSize;
-	if (hthread(LxThreadBody, t, m + 0x1000, KLxStackSize, &t->iCtid) <= 0)
+	if (hthread_on(LxThreadBody, t, m + 0x1000, KLxStackSize, &t->iCtid, 0) <= 0)
 		{
 		hmunmap(m, KLxMapSize);
 		__atomic_sub_fetch(&LiveStacks, 1, __ATOMIC_SEQ_CST);

@@ -71,6 +71,39 @@ def paths_dir(prof):
     return devmodel.paths(prof)['dir']
 
 
+def semc_images(files, out, uda_only=False):
+    """Sony Ericsson flash files (tools/fw/semc.py): role core -> core-flat.img (a plain XIP core), rofs1 ->
+    rofs1.img, rofx -> rofs2.img (extension of ROFS1, as the Nokia language ROFx), rofs3 -> rofs3.img
+    (customer ROFS), uda -> uda-<drive>.img (the FAT drive, sparse, its file system's size)"""
+    import semc
+    names = {'core': 'core-flat.img', 'rofs1': 'rofs1.img', 'rofx': 'rofs2.img', 'rofs3': 'rofs3.img'}
+    for role, (p, f) in files.items():
+        kind, facts = semc.classify(p)
+        if role == 'uda':
+            payload = open(p, 'rb').read()
+            if kind == 'semc-fat':
+                payload = semc.prefixed(payload)[2]
+            elif kind != 'fat':
+                raise SystemExit('%s: role uda but %s' % (os.path.basename(p), kind))
+            dst = os.path.join(out, 'uda-%s.img' % f.get('drive', 'C').lower())
+            fat = facts['fat']
+            with open(dst, 'wb') as fo:
+                fo.truncate(fat['bytes'])
+                fo.write(payload)
+            end, used = semc.fat_used_end(payload, fat)
+            print('user data layer: %s -> %s: %s %d MB, %d MB of data%s' % (
+                os.path.basename(p), os.path.relpath(dst, ROOT), fat['type'], fat['bytes'] >> 20, len(payload) >> 20,
+                '' if end <= len(payload) else ' (the FAT marks clusters past the file: INCOMPLETE)'))
+            continue
+        if uda_only:
+            continue
+        want = {'core': ('core',), 'rofs1': ('rofs',), 'rofx': ('rofx',), 'rofs3': ('rofs',)}.get(role)
+        if not want or kind not in want:
+            raise SystemExit('%s: role %s but the file is %s' % (os.path.basename(p), role, kind))
+        shutil.copyfile(p, os.path.join(out, names[role]))
+        print('%s: %s -> %s' % (os.path.basename(p), kind, names[role]))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--device'); ap.add_argument('--fw-dir'); ap.add_argument('--out')
@@ -104,6 +137,10 @@ def main():
     for n, h in sums.items():
         if n in want:
             print('%-40s %s' % (n, 'sha256 ok' if want[n] == h else 'CHANGED since the store import (%s)' % h[:16]))
+    # 3s. Sony Ericsson (container "semc", tools/fw/semc.py): no partitions, one file per image
+    if devmodel.get(prof, 'firmware.container') == 'semc':
+        semc_images(files, out, a.uda_only)
+        files = {}                              # all written; nothing left for the FIASCO steps
     # 3a. the user data layer -> uda-<drive>.img (a FAT drive, not ROM partitions)
     import uda as udamod
     for role, (p, f) in list(files.items()):
@@ -129,6 +166,8 @@ def main():
     #    the profile's roles only select the files.
     import layout
     wrote = set()
+    if devmodel.get(prof, 'firmware.container') == 'semc':
+        files = {}                              # images written by semc_images(); core.json etc. below
     def part_file(pdir, pname):
         stem = pname.replace('+', '_')		# tools/fiasco.py writes "SOS+CORE" as SOS_CORE@<loc>.bin
         src = sorted(glob.glob(os.path.join(pdir, glob.escape(stem) + '@*.bin')))

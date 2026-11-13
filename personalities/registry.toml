@@ -13,3 +13,4 @@ sym91 = 5        # Symbian OS 9.1  (S60 3rd Edition)          personalities/sym9
 sym101 = 6       # Symbian OS 10.1 (Nokia Belle)              personalities/sym101 (Symbian^3 tables + S10b..S114)
 sym102 = 7       # Symbian OS 10.1 FP2 (Nokia Belle FP2)      personalities/sym102 (sym101 shifted: S11/S12/Sd8 inserted)
 sym92l91 = 8     # Symbian OS 9.2 early F32 (S60 3.1: E71, N81 8GB)  personalities/sym92l91 (sym92 tables, 9.1 loader layout)
+sym91r = 9        # Symbian OS 9.1, RVCT EUSER (UIQ 3.0: SE P1i)      personalities/sym91r (sym91, 9.2 TLS calls)

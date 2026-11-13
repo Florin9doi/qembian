@@ -1,0 +1,39 @@
+# Firmware R6E30 (CDA162024/70 R6A, Trade_Russia) of se-p1i: merged over models/se-p1i/model.toml.
+
+[firmware]
+store = "SE-P1i/R6E30"                    # the ROM store entry (no type designator inside SE images)
+version = "R6E30"                          # version.txt "PDA: CXC162108 R6E30" [V]
+obtain = """
+The P1i flash files of one software version (SEtool/EMMA package): BbyoneSW (core), Rofs1Ext (ROFS1),
+ACPU_SW_*_ROF (ROFx), ACPU_CDA*_ROFS (customer), EPOC_* (C: FAT). tools/fw/store.py import the archive.
+"""
+[[firmware.files]]
+role = "core"
+glob = "BbyoneSW_*"
+
+[[firmware.files]]
+role = "rofs1"
+glob = "Rofs1Ext_*"
+
+[[firmware.files]]
+role = "rofx"
+glob = "ACPU_SW_*_ROF"
+
+[[firmware.files]]
+role = "rofs3"
+glob = "ACPU_CDA*_ROFS"
+
+[[firmware.files]]
+role = "uda"
+glob = "EPOC_*"
+drive = "C"
+
+[firmware.identity]
+sw = { version = "R6E30", pda = "CXC162108" }   # private/102030EE/version.txt "PDA: CXC162108 R6E30" [V]
+[firmware.identity.sha256]                 # the images inventory.py writes (build/roms/<id>/<fw>/)
+"core-flat.img" = "0783e7559562f0fe232cf49233634b134c2408ad3bc42de191b711bb272112bd"
+"rofs1.img" = "dae724b989bb38bf00d87418970220b2746d3ea1368a3775bbd293e8d971985f"
+"rofs2.img" = "92f5cf6d0e9c42447a0240f18b4c47bc5b95d06b6b24fb2f6b32e1ee8f532f44"
+
+[firmware.rom]
+user_window_start = 0xF8032680             # crashread.exe: lowest user-side file [V probe.py header]

@@ -46,6 +46,13 @@ static void Present()
 	TUint32 glSeq = 0;
 	static TUint32 LastGlSeq;
 	const TUint32* plain = HostedFbPlain(w, h, pitch, glSeq);
+	static TUint32 TracedSeq;
+	if (glSeq && glSeq != TracedSeq)
+		{
+		extern void HostedGlTraceFrame(TUint32 aSeq);
+		HostedGlTraceFrame(glSeq);			// htest --env GLTRACE=1
+		TracedSeq = glSeq;
+		}
 	if (plain && glSeq && glSeq == LastGlSeq)
 		return;
 	LastGlSeq = 0;

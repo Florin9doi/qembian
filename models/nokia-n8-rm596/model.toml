@@ -47,7 +47,7 @@ touch = true                               # capacitive multitouch (synaptics.dl
 touch_rate_hz = 100                         # [I] capacitive panel report rate: moves between samples are merged (syborg-pointer sample-hz)
 
 [gl.host]                                  # syborg-gl settings for this phone (docs/devices.md "[gl.host]")
-msaa = 8                                   # OpenVG anti-aliasing samples: 0, 2, 4, 8, 16 (runtime: sydb gl set msaa=4)
+msaa = 4                                   # OpenVG anti-aliasing samples: 0, 2, 4, 8, 16 (runtime: sydb gl set msaa=8); 4 = the most the real VideoCore IV offers its EGL clients (models/nokia-n8-rm596/egl-configs.txt)
 filter = "auto"                            # image sampling: auto (VG image quality), nearest, linear
 compose = "host"                           # host: composition/presentation on the GPU; guest: fallback copies
 

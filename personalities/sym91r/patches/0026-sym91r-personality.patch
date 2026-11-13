@@ -1,0 +1,51 @@
+Personality sym91r: Symbian 9.1 with an RVCT-built EUSER (Sony Ericsson P1i)
+
+sym91's tables, SWI return through ip and 9.1 loader layout, but UserSvr::DllTls/DllSetTls already pass the 9.2 arguments (uid 0), so the sym91 TLS shims must not be used (personalities/sym91r/README.md).
+
+--- a/kernel/eka/kernel/sexecpers.cpp
++++ b/kernel/eka/kernel/sexecpers.cpp
+@@ -25,6 +25,7 @@
+ const TInt KPersonalitySym101 = 6;	// Symbian 10.1 (Belle): Symbian^3 + S10b..S114 (personalities/sym101/README.md)
+ const TInt KPersonalitySym102 = 7;	// Symbian 10.1 FP2 (Belle FP2): sym101 with S11/S12/Sd8 inserted (personalities/sym102/README.md)
+ const TInt KPersonalitySym92L91 = 8;	// qembian: 9.2 tables and conventions, 9.1 loader layout (E71, N81 8GB: personalities/sym92l91/README.md)
++const TInt KPersonalitySym91R = 9;	// 9.1 with an RVCT-built EUSER (Sony Ericsson P1i): sym91 but the 9.2 TLS calls (personalities/sym91r/README.md)
+ 
+ TBool Exec92Enabled = EFalse;
+ TBool KernNestedAttachCountsAsLoaded = EFalse;	// scodeseg.cpp TraverseCodeSegs; Belle: ETrue
+@@ -352,7 +353,7 @@
+ 		ExecLoaderCodeSegUserSize = ExecLoaderCodeSegSize;
+ 		ExecLoaderProcessTail = _FOFF(TProcessCreateInfo, iDebugAttributes) - sizeof(TCodeSegCreateInfo);	// 36
+ 		}
+-	else if (pers == KPersonalitySym91)
++	else if (pers == KPersonalitySym91 || pers == KPersonalitySym91R)
+ 		{
+ 		ExecLoaderCodeSegSize = _FOFF(TCodeSegCreateInfo, iCodeRelocTable);		// 380
+ 		ExecLoaderCodeSegUserSize = ExecLoaderCodeSegSize;	// the process fields follow at 380 (read at 472: priority 0, KErrArgument)
+@@ -368,16 +369,16 @@
+ 		return;
+ 		}
+ 
+-	const TInt16* fastMap = pers == KPersonalitySym91 ? KExec91Fast : pers == KPersonalitySym94 ? KExec94Fast
++	const TInt16* fastMap = pers == KPersonalitySym91 ? KExec91Fast : pers == KPersonalitySym91R ? KExec91RFast : pers == KPersonalitySym94 ? KExec94Fast
+ 		: pers == KPersonalitySymbian3 ? KExec3Fast : pers == KPersonalitySym101 ? KExec101Fast
+ 		: pers == KPersonalitySym102 ? KExec102Fast : KExec92Fast;
+-	const TInt16* slowMap = pers == KPersonalitySym91 ? KExec91Slow : pers == KPersonalitySym94 ? KExec94Slow
++	const TInt16* slowMap = pers == KPersonalitySym91 ? KExec91Slow : pers == KPersonalitySym91R ? KExec91RSlow : pers == KPersonalitySym94 ? KExec94Slow
+ 		: pers == KPersonalitySymbian3 ? KExec3Slow : pers == KPersonalitySym101 ? KExec101Slow
+ 		: pers == KPersonalitySym102 ? KExec102Slow : KExec92Slow;
+-	const TInt fastCount = pers == KPersonalitySym91 ? EXEC91_FAST_COUNT : pers == KPersonalitySym94 ? EXEC94_FAST_COUNT
++	const TInt fastCount = pers == KPersonalitySym91 ? EXEC91_FAST_COUNT : pers == KPersonalitySym91R ? EXEC91R_FAST_COUNT : pers == KPersonalitySym94 ? EXEC94_FAST_COUNT
+ 		: pers == KPersonalitySymbian3 ? EXEC3_FAST_COUNT : pers == KPersonalitySym101 ? EXEC101_FAST_COUNT
+ 		: pers == KPersonalitySym102 ? EXEC102_FAST_COUNT : EXEC92_FAST_COUNT;
+-	const TInt slowCount = pers == KPersonalitySym91 ? EXEC91_SLOW_COUNT : pers == KPersonalitySym94 ? EXEC94_SLOW_COUNT
++	const TInt slowCount = pers == KPersonalitySym91 ? EXEC91_SLOW_COUNT : pers == KPersonalitySym91R ? EXEC91R_SLOW_COUNT : pers == KPersonalitySym94 ? EXEC94_SLOW_COUNT
+ 		: pers == KPersonalitySymbian3 ? EXEC3_SLOW_COUNT : pers == KPersonalitySym101 ? EXEC101_SLOW_COUNT
+ 		: pers == KPersonalitySym102 ? EXEC102_SLOW_COUNT : EXEC92_SLOW_COUNT;
+ 	EpocFastExecTable92[0] = fastCount;
+@@ -424,5 +425,5 @@
+ 		}
+ 	Exec92Enabled = ETrue;
+ 	Kern::Printf("EXEC92: Symbian %s exec personality enabled (%d fast, %d slow; loader structs %d+%d)",
+-		pers == KPersonalitySym91 ? "9.1" : pers == KPersonalitySym94 ? "9.4" : pers == KPersonalitySymbian3 ? "^3" : pers == KPersonalitySym101 ? "10.1" : pers == KPersonalitySym102 ? "10.1 FP2" : pers == KPersonalitySym92L91 ? "9.2 (9.1 loader)" : "9.2", fastCount, slowCount, ExecLoaderCodeSegSize, ExecLoaderProcessTail);
++		pers == KPersonalitySym91 ? "9.1" : pers == KPersonalitySym91R ? "9.1 (RVCT EUSER)" : pers == KPersonalitySym94 ? "9.4" : pers == KPersonalitySymbian3 ? "^3" : pers == KPersonalitySym101 ? "10.1" : pers == KPersonalitySym102 ? "10.1 FP2" : pers == KPersonalitySym92L91 ? "9.2 (9.1 loader)" : "9.2", fastCount, slowCount, ExecLoaderCodeSegSize, ExecLoaderProcessTail);
+ 	}

@@ -102,7 +102,7 @@ What the probes said [V, tools/fw/probe.py, inventory]:
   touch feedback (H-haptics-fail).
 - Audio is silent by design for now: the RAPIDO ring model plays nothing to the host, and the start-up
   tone is patched out (H-startuptone-none).
-- Graphics: frames composed and presented on the host GPU, 8x MSAA, gradients
+- Graphics: frames composed and presented on the host GPU, 4x MSAA (8x until 2026-11-13), gradients
   (docs/devices/nokia-n8-rm596/vg-host.md, composition.md); review and plans in docs/gpu-host-review.md.
 - Speed: docs/perf.md.
 

@@ -158,6 +158,7 @@ name = "d_display"
 kind = "ldd"
 family = "nokia-omap2"
 role = "DisplayDriver (board config: 27 caps words, portrait panel, 960-byte stride)"
+config = { panel = 1 }                     # the panel shows only what ctl 9/8 posted, as the real driver (2026-11-13: half-drawn redraws blinked)
 
 [[standins]]
 name = "secldd"
@@ -215,16 +216,6 @@ sim_service_status = { "0x01" = 0x01 }
 [rom]
 code_patches = []
 files = [{ rom = "Sys/Data/ESTARTCOMP.TXT", local = "ESTARTCOMP.TXT" }]
-
-# H-startuptone-none (5800): the start-up animation plays z:\data\Startup_tone.aac and Startup waits for
-# it; RAPIDO audio is not emulated (DSP shared memory), so the player never ends (EapDsp faults past the
-# stand-in's buffer). CenRep 101F8763 key 3 (tone path, cap_wr=alwaysfail) points to a missing file instead.
-[[rom.rofs_patches]]
-image = 2
-path = "private/10202be9/101F8763.txt"
-old = 'z:\\data\\Startup_tone.aac'
-new = 'z:\\data\\Startup_none.aac'
-hack = "H-startuptone-none"
 
 [gl]
 impl = "none"

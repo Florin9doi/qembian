@@ -20,7 +20,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import sms_provision  # noqa: E402
 
-MODEM = os.path.join(ROOT, 'src/qemu-syborg/hw/arm/syborg_modem.c')
+MODEM = os.path.join(ROOT, 'src/qemu-syborg/hw/arm/syborg_modem_core.c')   # the functions live in the core (split 2026-11-12)
 
 
 def extract(src, name):
@@ -71,7 +71,8 @@ def make_syn(options):
 class MssClamp(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        src = open(MODEM).read()
+        with open(MODEM) as f:
+            src = f.read()
         body = '\n'.join(extract(src, f) for f in ('csum_add', 'csum_fold', 'tcp_checksum', 'data_clamp_mss'))
         body = body.replace('SyborgModemState *s, ', '').replace('data_mtu(s)', '1400')
         prog = '#include <stdint.h>\n#include <stdio.h>\n#include <stdbool.h>\n' + body + r'''

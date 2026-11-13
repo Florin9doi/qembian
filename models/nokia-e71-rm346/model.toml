@@ -193,16 +193,6 @@ sim_service_status = { "0x01" = 0x01 }
 code_patches = []
 files = [{ rom = "Sys/Data/ESTARTCOMP.TXT", local = "ESTARTCOMP.TXT" }]
 
-# H-startuptone-none: Starter waits for the start-up tone, RAPIDO audio is not emulated (DSP shared memory),
-# so the player never ends and start-up stalls on a white screen [V 2026-11-11: Starter blocked, no IPC].
-# CenRep 101F8763 key 3 (tone path, cap_wr=alwaysfail) points to a missing file instead.
-[[rom.rofs_patches]]
-image = 2
-path = "private/10202be9/101F8763.txt"
-old = 'Z:\\system\\sounds\\Wakeup tone.aac'
-new = 'Z:\\system\\sounds\\Wakeup none.aac'
-hack = "H-startuptone-none"
-
 [gl]
 impl = "none"
 

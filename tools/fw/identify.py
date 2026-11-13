@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Identify Nokia flash files: what they are, read from the files (docs/device-model-v2.md section 3).
+"""Identify Nokia (and Sony Ericsson) flash files: what they are, read from the files (docs/device-model-v2.md
+section 3). Sony Ericsson packages (no FIASCO, no .vpl) are identified by tools/fw/semc.py package().
 
   identify.py PATH... [--json]     PATH: a directory (searched recursively), flash files, or a .zip/.rar/.7z
 
@@ -19,6 +20,7 @@ TOOLS = os.path.dirname(FW)
 sys.path.insert(0, FW)
 sys.path.insert(0, TOOLS)
 import layout, identity     # tools/fw
+import semc                 # tools/fw: Sony Ericsson packages
 import device as devmodel   # tools/device.py
 
 ARCHIVES = ('.zip', '.rar', '.7z')
@@ -135,6 +137,8 @@ def identify(paths):
         files = collect(paths, tmp)
         vpls = [v for v in (read_vpl(p) for p in files if p.lower().endswith('.vpl')) if v]
         flash = [read_flash(p) for p in files if is_fiasco(p)]
+        others = [p for p in files if not is_fiasco(p)]
+        se = semc.package(others) if any(semc.quick_core(p) for p in others) else []
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     vroles = {}
@@ -201,13 +205,22 @@ def identify(paths):
             if v['sw_version'] != ver:
                 rec['problems'].append('%s says %s' % (v['vpl'], v['sw_version']))
         out.append(rec)
+    for rec in se:                  # Sony Ericsson: identity from version.txt inside the ROM (tools/fw/semc.py)
+        rec['registry'] = reg.get(rec['type_code'])
+        rec['profiles'] = [d for d in devmodel.device_ids()
+                           if devmodel.get(devmodel.load(d), 'firmware.identity.sw', {}).get('type_code', '').upper()
+                           == rec['type_code'].upper()
+                           and norm_version(devmodel.get(devmodel.load(d), 'firmware.identity.sw', {}).get('version'))
+                           == rec['sw_version']]
+        rec['files'] = [{k: f[k] for k in ('name', 'role', 'id', 'problem') if f.get(k)} for f in rec['files']]
+        out.append(rec)
     return out
 
 
 def show(rec):
     r = rec['registry'] or {}
     name = r.get('name', 'unknown type code')
-    print('%s %s (%s), software %s %s  [%s]' % ('Nokia', name, rec['type_code'] or '?', rec['sw_version'] or '?',
+    print('%s %s (%s), software %s %s  [%s]' % ('Sony Ericsson' if rec['type_code'].startswith('SE-') else 'Nokia', name, rec['type_code'] or '?', rec['sw_version'] or '?',
                                                  rec['date'], rec['confidence']))
     if r:
         print('  registry: %s%s' % (r.get('status'), ', model ' + r['model'] if r.get('model') else ''))

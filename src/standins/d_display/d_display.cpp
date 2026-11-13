@@ -41,6 +41,8 @@ static TBool NativeLandscape = ETrue;	// d_display.native=landscape|portrait
 static TInt FbPitch = 1280;			// d_display.pitch
 static TUint PanelRows = 240;			// d_display.rows
 static TBool PartialCtls = ETrue;		// d_display.partial: controls 3..5 are the partial display mode
+static TBool PanelCopy = EFalse;		// d_display.panel: the panel shows what ctl 8/9 posted (see PanelUpdate)
+static TInt PanelUpdate(TInt aX, TInt aY, TInt aW, TInt aH);
 static void ReadDisplayConfig()
 	{
 	char b[16];
@@ -54,6 +56,7 @@ static void ReadDisplayConfig()
 	// the N95/5800 driver's partial (power save) display mode; the N8's driver has none, and Belle's
 	// TV-out behaviour plugin uses control 3 for something else (args 1,0,1,1; it panics on an error)
 	PartialCtls = BoardConfigInt("d_display.partial", 1) != 0;
+	PanelCopy = BoardConfigInt("d_display.panel", 0) != 0;
 	Kern::Printf("SYBSTUB: DisplayDriver %s panel, %d caps words, stride %d, %d panel rows",
 				 NativeLandscape ? "landscape" : "portrait", CapsWords, FbPitch, PanelRows);
 	}
@@ -374,6 +377,21 @@ static TInt DisplayCtl(DThread* aClient, TInt aFn, TAny* a1, TAny*, const TUint3
 	case 31:	// scan-line bytes (r_display export 77 on the N95): the frame buffer stride, as on the
 				// device (N95: 320 x 4 at every rotation; lcd_n95 programs the same pitch)
 		return Kern::ThreadRawWrite(aClient, a1, &FbPitch, sizeof(TInt));
+	case 8:		// update the whole screen (d_display.panel; else the frame buffer is live: nothing to do)
+	case 9:		// update a rect: a1 -> {x | w<<16, y | h<<16}, 0xffff = the whole width / height
+		{
+		if (!PanelCopy)
+			return KStubNotHandled;
+		TUint32 r[2] = { 0xffffffffu, 0xffffffffu };
+		if (aFn == 9 && Kern::ThreadRawRead(aClient, a1, r, sizeof(r)) != KErrNone)
+			return KErrArgument;
+		TInt x = r[0] & 0xffff, w = r[0] >> 16, y = r[1] & 0xffff, h = r[1] >> 16;
+		if (x == 0xffff || w == 0xffff)
+			x = 0, w = 0xffff;
+		if (y == 0xffff || h == 0xffff)
+			y = 0, h = 0xffff;
+		return PanelUpdate(x, y, Max(w, 1), Max(h, 1));		// w/h 0 -> 1, as the real driver
+		}
 	case 26:	// current rotation index (last req 0x8003). r_display ord59 swaps HAL's native
 				// 320x240 to the current 240x320 with it (CDirectScreenBitmap checks its rect so)
 		return Kern::ThreadRawWrite(aClient, a1, &Rotation, sizeof(TInt));
@@ -449,6 +467,85 @@ static SDsb Dsb;
 static NFastMutex DsbLock;
 static DPlatChunkHw* FbChunk;
 static TUint8* FbKern;
+
+// ---- the panel (d_display.panel = 1): the real driver has no continuous scan-out; ctl 9/8 copy the rect
+// WSERV has finished from its buffer to the panel (docs/devices/nokia-n95-8gb-rm320/nokia-d_display.md, ctl 9).
+// Here the panel is a second buffer in physical RAM that the Syborg frame buffer scans out (its BASE register):
+// WSERV keeps drawing into the video RAM it got from the LCD HAL, and only posted rects become visible.
+// Bug 2026-11-13: with the video RAM scanned out directly, the 5800 and 5230 showed every redraw half done
+// (regions blinking black: cleared before they were repainted; the 5230 redraws 2-3x more often).
+// Video RAM and panel have the same layout (stride FbPitch), so a rect is at the same offset in both.
+static NFastMutex PanelLock;
+static TPhysAddr VideoPhys, PanelPhys;
+static DPlatChunkHw *VideoChunk, *PanelChunk;
+static TUint8 *VideoKern, *PanelKern;
+static TInt PanelBytes, PanelRowsMax;
+static TInt PanelState;				// 0 not set up, 1 on, -1 failed (the frame buffer stays live)
+TUint32 PanelUpdates;				// tests, logs
+
+// the video RAM the frame buffer showed before the panel took over (DSB copies go there too)
+static TPhysAddr VideoBase()
+	{
+	return PanelState > 0 ? VideoPhys : (TPhysAddr)ReadReg(KHwBaseClcd, KFbBase);
+	}
+
+// first update: a panel as big as the largest picture (pitch x the larger side), filled from the video RAM, then
+// scanned out instead of it. Thread context (WSERV's ctl 9), not under PanelLock.
+static TBool PanelSetUp()
+	{
+	if (PanelState)
+		return PanelState > 0;
+	PanelState = -1;
+	VideoPhys = (TPhysAddr)ReadReg(KHwBaseClcd, KFbBase);
+	PanelRowsMax = Max((TInt)PanelRows, FbPitch / KBpp);
+	PanelBytes = Kern::RoundToPageSize(FbPitch * PanelRowsMax);
+	if (!VideoPhys)
+		return EFalse;
+	NKern::ThreadEnterCS();
+	TInt r = DPlatChunkHw::New(VideoChunk, VideoPhys, PanelBytes, EMapAttrSupRw | EMapAttrBufferedC);
+	if (r == KErrNone)
+		r = Epoc::AllocPhysicalRam(PanelBytes, PanelPhys, 12);
+	if (r == KErrNone)
+		r = DPlatChunkHw::New(PanelChunk, PanelPhys, PanelBytes, EMapAttrSupRw | EMapAttrBufferedC);
+	NKern::ThreadLeaveCS();
+	Kern::Printf("SYBSTUB: DisplayDriver panel buffer %d bytes at %08x (video RAM %08x): %d", PanelBytes, PanelPhys,
+				 VideoPhys, r);
+	if (r != KErrNone)
+		return EFalse;
+	VideoKern = (TUint8*)VideoChunk->LinearAddress();
+	PanelKern = (TUint8*)PanelChunk->LinearAddress();
+	memcpy(PanelKern, VideoKern, PanelBytes);
+	PanelState = 1;
+	WriteReg(KHwBaseClcd, KFbBase, PanelPhys);
+	return ETrue;
+	}
+
+// copy the posted rect (picture coordinates, clamped) from the video RAM to the panel
+static TInt PanelUpdate(TInt aX, TInt aY, TInt aW, TInt aH)
+	{
+	if (!PanelSetUp())
+		return KErrNone;			// no panel: the frame buffer stays live (as before)
+	TInt cols = FbPitch / KBpp;
+	if (aX >= cols || aY >= PanelRowsMax)
+		return KErrNone;
+	aW = Min(aW, cols - aX);
+	aH = Min(aH, PanelRowsMax - aY);
+	NKern::FMWait(&PanelLock);
+	// the LCD driver may have set BASE again (power up): the panel takes over again, with the new video RAM
+	TPhysAddr base = (TPhysAddr)ReadReg(KHwBaseClcd, KFbBase);
+	if (base != PanelPhys)
+		{
+		if (base == VideoPhys)
+			memcpy(PanelKern, VideoKern, PanelBytes);
+		WriteReg(KHwBaseClcd, KFbBase, PanelPhys);
+		}
+	TInt off = aY * FbPitch + aX * KBpp;
+	for (TInt y = 0; y < aH; ++y, off += FbPitch)
+		memcpy(PanelKern + off, VideoKern + off, aW * KBpp);
+	++PanelUpdates;
+	NKern::FMSignal(&PanelLock);
+	return KErrNone;
+	}
 
 static void VsyncDfcFn(TAny*);
 static TDfc VsyncDfc(VsyncDfcFn, NULL, 1);
@@ -540,10 +637,13 @@ static void VsyncDfcFn(TAny*)
 	Dsb.iReqThread = NULL;
 	TUint frames = ++Dsb.iFrames;
 	NKern::FMSignal(&DsbLock);
-	// the frame "goes to the panel": copy into the live frame buffer
+	// the frame "goes to the panel": copy into the live frame buffer (with d_display.panel: the video RAM, then
+	// the rect to the panel)
 	TUint8* dst = FbKern + ry * FbPitch + rx * KBpp;
 	for (TInt y = 0; y < rh; ++y, src += pitch, dst += FbPitch)
 		memcpy(dst, src, rw * KBpp);
+	if (PanelState > 0)
+		PanelUpdate(rx, ry, rw, rh);
 	if (frames == 1 || (frames % 600) == 0)
 		Kern::Printf("SYBDSB: frame %d presented at vsync %d (%d Hz)", frames,
 					 ReadReg(KHwBaseClcd, KFbFrameCount), ReadReg(KHwBaseClcd, KFbRefreshRate));
@@ -609,7 +709,7 @@ static TInt DsbCreate(DThread* aClient, TAny* aChannel, TAny* a1, TInt aFlags)
 	NKern::ThreadEnterCS();
 	if (!FbChunk)
 		{
-		e = DPlatChunkHw::New(FbChunk, ReadReg(KHwBaseClcd, KFbBase), Kern::RoundToPageSize(FbPitch * KFbH),
+		e = DPlatChunkHw::New(FbChunk, VideoBase(), Kern::RoundToPageSize(FbPitch * KFbH),
 							  EMapAttrSupRw | EMapAttrBufferedC);
 		if (e != KErrNone)
 			{

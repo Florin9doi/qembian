@@ -1318,6 +1318,29 @@ static void modem_request(SyborgModemState *s, uint32_t ch, const uint8_t *m, ui
 
 static void modem_forget_channel(SyborgModemState *s, uint32_t chn);
 
+/* the fake CCPU's output: packets and log lines to the bridgedrv unit's open channel object on port 0 */
+static void ccpu_send(void *ctx, uint32_t unit, const uint8_t *pkt, uint32_t len)
+{
+    SyborgModemState *s = ctx;
+    uint32_t chn = unit < MODEM_CHANNELS ? s->chan_key[0][unit] : 0;
+    if (!chn) {
+        modem_guest_error(s, "syborg-modem: CCPU packet for closed unit %u dropped\n", (unsigned)unit);
+        return;
+    }
+    modem_push(s, RX_CAIF, chn, pkt, len);
+}
+
+static void ccpu_log(void *ctx, uint32_t unit, const char *text)
+{
+    SyborgModemState *s = ctx;
+    uint32_t chn = unit < MODEM_CHANNELS ? s->chan_key[0][unit] : 0;
+    if (chn) {
+        modem_log(s, chn, "ccpu: %s", text);
+    }
+}
+
+static const SybCcpuOut ccpu_out_ops = { ccpu_send, ccpu_log, NULL };
+
 static void modem_tx(SyborgModemState *s, unsigned port, uint32_t kind)
 {
     ModemPort *p = &s->port[port];
@@ -1340,6 +1363,12 @@ static void modem_tx(SyborgModemState *s, unsigned port, uint32_t kind)
     case TX_DATA:
         data_from_guest(s, chn, p->tx, len);
         break;
+    case TX_CAIF: {
+        SybCcpuOut out = ccpu_out_ops;
+        out.ctx = s;
+        sybccpu_packet(&s->ccpu, &out, CH_NUM(v), p->tx, len);
+        break;
+    }
     case TX_SUBSCRIBE:
         c->subs_len = MIN(len, MODEM_SUBS);
         memcpy(c->subs, p->tx, c->subs_len);
@@ -1618,6 +1647,7 @@ void sybmodem_reset(SyborgModemState *s)
     s->gpds_attached = s->gpds_detached = 0;
     s->gpds_pdp_type = s->gpds_apn_len = 0;
     s->aud_src = s->aud_on = 0;
+    sybccpu_reset(&s->ccpu);
 }
 
 int sybmodem_post_load(SyborgModemState *s)

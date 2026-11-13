@@ -31,7 +31,12 @@ IDX = os.path.join(N95, 'symindex.json')
 GHI = os.path.join(N95, 'ghidra')
 SDK = os.path.expanduser(os.environ.get('S60_SDK_LIB') or devmodel.get(devmodel.load(), 'firmware.sdk_lib')
                          or '~/work/S60_3rd_FP1/Epoc32/release/armv5/lib')   # ordinals differ per platform
-B = 0x80000000
+B = 0x80000000                  # the ROM base: core.json's (moving-model ROMs, N73/P1i: 0xF8000000)
+try:
+    with open(JSN) as _f:
+        B = json.load(_f).get('base', B)
+except (OSError, ValueError):
+    pass
 
 
 def demangle(names):

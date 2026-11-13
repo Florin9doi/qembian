@@ -372,8 +372,13 @@ static TUint32 NvmemRead(TAny* aCtx, TUint32 aOff)
 		}
 	}
 
+// GLSTAT: drive transfers (reads, writes, bytes, ns spent in them): is storage what the phone waits on?
+TUint32 HostedNvReads, HostedNvWrites, HostedNvBytes;
+TUint64 HostedNvNs;
+
 static void NvmemExecute(SNvmem& s)
 	{
+	TUint64 t0 = hnow_ns();
 	TUint64 bytes = (TUint64)s.iSize * KSector;
 	TUint64 pos = (TUint64)s.iOffset * KSector;
 	TUint8* shm = (TUint8*)HostedPhysicalToLinear(s.iShmBase, s.iShmSize);
@@ -382,6 +387,9 @@ static void NvmemExecute(SNvmem& s)
 	if (ok)
 		ok = NvmemCopy(s, pos, shm, (TUint32)bytes, s.iDirection == 2) == KErrNone;
 	s.iStatus = ok ? s.iSize : 0xffffffffu;
+	s.iDirection == 2 ? ++HostedNvWrites : ++HostedNvReads;
+	HostedNvBytes += (TUint32)bytes;
+	HostedNvNs += hnow_ns() - t0;
 	HostedRaiseIrq(s.iIrq);
 	}
 

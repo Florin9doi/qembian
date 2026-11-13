@@ -301,6 +301,37 @@ static const VMStateDescription vmstate_modem_late = {
     }
 };
 
+static const VMStateDescription vmstate_ccpu_create = {
+    .name = "syborg-modem/ccpu-create",
+    .version_id = 1,
+    .fields = (const VMStateField[]) {
+        VMSTATE_UINT32(used, SybCcpuCreate),
+        VMSTATE_UINT32(unit, SybCcpuCreate),
+        VMSTATE_UINT32(link, SybCcpuCreate),
+        VMSTATE_UINT32(app_req, SybCcpuCreate),
+        VMSTATE_UINT32(our_req, SybCcpuCreate),
+        VMSTATE_UINT32(object, SybCcpuCreate),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
+/* the P1i's fake CCPU (syborg_ccpu.c): a subsection, so snapshots taken before it still load */
+static const VMStateDescription vmstate_modem_ccpu = {
+    .name = "syborg-modem/ccpu",
+    .version_id = 1,
+    .minimum_version_id = 1,
+    .fields = (const VMStateField[]) {
+        VMSTATE_UINT32_ARRAY(core.ccpu.next_link, SyborgModemDev, CCPU_UNITS),
+        VMSTATE_UINT32(core.ccpu.next_value, SyborgModemDev),
+        VMSTATE_UINT32(core.ccpu.next_req, SyborgModemDev),
+        VMSTATE_UINT32(core.ccpu.next_obj, SyborgModemDev),
+        VMSTATE_STRUCT_ARRAY(core.ccpu.create, SyborgModemDev, CCPU_CREATES, 1, vmstate_ccpu_create, SybCcpuCreate),
+        VMSTATE_UINT8_2DARRAY(core.ccpu.obj_clsid, SyborgModemDev, CCPU_OBJECTS, 16),
+        VMSTATE_UINT8_2DARRAY(core.ccpu.obj_iid, SyborgModemDev, CCPU_OBJECTS, 16),
+        VMSTATE_END_OF_LIST()
+    }
+};
+
 static int modem_post_load(void *opaque, int version_id)
 {
     SyborgModemDev *d = opaque;
@@ -335,6 +366,10 @@ static const VMStateDescription vmstate_syborg_modem = {
         VMSTATE_UINT16(core.aud_src, SyborgModemDev),
         VMSTATE_UINT16(core.aud_on, SyborgModemDev),
         VMSTATE_END_OF_LIST()
+    },
+    .subsections = (const VMStateDescription * const []) {
+        &vmstate_modem_ccpu,
+        NULL
     }
 };
 

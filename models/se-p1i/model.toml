@@ -1,0 +1,209 @@
+# Sony Ericsson P1i: UIQ 3.0 on Symbian 9.1, moving memory model (the N73's kernel set-up).
+# Firmware formats and the bring-up analysis: docs/semc-firmware.md; bring-up log: docs/devices/se-p1i/bring-up.md.
+# Evidence tags: [V] checked against the firmware or a run, [I] inferred.
+schema = 2
+family = "semc-uiq3"
+
+[device]
+id = "se-p1i"
+vendor = "Sony Ericsson"
+model = "P1i"
+type_code = "SE-P1i"                       # tools/fw/semc.py: no type designator in SE firmware
+aliases = ["p1i", "p1"]
+market = "global"
+
+[platform]
+os_version = "9.1"
+ui = "uiq-3.0"
+personality = "sym91r"                     # sym91 (EUser SWI sequence identical to the N73's [V probe.py stubs])
+                                           # with the 9.2 TLS calls of an RVCT EUSER (personalities/sym91r/README.md)
+soc = "pnx4008"                            # Philips Nexperia PNX4008, ARM926EJ-S 208 MHz, PowerVR MBX [I spec sheets]
+
+# ---------------------------------------------------------------------------------------------
+[firmware]
+default = "R6E30"
+container = "semc"                         # tools/fw/semc.py: plain XIP core + ROFS1 + ROFx + customer ROFS + FAT C:
+
+[firmware.identity]
+drivers = ["lcd_ctrl.ldd", "vtcaifdrv.ldd"]
+no_drivers = []
+
+[firmware.rom]
+base = 0xF8000000                          # TRomHeader iRomBase [V]: moving memory model
+kernel_data = 0x64000000                   # [V]
+memory_model = "moving"                    # seven fixed processes (efile, SettingSvr, centralrepositorysrv, EventSvr,
+                                           # c32exe, AtServer, EComServer) [V probe.py header]
+paged = false
+
+# ---------------------------------------------------------------------------------------------
+[board]
+cpu = "arm926"                             # ARM926EJ-S
+ram_mb = 132                               # 128 MB on the phone [I spec sheets]; the XIP core is in NAND there, RAM here
+ram_mb_real = 128
+
+[board.display]
+width = 240                                # 2.8" 240x320 [I spec sheets; wsini.ini to check]
+height = 320
+native_orientation = "portrait"
+line_pitch = 960
+panel_rows = 320
+touch = true                               # resistive touch: exyin.dll on the phone, our exyin stand-in
+touch_rate_hz = 60                         # [I] as the 5800
+
+[board.flash]
+size_mb = 128
+
+# Drives: the P1i's own ESTART.TXT [V]: C: 0 NAND user data (FAT), D: 1 Memory Stick, E: 2 IRAM,
+# Z: 7 ROFS1 (+ROFx) and Z: 8 ROFS2 (customer). Ours: C: NVMemory 1, D: second NVMemory 2, E: IRAM 0,
+# Z: composite drives 8 and 9 (medrofs v2, one partition each).
+[[board.drives]]
+letter = "C"
+local_drive = 1
+kind = "nvmem"
+image = "nvmemory.img"
+size = "160M"                              # the user data FAT32 is 160 MB [V EPOC_Trade_Russia boot sector]
+flags = "FS_FORMAT_CORRUPT,FS_SCANDRIVE"
+
+[[board.drives]]
+letter = "D"
+local_drive = 2
+kind = "nvmem2"
+image = "nvmemory2.img"
+size = "1G"
+removable = true
+flags = "FS_FORMAT_CORRUPT,FS_SCANDRIVE"   # Memory Stick Micro (M2) slot
+
+[[board.drives]]
+letter = "E"
+local_drive = 0
+kind = "iram"
+flags = "FS_FORMAT_COLD,FS_SYNC_DRIVE"
+
+[[board.drives]]
+letter = "Z"
+local_drive = 8
+kind = "composite"
+flags = "FS_COMPOSITE"
+
+[[board.drives]]
+letter = "Z"
+local_drive = 9
+kind = "composite"
+flags = "FS_COMPOSITE"
+
+# ---------------------------------------------------------------------------------------------
+[hardware]
+wlan = true
+bluetooth = true
+camera = { main_mp = 3.2, front = true }
+fm_radio = true
+gps = false
+accelerometer = false
+slides = []
+leds = ["display-backlight"]
+memory_card = true                         # Memory Stick Micro
+mass_memory_gb = 0
+tv_out = false
+dsp = "philips"
+gpu = "powervr-mbx"
+
+# ---------------------------------------------------------------------------------------------
+[kernel]
+baseport = "syborgmv"                      # moving memory model, ARM926, no VFP (as the N73)
+place = "after-firmware"                   # kernel-side and user-side files are interleaved in the core [V]
+patchsets = ["platform", "sym92", "sym91", "policy"]
+missing_drivers = []                       # filled from the first boots
+omit_baseport = ["epointer.dll"]            # Syborg mouse driver: the exyin stand-in owns the pointer device
+
+[kernel.lcd]
+target = "lcd_portrait"
+
+[[standins]]
+name = "halke"
+kind = "ldd"
+family = "semc"
+role = "HALKE: HAL attributes 0..7 for Hal.dll (control 0), the HAL.DAT restore of EStart (controls 1, 2)"
+# Z:\resource\apps\ProductInfo.ini [V]: EManufacturer, hardware rev (commented out there: Hermione FP2.1
+# 0x2104 [I]), software rev, build, EModel 0x5000169F "P1i", EMachineUid, EDeviceFamily 0x10274BD1, family rev 4
+config = { attr0 = 270494957, attr1 = 8452, attr2 = 2, attr3 = 0, attr4 = 1342183071, attr5 = 536882793, attr6 = 271010769, attr7 = 4 }
+
+[[standins]]
+name = "bridgedrv"
+kind = "ldd"
+family = "semc"
+role = "BridgeDRV: CCPU packet link under caifmux.csy; CAIF link layer + first BridgeServer replies (caifpeer.h), logs OPA (SYBCAIF:)"
+
+[[standins]]
+name = "gpiodriver"
+kind = "ldd"
+family = "semc"
+role = "GPIODRIVER: GPIO/I2C expander channel of EStart, APS, Hal.dll; logs, controls 0, requests pending"
+
+[[standins]]
+name = "lcdctrl"
+file = "lcd_ctrl"
+kind = "ldd"
+family = "semc"
+role = "LCDCTRL: LCD controller channel of Hal.dll, startuphandler.aps, lcdhandler.aps; logs, controls 0, requests pending"
+
+[[standins]]
+name = "dspbootldd"
+kind = "ldd"
+family = "semc"
+role = "DSP_BOOT_DRV: DSP boot by APS (startuphandler.aps); no DSP, everything succeeds"
+
+[[standins]]
+name = "dspcontrolldd"
+kind = "ldd"
+family = "semc"
+role = "DSP_CONTROL_DRV: audio DSP control of the start-up animation player and M3SAudioDevMgr; no DSP"
+
+[[standins]]
+name = "extsoundldd"
+kind = "ldd"
+family = "semc"
+role = "EXT_SOUND_DRV: sound output of the start-up animation player and A2dp.dll; silent, requests complete"
+
+[[standins]]
+name = "extsoundpdd"
+kind = "pdd"
+family = "semc"
+role = "EXT_SOUND_DRV.SUZI_PDD: empty PDD so ExtSoundPdd.pdd loads"
+
+[[standins]]
+name = "mpeg4dec"
+kind = "ldd"
+family = "semc"
+role = "MPEG4DECDRV: hardware MPEG-4 decoder of the start-up animation player; no input buffer, stream ends at once"
+
+[[standins]]
+name = "medrofs"
+kind = "extension"
+family = "common"
+role = "ROFS1 + ROFx on local drive 8, customer ROFS on 9"
+
+[[standins]]
+name = "mednvmem2"
+kind = "extension"
+family = "common"
+role = "second NVMemory (D:, Memory Stick) on local drive 2"
+
+[[standins]]
+name = "exyin"
+kind = "kext"
+family = "common"
+role = "touch: DDigitiser on the Syborg pointer"
+
+[rom]
+code_patches = []
+files = [{ rom = "sys/Data/ESTART.TXT", local = "ESTART.TXT" }]
+
+[gl]
+impl = "none"                              # PowerVR MBX: later (libgles_cm.dll in ROFS1)
+
+[milestones]
+
+[status]
+level = "L0"
+updated = "2026-11-13"
+open = ["first boot"]

@@ -133,17 +133,19 @@ EXPORT_C EGLBoolean eglDestroySurface(EGLDisplay d, EGLSurface s)
 }
 
 EXPORT_C EGLBoolean eglQuerySurface(EGLDisplay d, EGLSurface s, EGLint attr, EGLint *v) { A((unsigned int)d, (unsigned int)s, (unsigned int)attr, (unsigned int)v); return CALL(QuerySurface); }
-EXPORT_C EGLBoolean eglBindAPI(EGLenum api) { A((unsigned int)api); return CALL(BindAPI); }
+/* the guest copy of the thread's OpenVG matrix state (vgshadow.cpp) is forgotten when its context or API may change */
+extern "C" void khrVgShadowForget(void);
+EXPORT_C EGLBoolean eglBindAPI(EGLenum api) { khrVgShadowForget(); A((unsigned int)api); return CALL(BindAPI); }
 EXPORT_C EGLenum eglQueryAPI(void) { return CALL0(QueryAPI); }
 EXPORT_C EGLBoolean eglWaitClient(void) { return CALL0(WaitClient); }
-EXPORT_C EGLBoolean eglReleaseThread(void) { return CALL0(ReleaseThread); }
+EXPORT_C EGLBoolean eglReleaseThread(void) { khrVgShadowForget(); return CALL0(ReleaseThread); }
 EXPORT_C EGLBoolean eglSurfaceAttrib(EGLDisplay d, EGLSurface s, EGLint attr, EGLint v) { A((unsigned int)d, (unsigned int)s, (unsigned int)attr, (unsigned int)v); return CALL(SurfaceAttrib); }
 EXPORT_C EGLBoolean eglBindTexImage(EGLDisplay d, EGLSurface s, EGLint b) { A((unsigned int)d, (unsigned int)s, (unsigned int)b); return CALL(BindTexImage); }
 EXPORT_C EGLBoolean eglReleaseTexImage(EGLDisplay d, EGLSurface s, EGLint b) { A((unsigned int)d, (unsigned int)s, (unsigned int)b); return CALL(ReleaseTexImage); }
 EXPORT_C EGLBoolean eglSwapInterval(EGLDisplay d, EGLint i) { A((unsigned int)d, (unsigned int)i); return CALL(SwapInterval); }
 EXPORT_C EGLContext eglCreateContext(EGLDisplay d, EGLConfig c, EGLContext share, const EGLint *at) { A((unsigned int)d, (unsigned int)c, (unsigned int)share, (unsigned int)at); return (EGLContext)CALL(CreateContext); }
-EXPORT_C EGLBoolean eglDestroyContext(EGLDisplay d, EGLContext c) { A((unsigned int)d, (unsigned int)c); return CALL(DestroyContext); }
-EXPORT_C EGLBoolean eglMakeCurrent(EGLDisplay d, EGLSurface dr, EGLSurface rd, EGLContext c) { A((unsigned int)d, (unsigned int)dr, (unsigned int)rd, (unsigned int)c); return CALL(MakeCurrent); }
+EXPORT_C EGLBoolean eglDestroyContext(EGLDisplay d, EGLContext c) { khrVgShadowForget(); A((unsigned int)d, (unsigned int)c); return CALL(DestroyContext); }
+EXPORT_C EGLBoolean eglMakeCurrent(EGLDisplay d, EGLSurface dr, EGLSurface rd, EGLContext c) { khrVgShadowForget(); A((unsigned int)d, (unsigned int)dr, (unsigned int)rd, (unsigned int)c); return CALL(MakeCurrent); }
 EXPORT_C EGLContext eglGetCurrentContext(void) { return (EGLContext)CALL0(GetCurrentContext); }
 EXPORT_C EGLSurface eglGetCurrentSurface(EGLint rd) { A((unsigned int)rd); return (EGLSurface)CALL(GetCurrentSurface); }
 EXPORT_C EGLDisplay eglGetCurrentDisplay(void) { return (EGLDisplay)CALL0(GetCurrentDisplay); }

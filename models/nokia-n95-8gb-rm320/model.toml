@@ -155,6 +155,7 @@ name = "d_display"
 kind = "ldd"
 family = "nokia-omap2"
 role = "DisplayDriver: caps, rotation, partial mode, DSB, vsync wait 0x7f01, sygl command stream 0x7f10/11"
+config = { panel = 1 }                     # the panel shows only what ctl 9/8 posted, as the real driver (2026-11-13: half-drawn redraws blinked)
 
 [[standins]]
 name = "secldd"
@@ -226,16 +227,16 @@ indications = [{ res = 0x09, msg = 0xEF, data = "0D 0B 08 00 00", channel = 7, a
 # ---------------------------------------------------------------------------------------------
 # ROM composition (tools/romcompose.py; driven today by scripts/hybrid-boot.sh).
 [rom]
-code_patches = ["code-patches.txt"]        # (H-keysound-nommf, H-splash-behind, H-startuptone-nommf)
+code_patches = ["code-patches.txt"]        # (H-keysound-nommf, H-splash-behind)
 # MMF works through syborg-snd (2026-11-12): key tones (the modem's, generated on the host), the start-up jingle
 # and scrolling with tones verified without the two audio byte patches
-omit_patches = ["H-keysound-nommf", "H-startuptone-nommf"]
+omit_patches = ["H-keysound-nommf"]
 files = [{ rom = "Sys/Data/ESTARTCOMP.TXT", local = "ESTARTCOMP.TXT" }]   # CR LF!
 
 # Named variants of the composed ROM (scripts/compose-exp.sh): same device, different patch set.
 [rom.variants.audio-exp]
 image = "hybrid-exp.img"                   # build/roms/<id>/<fw>/hybrid-exp.img
-omit_patches = ["H-keysound-nommf", "H-startuptone-nommf"]   # MMF works through the DSP stand-in; startup jingle plays
+omit_patches = ["H-keysound-nommf"]   # MMF works through the DSP stand-in; startup jingle plays
 notes = "ROM of the n95-gui instance (rom_variant = \"audio-exp\"). Key tones through the fake DSP are still being verified."
 
 # ---------------------------------------------------------------------------------------------

@@ -199,3 +199,16 @@ the IPC trace build to find who waits on whom).
 | N8 Anna 025.007 | opening the menu turns the screen fully black and the phone seems to hang | catch/IPC trace while opening the menu from the seeded home screen; compare with the menu on 011.012 (works) |
 | N95 (oracle, 2026-11-08) | the real phone boots with no abnormal thread exits; qembian has 9 (central repository restart, SplashScreen E32USER-CBase 46, WLAN, USB, Bluetooth SDP/FaxModem, lbdtracker, MobileCrash servers) | docs/real-phone-tracing.md "First real recording": fix them one by one, re-run `tools/oracle.py diff` |
 | 5800, N8 (all S60 5th / Symbian^3 phones) | random UI actions take seconds, e.g. Settings, then any item | likely a request to a driver or server that only completes on a timeout: time the action with the IPC trace, look for requests completing after ~1-3 s or with errors, and for unanswered ISI requests sent at that moment (the 3 s haptics stall, H-haptics-fail, was this kind) |
+
+## Check later: display panel model (d_display.panel) on the phones not yet confirmed
+
+2026-11-13: the display stand-in can keep a panel buffer filled only by WSERV's posted updates (ctl 9/8), as the
+real N95-family driver; scanning out the video RAM directly showed every redraw half done (black blinking, fixed on
+the 5800/5230, owner-confirmed "drastically better"). Enabled (`config = { panel = 1 }` on `d_display`) where logs
+show steady ctl 9 traffic: N95, N95 8GB, E5-00, N97, E52, 5730, N79, E72 (+ 5800, 5230).
+
+Not enabled, to check when they run well enough: E71 (rm346), N81 8GB (rm179), N73 (rm132), N86 (rm484), 6720
+(rm424). Their logs had 0-3 ctl 9 calls (short or missing runs). Check: `grep -c "ctl 9 " <session>/serial.log`
+after a minute of UI use; steady calls -> add `config = { panel = 1 }` to the profile's d_display entry and the
+device to tests/device_py_test.py. Caution: with the panel on, a phone whose WSERV does not post with ctl 9 would
+keep showing its first frame. GPU phones (N8, 701, 808) compose on the host and stay off.

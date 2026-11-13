@@ -40,7 +40,11 @@ python3 -I "$ROOT/tools/gen-vg2.py" "$ROOT/external/oss.FCL.sf.os.graphics/openv
 "$GCC-gcc" -c -march=armv6k -marm -mfloat-abi=softfp -mfpu=vfp -O2 -std=gnu99 -ffreestanding -fno-builtin \
   -include "$OBJ/gcce_fixed.h" -D__OPENVGHEADERS_USE_VG_1_1 "${SDKINC[@]}" -I"$ROOT/src/syvg" -o "$OBJ/vg2_gen.o" "$OBJ/vg2_gen.c"
 "${CXX[@]}" -D__OPENVGHEADERS_USE_VG_1_1 -o "$OBJ/vg2call.o" "$HERE/vg2call.cpp"
-VGOBJS=("$OBJ/vg2_gen.o" "$OBJ/vg2call.o")
+# the guest copy of OpenVG matrix state: bit-exact with the host RI, so no contracted multiply-adds
+# (KHR_VGSHADOW_CHECK=1: every local answer also asked from the host and compared, "VGSHADOW mismatch" in the log)
+"${CXX[@]}" -D__OPENVGHEADERS_USE_VG_1_1 -ffp-contract=off ${KHR_VGSHADOW_CHECK:+-DKHR_VGSHADOW_CHECK} \
+  -I"$ROOT/src/syvg" -o "$OBJ/vgshadow.o" "$HERE/vgshadow.cpp"
+VGOBJS=("$OBJ/vg2_gen.o" "$OBJ/vg2call.o" "$OBJ/vgshadow.o")
 
 
 # --- generated export tables and forwarders

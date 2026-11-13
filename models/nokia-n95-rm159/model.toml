@@ -154,6 +154,7 @@ name = "d_display"
 kind = "ldd"
 family = "nokia-omap2"
 role = "DisplayDriver: caps, rotation, partial mode, DSB, vsync wait 0x7f01, sygl command stream 0x7f10/11"
+config = { panel = 1 }                     # the panel shows only what ctl 9/8 posted, as the real driver (2026-11-13: half-drawn redraws blinked)
 
 [[standins]]
 name = "secldd"
@@ -223,7 +224,7 @@ files = [{ rom = "Sys/Data/ESTARTCOMP.TXT", local = "ESTARTCOMP.TXT" }]   # CR L
 # Named variants of the composed ROM (scripts/compose-exp.sh): same device, different patch set.
 [rom.variants.audio-exp]
 image = "hybrid-exp.img"                   # build/roms/<id>/<fw>/hybrid-exp.img
-omit_patches = ["H-keysound-nommf", "H-startuptone-nommf"]   # MMF works through the DSP stand-in; startup jingle plays
+omit_patches = ["H-keysound-nommf"]   # MMF works through the DSP stand-in; startup jingle plays
 
 # ---------------------------------------------------------------------------------------------
 # GL: the phone's libgles_cm.dll entry points are redirected to our GLES 1.1/EGL (sygl).

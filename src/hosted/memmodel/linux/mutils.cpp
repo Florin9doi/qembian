@@ -161,6 +161,8 @@ void MM::Signal()
 	K::CheckFreeMemoryLevel(initial,final,failed);
 	}
 
+TUint32 HostedWsdMaps, HostedWsdCopied;		// GLSTAT: DLL data switched by mapping, bytes copied
+
 void MM::DoProcessSwitch(TAny* aAddressSpace)
 // Kernel locked on entry and exit
 	{
@@ -186,6 +188,20 @@ void MM::DoProcessSwitch(TAny* aAddressSpace)
 		DWin32Process*& liveProc = codeSeg->iLiveProcess;
 		if (liveProc == proc)
 			continue;			// no change in live mapping
+		if (procData.iFd >= 0)
+			{
+			// hosted, large DLL data: map this process's file at the DLL's address (its kernel view is the same
+			// pages: nothing to copy out). Not populated: MAP_POPULATE made each map cost more than copying 64 KB
+			// out and in under TCG (808 home page 2: 18.7% in hmmap vs 13% copying)
+			TInt bytes = (codeSeg->iRealDataSize + codeSeg->iRealBssSize + 0xfff) & ~0xfff;
+			TAny* m = hmmap((TAny*)(codeSeg->iDataDest & ~0xfffu), bytes, PROT_READ | PROT_WRITE,
+			                MAP_SHARED | MAP_FIXED, procData.iFd, 0);
+			__NK_ASSERT_ALWAYS((TLinAddr)m == (codeSeg->iDataDest & ~0xfffu));
+			++HostedWsdMaps;
+			++codeSeg->iWsdSwaps;
+			liveProc = proc;
+			continue;
+			}
 		if (liveProc)
 			{
 			// copy out old process data
@@ -196,6 +212,8 @@ void MM::DoProcessSwitch(TAny* aAddressSpace)
 			memcpy(oldProcData.iBssCopy, (const TAny*)codeSeg->iBssDest, codeSeg->iRealBssSize);
 			}
 		// copy new data in
+		HostedWsdCopied += 2 * (codeSeg->iRealDataSize + codeSeg->iRealBssSize);
+		++codeSeg->iWsdSwaps;
 		memcpy((TAny*)codeSeg->iDataDest, procData.iDataCopy, codeSeg->iRealDataSize);
 		memcpy((TAny*)codeSeg->iBssDest, procData.iBssCopy, codeSeg->iRealBssSize);
 		liveProc = proc;

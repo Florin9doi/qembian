@@ -24,6 +24,8 @@ def main():
     a = ap.parse_args()
     d = open(a.img, 'rb').read()
     j = json.load(open(a.json))
+    global B
+    B = j.get('base', B)                # moving-model ROMs (N73, P1i): 0xF8000000
     imgs = [f for f in j['files'] if 'image' in f]
     me = [f for f in imgs if f['path'].lower().endswith('/' + a.name.lower())]
     if not me:

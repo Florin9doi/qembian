@@ -6,7 +6,7 @@
   inflate_sos(hdr, body)        a compressed SOS* partition (N73 SOS*CORE) -> (ROM image, bytes after)
   rofs_versions(img)            {'sw': {...}, 'langsw': {...}} from a ROFS image's Resource/Versions
 """
-import mmap, os, struct, sys, zlib
+import mmap, os, re, struct, sys, zlib
 
 TOOLS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, TOOLS)
@@ -97,4 +97,8 @@ def rofs_versions(img):
         for key in ('sw', 'langsw', 'customersw'):
             if p == 'resource/versions/%s.txt' % key:
                 out[key] = version_file(img[off:off + n].decode('utf-16-le', 'replace'))
+        if p == 'private/102030ee/version.txt' and 'sw' not in out:	# Sony Ericsson UIQ 3: "PDA: CXC162108 R6E30"
+            m = re.search(r'(CXC\d+)\s*(R\w+)', img[off:off + n].decode('latin1'))
+            if m:
+                out['sw'] = {'version': m.group(2), 'pda': m.group(1)}
     return out

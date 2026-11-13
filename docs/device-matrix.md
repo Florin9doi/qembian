@@ -74,6 +74,8 @@ instance's `[overrides.sim]`).
 | N95 8GB (`nokia-n95-8gb-rm320`) | S60 3rd FP1 | idle, apps, Carousel | GLES 1.1 on the host GPU (sygl) | jingle, WAV/AAC, MP3 decoded on the host, key tones; no ROM audio patches | SIM, registration, SMS (S60 3rd "pp-routing" variant); settings message received but not stored yet | reference device |
 | N95 (`nokia-n95-rm159`) | S60 3rd FP1 | idle (bring-up notes) | sygl | ehwa path as the N95 8GB, not re-checked since the sound device | - | |
 | N73, N73 ME (`nokia-n73-rm132`, `-rm133`) | S60 3rd | idle, menu | software | DSP bridge (untested since the sound device) | - | moving memory model |
+| 5230 (`nokia-5230-rm588`) | S60 5th | first-boot region query (2026-11-13) | software | start-up tone path live | - | the 5800's sibling: same exec table, wsini, drive map; no WLAN, MMC card driver |
+| P1i (`se-p1i`) | UIQ 3.0 | platform start-up (APS, comms, EComServer) on a host-side fake CCPU; no window server yet: black screen | - | - | - | first non-Nokia: `sym91r`, HALKE, bridgedrv, LCDCTRL, DSP/sound/video stand-ins; next: the CCPU call outputs APS waits for (docs/devices/se-p1i/bring-up.md) |
 | 5730, N79 (`nokia-5730-rm465`, `nokia-n79-rm348`) | S60 3rd FP2 | idle, menu | software | silent (RAPIDO stream format not declared) | - | |
 | 5800 (`nokia-5800-rm356`) | S60 5th | idle, menu, touch | software | silent (format not declared) | - | |
 | N8 011.012 / 013.016 / 025.007 (`nokia-n8-rm596`, `-v13`, `-v25`) | Symbian^3, Anna | idle, apps | EGL/OpenVG/GLES on the host GPU, host composition | start-up tone, WAV/MP3 (RAPIDO ring on the host), key tones; no start-up tone patch | SIM, 3G registration, packet data, settings SMS stored | |
@@ -116,7 +118,7 @@ Values from `models/<id>/device.toml` unless noted ([bring-up] = the device's no
 | Profile id | Hosted state (2026-11-13) | How to run | Open |
 |---|---|---|---|
 | nokia-n95-8gb-rm320 | home screen, keypad, screensaver (panel rotation, partial mode, VSYNC); start-up as fast as on the QEMU board | `tools/hosted/phone.py` | GL apps (the host GL server works, not wired by default); sound |
-| nokia-808-rm807 | home screen, touch, keys, apps (Calendar, Settings); composition on the host GPU; seed past the first-boot wizard | `tools/hosted/phone.py --rom nokia-808-rm807 --gl` | Settings -> Phone (UICC 21 reply held back: USER 11 in the state manager); intermittent stop at state 104; thread hand-over cost |
+| nokia-808-rm807 | home screen with its widgets, touch, keys, apps (Calendar, Settings); composition on the host GPU (GL waits block, swaps paced to vsync); seed past the first-boot wizard | `tools/hosted/phone.py --rom nokia-808-rm807 --gl` | Settings -> Phone (UICC 21 reply held back: USER 11 in the state manager); intermittent stop at state 104; thread hand-over cost |
 | others | not tried hosted | - | - |
 
 On a real device (Pixel 3a, postmarketOS): `tools/hosted/device-bundle.py --rom ID`, `docs/hosted-eka2/pixel-3a.md` [untested].

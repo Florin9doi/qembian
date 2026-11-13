@@ -1,0 +1,9 @@
+# ESTART.TXT for the qembian P1i hybrid ROM (replaces Z:\sys\data\ESTART.TXT).
+# The P1i's own: C: 0 NAND user FAT, D: 1 Memory Stick, E: 2 IRAM, Z: 7 ROFS1, Z: 8 ROFS2.
+# Ours: C: NVMemory on local drive 1, D: NVMemory 2 on 2, E: IRAM on 0, Z: medrofs partitions on 8 and 9.
+
+C: 1  ELOCAL FAT  0   FS_FORMAT_CORRUPT,FS_SCANDRIVE      # Syborg NVMemory (phone: NAND user data)
+D: 2  ELOCAL FAT  0   FS_FORMAT_CORRUPT,FS_SCANDRIVE      # Syborg NVMemory 2 (phone: Memory Stick)
+E: 0  ELOCAL FAT  0   FS_FORMAT_COLD,FS_SYNC_DRIVE        # IRAM
+Z: 8  EROFS  ROFS 0   FS_COMPOSITE,FS_SYNC_DRIVE          # ROFS1 + ROFx
+Z: 9  EROFS  ROFS 0   FS_COMPOSITE,FS_SYNC_DRIVE          # ROFS2 (customer)

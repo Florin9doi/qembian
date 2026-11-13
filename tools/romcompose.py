@@ -132,6 +132,25 @@ def emit_dirs(root, at):
     return bytes(out), addr[id(root)], entry_addr
 
 
+def rofs_partitions(images):
+    """[(name, bytes)] of ROFS/ROFx images -> the partitions of the ROFS flash (header v2): a ROFx extends the
+    image before it, at that image's iMaxImageSize (as on the flash; EROFS looks for it there), every ROFS
+    starts a partition of its own (P1i: ROFS1 + ROFx on one drive, the customer ROFS on the next)"""
+    parts = []
+    for name, img in images:
+        if img[:4] not in (b'ROFS', b'ROFx'):
+            raise SystemExit('%s: not a ROFS image' % name)
+        if img[:4] == b'ROFx' and parts:
+            prev = parts[-1]
+            mx = struct.unpack_from('<I', prev, 44)[0]
+            if mx < len(prev):
+                raise SystemExit('%s: the image before it is larger than its iMaxImageSize' % name)
+            prev += b'\xff' * (mx - len(prev)) + img
+        else:
+            parts.append(bytearray(img))
+    return parts
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--ours', required=True)
@@ -257,13 +276,13 @@ def main():
     rofs_at = rofs_len = 0
     if a.rofs and a.rofs_drives:
         drives = [int(x, 0) for x in a.rofs_drives.split(',')]
-        if len(drives) != len(a.rofs):
-            raise SystemExit('--rofs-drives: %d drives for %d images' % (len(drives), len(a.rofs)))
+        # a ROFx extends the image before it: same partition, at that image's iMaxImageSize (as on the
+        # flash; EROFS looks for it there). Partitions = the ROFS images; one drive each (P1i: ROFS1+ROFx, ROFS2)
+        parts = rofs_partitions([(path, open(path, 'rb').read()) for path in a.rofs])
+        if len(drives) != len(parts):
+            raise SystemExit('--rofs-drives: %d drives for %d ROFS partitions' % (len(drives), len(parts)))
         blob, table = bytearray(), []
-        for drv, path in zip(drives, a.rofs):
-            img = open(path, 'rb').read()
-            if img[:4] not in (b'ROFS', b'ROFx'):
-                raise SystemExit('%s: not a ROFS image' % path)
+        for drv, img in zip(drives, parts):
             table.append((drv, len(blob), len(img)))
             blob += img + b'\xff' * ((-len(img)) % 0x1000)
         rofs_len = len(blob)

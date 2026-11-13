@@ -25,10 +25,33 @@ static const TInt KPages = (KLocalWindowHi - KLocalWindowLo) >> 12;
 static TUint16 UnitUse[KUnits];				// how many processes reserved each unit
 static DWin32Chunk* PageOwner[KPages];		// whose committed page is mapped there (NULL: PROT_NONE)
 static TUint16 UnitMapped[KUnits];			// mapped pages per unit (placement of chunks on shared addresses)
+// chunks whose committed range (plus a growth margin) covers each unit: where pages will be, not only where they are
+// now (placement on shared addresses: a new chunk's head goes where the others are cold). 808 2026-11-13: the home
+// screen's heap was placed over AknIconSrv's (fewest pages mapped *then*) and they displaced each other ~350 times a
+// second each while home page 2 animated.
+static TUint16 UnitHot[KUnits];
+static TUint32 CostPrefix[KUnits + 1];		// FindSharedUnits' scratch (MM::Wait held)
 static SLocalSpace* LiveSpace;				// the process last switched in
 static TInt SharedUnits;					// units more than one process reserved: displacement possible
 static TBool WindowReady;
 TUint32 HostedLocalMaps, HostedLocalDisplaced, HostedLocalCopies, HostedLocalSharedAddr;	// tests
+TUint32 HostedLocalScanned;				// pages MapChunk looked at (GLSTAT): the cost of a switch-in remap
+
+// who remaps on a switch-in and whom that displaces (Ctrl+P with --env GLSTAT=1: HostedLocalReport); process
+// pointers only, checked against the process container before they are named
+struct SLocalStat { DProcess* iProcess; TUint32 iSwitchMaps, iScanned, iDisplaced; };
+static const TInt KLocalStats = 16;
+SLocalStat HostedLocalStats[KLocalStats];
+static SLocalStat* LocalStat(DProcess* aProcess)
+	{
+	for (TInt i = 0; i < KLocalStats; ++i)
+		if (HostedLocalStats[i].iProcess == aProcess || !HostedLocalStats[i].iProcess)
+			{
+			HostedLocalStats[i].iProcess = aProcess;
+			return &HostedLocalStats[i];
+			}
+	return &HostedLocalStats[KLocalStats - 1];		// full: the last row collects the rest
+	}
 
 // debugging: htest --env LOCALTRACE=1 prints chunk creation, commits and displacements
 static TInt Tracing()
@@ -129,22 +152,43 @@ static TInt FindUnits(SLocalSpace* aSpace, TInt aUnits)
 	return -1;
 	}
 
-// the window is full: aUnits free in the process's allocator, where other processes have the fewest pages mapped
-// (the new chunk's pages rarely displace theirs: 808 at 15 s, 5357 displacements with first fit)
+// a unit's heat for placement: pages mapped there now, and chunks whose committed range (+ margin) covers it
+static inline TUint32 Heat(TInt aUnit)
+	{
+	return UnitMapped[aUnit] + 16 * UnitHot[aUnit];
+	}
+
+// KHeadUnits: a chunk's head (its first 2 MB), where most of its pages will be (heaps grow up from the base)
+static const TInt KHeadUnits = 32;
+
+// The placement cost of [aStart, aStart + aUnits): its heat, the head's counted 4 times (MM::Wait held)
+TUint32 HostedLocalPlacementCost(TInt aStart, TInt aUnits)
+	{
+	TInt head = Min(aUnits, KHeadUnits);
+	return CostPrefix[aStart + aUnits] - CostPrefix[aStart] + 3 * (CostPrefix[aStart + head] - CostPrefix[aStart]);
+	}
+
+// the window is full: aUnits free in the process's allocator, where the new chunk's head lands on the others' cold
+// units (neither mapped nor in a committed range + margin). 808 at 15 s: 5357 displacements with first fit; then
+// fewest pages mapped at creation, which put the home screen's heap over AknIconSrv's growing one.
 static TInt FindSharedUnits(SLocalSpace* aSpace, TInt aUnits)
 	{
+	if (aUnits > KUnits)
+		return -1;
+	CostPrefix[0] = 0;
+	for (TInt u = 0; u < KUnits; ++u)
+		CostPrefix[u + 1] = CostPrefix[u] + Heat(u);
 	TInt best = -1;
-	TUint32 bestCost = 0xffffffffu, cost = 0;
+	TUint32 bestCost = 0xffffffffu;
 	for (TInt u = 0, own = 0; u < KUnits; ++u)
 		{
-		cost += UnitMapped[u];
 		own += aSpace->iUnits->NotFree(u, 1) ? 1 : 0;
 		if (u >= aUnits)
-			{
-			cost -= UnitMapped[u - aUnits];
 			own -= aSpace->iUnits->NotFree(u - aUnits, 1) ? 1 : 0;
-			}
-		if (u >= aUnits - 1 && !own && cost < bestCost)
+		if (u < aUnits - 1 || own)
+			continue;
+		TUint32 cost = HostedLocalPlacementCost(u - aUnits + 1, aUnits);
+		if (cost < bestCost)
 			{
 			best = u - aUnits + 1;
 			bestCost = cost;
@@ -153,6 +197,42 @@ static TInt FindSharedUnits(SLocalSpace* aSpace, TInt aUnits)
 			}
 		}
 	return best;
+	}
+
+// tests (kn_efile): a run of aUnits that neither process has reserved (others may share it), -1 if none
+TInt HostedLocalUnitsFor(DProcess* aA, DProcess* aB, TInt aUnits)
+	{
+	SLocalSpace* a = ((DWin32Process*)aA)->iLocalSpace;
+	SLocalSpace* b = ((DWin32Process*)aB)->iLocalSpace;
+	for (TInt u = 0, run = 0; u < KUnits; ++u)
+		{
+		TBool used = (a && a->iUnits->NotFree(u, 1)) || (b && b->iUnits->NotFree(u, 1));
+		run = used ? 0 : run + 1;
+		if (run == aUnits)
+			return u - aUnits + 1;
+		}
+	return -1;
+	}
+
+// tests (kn_efile): the hot counts of [aStart, aStart + aUnits) summed
+TUint32 HostedLocalHotAt(TInt aStart, TInt aUnits)
+	{
+	TUint32 h = 0;
+	for (TInt u = aStart; u < aStart + aUnits && u < KUnits; ++u)
+		h += UnitHot[u];
+	return h;
+	}
+
+// tests (kn_efile): the placement cost of [aStart, aStart + aUnits) as FindSharedUnits sees it now
+TUint32 HostedLocalCostAt(TInt aStart, TInt aUnits)
+	{
+	MM::Wait();
+	CostPrefix[0] = 0;
+	for (TInt u = 0; u < KUnits; ++u)
+		CostPrefix[u + 1] = CostPrefix[u] + Heat(u);
+	TUint32 c = HostedLocalPlacementCost(aStart, aUnits);
+	MM::Signal();
+	return c;
 	}
 
 TInt LocalChunkCreate(DWin32Chunk* aChunk)
@@ -210,6 +290,20 @@ TInt LocalChunkCreate(DWin32Chunk* aChunk)
 	return KErrNone;
 	}
 
+// page aRel of aChunk is (or may be) committed but not mapped at its address; kernel locked
+static void Displace(DWin32Chunk* aChunk, TInt aRel, TInt aCount)
+	{
+	aChunk->iLocalMapped = EFalse;
+	if (aChunk->iLocalDispLo >= aChunk->iLocalDispHi)
+		{
+		aChunk->iLocalDispLo = aRel;
+		aChunk->iLocalDispHi = aRel + aCount;
+		return;
+		}
+	aChunk->iLocalDispLo = Min(aChunk->iLocalDispLo, aRel);
+	aChunk->iLocalDispHi = Max(aChunk->iLocalDispHi, aRel + aCount);
+	}
+
 // map pages [aFirst, aFirst + aCount) of the window (committed pages of aChunk) at their addresses; kernel locked
 static void MapRun(DWin32Chunk* aChunk, TInt aFirst, TInt aCount)
 	{
@@ -223,8 +317,10 @@ static void MapRun(DWin32Chunk* aChunk, TInt aFirst, TInt aCount)
 		DWin32Chunk* old = PageOwner[p];
 		if (old && old != aChunk)
 			{
-			old->iLocalMapped = EFalse;
+			Displace(old, p - (((TLinAddr)old->iBase - KLocalWindowLo) >> 12), 1);
 			++HostedLocalDisplaced;
+			if (old->iLocalSpace)
+				++LocalStat(old->iLocalSpace->iProcess)->iDisplaced;
 			}
 		if (!old)
 			++UnitMapped[p >> (KUnitShift - 12)];
@@ -254,12 +350,21 @@ static void UnmapOwned(DWin32Chunk* aChunk, TInt aFirst, TInt aCount)
 		}
 	}
 
-// map every committed run of aChunk that is not mapped; kernel locked
+// map every committed run of aChunk that is not mapped; kernel locked. Only the displaced range is walked: the
+// whole maximum (13,000 pages for the 808 home screen's heap, ~8 M page tests a second on page 2) was ~16% of the CPU
 static void MapChunk(DWin32Chunk* aChunk)
 	{
 	TInt first = ((TLinAddr)aChunk->iBase - KLocalWindowLo) >> 12;
 	TInt n = aChunk->iMaxSize >> 12;
-	for (TInt i = 0; i < n; )
+	TInt lo = 0;
+	if (aChunk->iLocalDispLo < aChunk->iLocalDispHi)
+		{
+		lo = Max(aChunk->iLocalDispLo, 0);
+		n = Min(aChunk->iLocalDispHi, n);
+		}
+	aChunk->iLocalDispLo = aChunk->iLocalDispHi = 0;
+	HostedLocalScanned += n - lo;
+	for (TInt i = lo; i < n; )
 		{
 		if (aChunk->iLocalPages->NotAllocated(i, 1) || PageOwner[first + i] == aChunk)
 			{
@@ -318,7 +423,18 @@ TInt LocalCommit(DWin32Chunk* aChunk, TInt aOffset, TInt aSize)
 			memset((TAny*)a, aChunk->iClearByte, aSize);
 		}
 	else
-		aChunk->iLocalMapped = EFalse;
+		Displace(aChunk, aOffset >> 12, n);
+	// the hot map: the committed range's units plus a growth margin (half of it, at least 1 MB)
+	TInt units = (aChunk->iMaxSize + (1 << KUnitShift) - 1) >> KUnitShift;
+	TInt top = (aOffset + aSize + (1 << KUnitShift) - 1) >> KUnitShift;
+	TInt hot = Min(units, top + Max(16, top / 2));
+	if (hot > aChunk->iLocalHotEnd)
+		{
+		TInt u0 = ((TLinAddr)aChunk->iBase - KLocalWindowLo) >> KUnitShift;
+		for (TInt u = aChunk->iLocalHotEnd; u < hot; ++u)
+			++UnitHot[u0 + u];
+		aChunk->iLocalHotEnd = hot;
+		}
 	NKern::Unlock();
 	if (Tracing())
 		Kern::Printf("LOCAL: commit %O %08x+%x %s (live %d)", aChunk, a, aSize, map ? "mapped" : "not mapped", LiveSpace == s);
@@ -369,6 +485,9 @@ void LocalChunkDestroy(DWin32Chunk* aChunk)
 	NKern::Unlock();
 	TInt units = (aChunk->iMaxSize + (1 << KUnitShift) - 1) >> KUnitShift;
 	TInt u = ((TLinAddr)aChunk->iBase - KLocalWindowLo) >> KUnitShift;
+	for (TInt i = 0; i < aChunk->iLocalHotEnd; ++i)
+		--UnitHot[u + i];
+	aChunk->iLocalHotEnd = 0;
 	s->iUnits->Free(u, units);
 	for (TInt i = u; i < u + units; ++i)
 		if (--UnitUse[i] == 1)
@@ -388,9 +507,16 @@ void LocalSwitch(DWin32Process* aProcess)
 	LiveSpace = s;
 	if (!s)
 		return;
+	TUint32 m0 = HostedLocalMaps, s0 = HostedLocalScanned;
 	for (DWin32Chunk* c = s->iChunks; c; c = c->iLocalNext)
 		if (!c->iLocalMapped)
 			MapChunk(c);
+	if (HostedLocalScanned != s0)
+		{
+		SLocalStat* st = LocalStat(s->iProcess);
+		st->iSwitchMaps += HostedLocalMaps - m0;
+		st->iScanned += HostedLocalScanned - s0;
+		}
 	}
 
 void LocalSpaceRelease(DWin32Process* aProcess)

@@ -282,7 +282,7 @@ def build():
     if nk:
         khdrs = hdrs + glob.glob(os.path.join(NKLINUX, '*.h')) + glob.glob(os.path.join(SRC, 'kernel/linux/*.h')) + \
             glob.glob(os.path.join(SRC, 'memmodel/linux/*.h')) + glob.glob(os.path.join(SRC, 'include/*.h')) + \
-            glob.glob(os.path.join(SRC, 'include/board/*.h')) + [os.path.join(ROOT, 'src/standins/_shared/iscpeer.inl'), os.path.join(ROOT, 'src/qemu-syborg/hw/arm/syborg_modem_core.h')]
+            glob.glob(os.path.join(SRC, 'include/board/*.h')) + [os.path.join(ROOT, 'src/standins/_shared/iscpeer.inl'), os.path.join(ROOT, 'src/qemu-syborg/hw/arm/syborg_modem_core.h'), os.path.join(ROOT, 'src/qemu-syborg/hw/arm/syborg_ccpu.h')]
         ksrcs = [os.path.join(EKA, n + '.cpp') for n in KERNEL_GENERIC] + \
             sorted(glob.glob(os.path.join(SRC, 'memmodel/linux/*.cpp'))) + \
             sorted(glob.glob(os.path.join(SRC, 'kernel/linux/*.cpp'))) + \
@@ -369,14 +369,16 @@ def build():
                 modobjs.setdefault(kmods[s], []).append(o)
             else:
                 kern.append(o)
-        # the fake modem's core, shared with the QEMU device (C, built for the hosted runtime)
-        core = os.path.join(MODEM_CORE_DIR, 'syborg_modem_core.c')
-        o = os.path.join(BOUT, 'kobj', 'syborg_modem_core.c.o')
-        chdrs = [os.path.join(MODEM_CORE_DIR, 'syborg_modem_core.h'), os.path.join(SRC, 'include/board/syborg_modem_env.h')]
-        if newer(o, [core] + chdrs):
-            run(CC32 + ['-x', 'c', '-std=gnu11', '-DSYBMODEM_HOSTED', '-I', MODEM_CORE_DIR,
-                        '-I', os.path.join(SRC, 'include/board'), '-c', core, '-o', o])
-        kern.append(o)
+        # the fake modem's core and the P1i's fake CCPU, shared with the QEMU device (C, built for the hosted runtime)
+        chdrs = [os.path.join(MODEM_CORE_DIR, h) for h in ('syborg_modem_core.h', 'syborg_ccpu.h')] + \
+            [os.path.join(SRC, 'include/board/syborg_modem_env.h')]
+        for cname in ('syborg_modem_core.c', 'syborg_ccpu.c'):
+            core = os.path.join(MODEM_CORE_DIR, cname)
+            o = os.path.join(BOUT, 'kobj', cname + '.o')
+            if newer(o, [core] + chdrs):
+                run(CC32 + ['-x', 'c', '-std=gnu11', '-DSYBMODEM_HOSTED', '-I', MODEM_CORE_DIR,
+                            '-I', os.path.join(SRC, 'include/board'), '-c', core, '-o', o])
+            kern.append(o)
         # each module is a separate DLL on the phone: one partial link per module with only its entry
         # points left global, so modules built from shared sources (iscpeer.inl, nokiastub.h, the NVMemory
         # driver) keep their own classes and data. Weak (inline/template) definitions stay shared.
@@ -646,7 +648,8 @@ def gl_setup(a, chan):
         sys.exit('htest: glserver build failed:\n' + r.stdout + r.stderr)
     with open(chan, 'wb') as f:
         f.truncate(64 << 20)
-    args = [os.path.join(ROOT, 'build/hosted/glserver/glserver'), '--chan', chan]
+    args = [os.path.join(ROOT, 'build/hosted/glserver/glserver'), '--chan', chan,
+            '--frame-file', chan + '.frames']     # composed-frame counter, as QEMU's syborg-gl.frame-file (ui_compare)
     if DEVICE:
         qa = subprocess.run([sys.executable, os.path.join(ROOT, 'tools/device.py'), 'qemu-args'],
                             env=dict(os.environ, SYBORG_DEVICE=DEVICE), capture_output=True, text=True).stdout.split()
@@ -655,6 +658,7 @@ def gl_setup(a, chan):
                               ('gpu-memory-mb', '--gpu-memory-mb'), ('msaa', '--msaa')):
                 if x.startswith('syborg-gl.%s=' % prop):
                     args += [opt, x.split('=', 1)[1]]
+    args += os.environ.get('GLSERVER_ARGS', '').split()     # e.g. GLSERVER_ARGS="--vsync-hz 0" (pacing off)
     log = open(chan + '.log', 'w')
     GL_SERVERS.append(subprocess.Popen(args, stdout=log, stderr=subprocess.STDOUT))
     qemu = ['-object', 'memory-backend-file,id=glchan,size=64M,mem-path=%s,share=on' % chan,
@@ -751,7 +755,10 @@ def run_phone(img, a):
     append = ('console=ttyAMA0 panic=-1 quiet htest=kn_efile htest.timeout=100000000 htest.cp15=%s '
               'htest.env.PHONE=/sys/bus/pci/devices/0000:00:%02x.0/resource2 %s' % (a.cp15, PHONE_SHM_ADDR, a.append))
     glq, glenv = gl_setup(a, os.path.join(os.path.dirname(shm), 'gl.chan')) if a.gl else ([], None)
-    for kv in a.env + ([glenv] if glenv else []):
+    # every nanothread on CPU 0, the host helper threads on the others (HPIN, lxhost.cpp): 2026-11-13, the 808's
+    # home page 2 drew 11.2 -> 18.1 fps (hand-overs without cross-CPU wake-ups). --env HPIN=ffffffff: off
+    pin = [] if any(kv.startswith('HPIN=') for kv in a.env) or a.smp < 2 else ['HPIN=0']
+    for kv in a.env + pin + ([glenv] if glenv else []):
         append += ' htest.env.' + kv
     cmd = [QEMU, '-M', 'virt,gic-version=3', '-accel', 'tcg', '-cpu', a.cpu, '-smp', str(a.smp), '-m', '1024',
            '-kernel', KERNEL, '-initrd', img, '-append', append.strip(), '-no-reboot', '-display', 'none',

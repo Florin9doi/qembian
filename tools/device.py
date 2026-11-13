@@ -319,7 +319,7 @@ def _store_entries():
     if not os.path.isdir(STORE):
         return out
     for tc in sorted(os.listdir(STORE)):
-        if not re.fullmatch(r'RM-\d+', tc):
+        if not re.fullmatch(r'RM-\d+|SE-[\w.-]+', tc):    # Nokia type codes, Sony Ericsson SE-<product> (tools/fw/semc.py)
             continue
         for v in sorted(os.listdir(os.path.join(STORE, tc))):
             m = os.path.join(STORE, tc, v, 'rom.toml')
@@ -737,8 +737,9 @@ def build(prof, variant=None, kernel=False, standins=True, out=None, trace=None,
     # a composite over several ROFS images, each on its own local drive (9.3: ROFS1/2/3 on 9/10/11)
     zdrives = [d['local_drive'] for d in get(prof, 'board.drives', []) if d.get('kind') == 'composite']
     if len(zdrives) > 1:
-        if len(zdrives) != len(rofs):
-            raise DeviceError('%d composite drives in [[board.drives]] for %d ROFS images' % (len(zdrives), len(rofs)))
+        nparts = sum(1 for i, r in enumerate(rofs) if i == 0 or open(r, 'rb').read(4) != b'ROFx')   # a ROFx joins the image before it
+        if len(zdrives) != nparts:
+            raise DeviceError('%d composite drives in [[board.drives]] for %d ROFS partitions' % (len(zdrives), nparts))
         cmd += ['--rofs-drives', ','.join(str(x) for x in zdrives)]
     for pf in pfiles:
         cmd += ['--patches', pf]
@@ -821,14 +822,15 @@ def qemu_args(prof, rom=None):
     # the fake modem's reply table (QEMU syborg-modem, read at start): written at every launch, so a reply
     # change needs no ROM rebuild ([modem].replies layering, tools/isi.py)
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # run with -I: tools/ is not on the path
-    import isi
-    # an instance's [overrides] can change the modem: its table is its own
-    tab = os.path.join(prof['_instance'], 'isi-replies.tab') if prof.get('_instance') else os.path.join(paths(prof)['dir'], 'gen', 'isi-replies.tab')
-    os.makedirs(os.path.dirname(tab), exist_ok=True)
-    text = isi.table_text(prof)
-    if not os.path.exists(tab) or open(tab).read() != text:
-        open(tab, 'w').write(text)
-    a += ['-global', 'syborg-modem.replies=%s' % tab]
+    if get(prof, 'modem.kind') == 'isi-fake-peer':      # BB5 phones; a phone without an ISI modem (Sony Ericsson) has none
+        import isi
+        # an instance's [overrides] can change the modem: its table is its own
+        tab = os.path.join(prof['_instance'], 'isi-replies.tab') if prof.get('_instance') else os.path.join(paths(prof)['dir'], 'gen', 'isi-replies.tab')
+        os.makedirs(os.path.dirname(tab), exist_ok=True)
+        text = isi.table_text(prof)
+        if not os.path.exists(tab) or open(tab).read() != text:
+            open(tab, 'w').write(text)
+        a += ['-global', 'syborg-modem.replies=%s' % tab]
     # the GL identity (strings, extension lists) the host's OpenGL ES answers with ([gl.identity]): written at
     # every launch, so a change needs no ROM rebuild (docs/devices/nokia-n8-rm596/gles-host.md)
     ident = get(prof, 'gl.identity', {}) or {}
@@ -1207,7 +1209,10 @@ def main(argv=None):
             return 0
         if a.cmd == 'registry':
             reg = registry()
-            rows = [reg[a.code.upper()]] if a.code else list(reg.values())
+            byup = {k.upper(): r for k, r in reg.items()}      # RM-132, SE-P1i: the code as typed, any case
+            if a.code and a.code.upper() not in byup:
+                raise SystemExit('%s: not in models/registry.toml' % a.code)
+            rows = [byup[a.code.upper()]] if a.code else list(reg.values())
             for r in rows:
                 print('%-7s %-20s %-10s %-22s %-14s %s' % (r['code'], r['name'], r.get('platform', ''), r.get('soc', ''),
                                                        r.get('status', ''), r.get('model', '')))

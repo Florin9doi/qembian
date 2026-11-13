@@ -95,7 +95,7 @@ TInt DWin32Process::DoCreate(TBool aKernelProcess, TProcessCreateInfo& /*aInfo*/
 	iAttributes=aKernelProcess ? ESupervisor|EPrivate : 0;
 	// force iDllData to reserve KMaxWsdDllsPerProcess. The Append will
 	// create the space, the Remove will not free it.
-	SProcessDllDataBlock data = {0,0,0};
+	SProcessDllDataBlock data = {0,0,0,-1};
 	TInt err = iDllData.Append(data);
 	if(err==KErrNone) 
 		{
@@ -196,6 +196,55 @@ void DWin32Process::FinalRelease()
 	{
 	}
 
+// a process's copy of a DLL's .data/.bss: heap blocks, or (iWsdMap) one memory file of the data region's pages,
+// .data then .bss as at the DLL's address, viewed by the kernel at iDataCopy (the switch maps the same file at the
+// DLL's address, so both see the same pages and nothing is copied out)
+static TInt WsdBytes(DWin32CodeSeg* aSeg)
+	{
+	return (aSeg->iRealDataSize + aSeg->iRealBssSize + 0xfff) & ~0xfff;
+	}
+
+static TBool DllDataNew(DWin32CodeSeg* aSeg, SProcessDllDataBlock& aData)
+	{
+	aData.iFd = -1;
+	aData.iDataCopy = aData.iBssCopy = NULL;
+	if (!aSeg->iWsdMap)
+		{
+		aData.iDataCopy = Kern::Alloc(aSeg->iRealDataSize ? aSeg->iRealDataSize : 4);
+		aData.iBssCopy = Kern::Alloc(aSeg->iRealBssSize ? aSeg->iRealBssSize : 4);
+		return aData.iDataCopy && aData.iBssCopy;
+		}
+	TInt fd = hmemfd("wsd");
+	if (fd < 0)
+		return EFalse;
+	TAny* m = hftruncate(fd, WsdBytes(aSeg)) < 0 ? NULL :
+	          hmmap(0, WsdBytes(aSeg), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	if (!m || HMAP_FAILED(m))
+		{
+		hsys(SYS_close, fd);
+		return EFalse;
+		}
+	aData.iFd = fd;
+	aData.iDataCopy = (TUint8*)m + (aSeg->iDataDest & 0xfff);
+	aData.iBssCopy = (TUint8*)aData.iDataCopy + aSeg->iRealDataSize;
+	return ETrue;
+	}
+
+static void DllDataFree(DWin32CodeSeg* aSeg, SProcessDllDataBlock& aData)
+	{
+	if (aData.iFd < 0)
+		{
+		Kern::Free(aData.iDataCopy);
+		Kern::Free(aData.iBssCopy);
+		return;
+		}
+	// the DLL's address may still map this file (the process was live): it stays valid until the next switch-in
+	// of another process maps that one's file; nobody uses it meanwhile (iLiveProcess is NULL)
+	hmunmap((TAny*)((TLinAddr)aData.iDataCopy & ~0xfffu), WsdBytes(aSeg));
+	hsys(SYS_close, aData.iFd);
+	aData.iFd = -1;
+	}
+
 TInt DWin32Process::MapCodeSeg(DCodeSeg* aSeg)
 	{
 	
@@ -221,10 +270,9 @@ TInt DWin32Process::MapCodeSeg(DCodeSeg* aSeg)
 	TInt count=0;
 	TInt err = KErrNone;
 
-	// hosted: the copies come from the kernel heap (Win32 used the host heap with scheduling disabled)
-	data.iDataCopy = Kern::Alloc(seg->iRealDataSize ? seg->iRealDataSize : 4);
-	data.iBssCopy = Kern::Alloc(seg->iRealBssSize ? seg->iRealBssSize : 4);
-	if (!data.iDataCopy || !data.iBssCopy)
+	// hosted: the copies come from the kernel heap (Win32 used the host heap with scheduling disabled), or, for
+	// large data, from the process's own memory file (iWsdMap: the kernel's view of what is mapped on switch-in)
+	if (!DllDataNew(seg, data))
 		{
 		err = KErrNoMemory;
 		goto failed;
@@ -246,8 +294,7 @@ TInt DWin32Process::MapCodeSeg(DCodeSeg* aSeg)
 	return KErrNone;	
 
 failed:
-	Kern::Free(data.iDataCopy);
-	Kern::Free(data.iBssCopy);
+	DllDataFree(seg, data);
 
 	return err;
 	}
@@ -277,8 +324,7 @@ void DWin32Process::UnmapCodeSeg(DCodeSeg* aSeg)
 	if (ix < 0)
 		return;
 
-	Kern::Free(data.iDataCopy);
-	Kern::Free(data.iBssCopy);
+	DllDataFree(seg, data);
 
 	__KTRACE_OPT(KDLL,Kern::Printf("Process %O UnmapCodeSeg(%C)", this, aSeg));
 	}
@@ -294,9 +340,8 @@ void DWin32Process::RemoveDllData()
 		if (data.iCodeSeg->iLiveProcess == this)
 			data.iCodeSeg->iLiveProcess = NULL;
 		iDllData.Remove(ii);
-		Kern::Free(data.iDataCopy);
-		Kern::Free(data.iBssCopy);
 		NKern::Unlock();
+		DllDataFree(data.iCodeSeg, data);
 		}
 	}
 

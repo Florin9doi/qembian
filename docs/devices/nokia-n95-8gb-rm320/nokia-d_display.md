@@ -296,7 +296,7 @@ posting clients, **n/a** = not needed.
 | ctl 10 | returns 0 for any a1 | a1 is the screen number by value; **0 → KErrNone, else KErrNotSupported** (V) | low |
 | ctl 11 | block | as above (26 words, 0x68 bytes) | now |
 | ctl 31 | 960 | real = 320 × bytes/pixel = 1280 for 16MU, rotation-independent (V). For us it must equal the stride of the buffer ScDv draws into (our HAL/fb: 960); **keep 960 unless the BSP stride changes** (then change both) | now |
-| ctl 9 | ignored, 0 | rect `{x\|w<<16, y\|h<<16}` in current-orientation coordinates, 0xffff = whole; clamp to 240×320; return 0. Our fb is live so no copy is needed; when partial mode (ctl 3) is emulated this is where rows outside the band would be masked | now (no-op is faithful) |
+| ctl 9 | ignored, 0 | rect `{x\|w<<16, y\|h<<16}` in current-orientation coordinates, 0xffff = whole; clamp to 240×320; return 0. With `d_display.panel = 1` (5800, 5230) the stand-in copies the rect from the video RAM into a panel buffer the frame buffer scans out (ctl 8: the whole screen), as the real driver; without it the frame buffer is live and every half-done redraw is visible (2026-11-13: regions blinking black on the 5800/5230) | done with d_display.panel (the no-op was not faithful) |
 | ctl 8 | default 0 | full refresh → 0 (V) | now, already right |
 | ctl 0x2b / 0x2c / 0x2d | ignored, 0 | freeze flag, unfreeze, return swallowed-update count as the **return value** (V) | low |
 | ctl 3 | ignored, 0 | validate `start < end < 240` (else **KErrArgument**), remember `{start,end,fullColour}`, set active flag, return 0 (V). Rows = native 320×240 rows = portrait X columns `[start,end]`. Emulation (optional): dim/blank the fb outside those columns (QEMU `blank-dim`-style) | saver |

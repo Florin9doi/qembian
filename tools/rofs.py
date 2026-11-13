@@ -1,13 +1,32 @@
 #!/usr/bin/env python3
-"""List / extract files from a Symbian ROFS (or ROFx extension) image.
+"""List / extract files from a Symbian ROFS (or ROFx extension) image, or an EKA1-era ROLF image.
 
   rofs.py IMG                    list "<offset> <size> <path>" (ROFx entries whose data is in ROFS1: "rofs1@<off>")
   rofs.py IMG --extract PATH OUT extract one file (path match is case-insensitive, '/' separators)
+
+ROLF (Sony Ericsson P910i, UIQ 2.1, Symbian 7.0 [verified on EAST-EMEA_Rolf_File]): the same header
+layout and TRofsDir, but entries carry no UID block (name offset right after iStructSize) and each
+entry starts on a 4-byte boundary (iStructSize does not include the padding).
 """
 import argparse, struct
 
 
-def walk(d, dir_off, path='', out=None, base=0):
+ENTRY_FMT = {False: (18, 1), True: (2, 4)}   # rolf -> (offset of the name-offset byte, entry alignment)
+
+
+def entries(d, p, end, rolf=False):
+    """(attributes, size, address, name) of the TRofsEntry records in d[p:end]"""
+    eoff, align = ENTRY_FMT[rolf]
+    while p < end:
+        es = struct.unpack_from('<H', d, p)[0]
+        if es == 0:
+            break
+        noff, att, fs, fa, attx, nl = struct.unpack_from('<BBIIBB', d, p + eoff)
+        yield att, fs, fa, d[p + noff:p + noff + 2 * nl].decode('utf-16le')
+        p = (p + es + align - 1) & ~(align - 1)
+
+
+def walk(d, dir_off, path='', out=None, base=0, rolf=False):
     """Offsets inside the image are relative to the partition start; a ROFx extension image is
     placed at ROFS1's iMaxImageSize, so its offsets carry that base and we subtract it."""
     out = [] if out is None else out
@@ -15,27 +34,13 @@ def walk(d, dir_off, path='', out=None, base=0):
     if not 0 <= dir_off <= len(d) - 12:
         return out              # a ROFx directory kept in ROFS1 (N81 8GB 21.0.010): not in this image
     size, pad, first, fblock, fsize = struct.unpack_from('<HBBII', d, dir_off)
-    p = dir_off + first
-    end = dir_off + size
-    while p < end:                                   # sub-directory entries
-        es = struct.unpack_from('<H', d, p)[0]
-        if es == 0:
-            break
-        noff, att, fs, fa, attx, nl = struct.unpack_from('<BBIIBB', d, p + 18)
-        name = d[p + noff:p + noff + 2 * nl].decode('utf-16le')
-        walk(d, fa, path + name + '/', out, base)
-        p += es
-    p, end = fblock - base, min(fblock - base + fsize, len(d))
-    if p < 0:
+    for att, fs, fa, name in entries(d, dir_off + first, dir_off + size, rolf):    # sub-directories
+        walk(d, fa, path + name + '/', out, base, rolf)
+    if fblock < base:
         return out              # the file block lives in ROFS1 too
-    while p < end:                                   # file entries
-        es = struct.unpack_from('<H', d, p)[0]
-        if es == 0:
-            break
-        noff, att, fs, fa, attx, nl = struct.unpack_from('<BBIIBB', d, p + 18)
-        name = d[p + noff:p + noff + 2 * nl].decode('utf-16le')
+    p = fblock - base
+    for att, fs, fa, name in entries(d, p, min(p + fsize, len(d)), rolf):          # files
         out.append((fa, fs, path + name))   # partition-relative
-        p += es
     return out
 
 
@@ -70,6 +75,8 @@ def entry(d, want, dir_off=None, path=''):
 
 
 def files(d):
+    if d[:4] == b'ROLF':
+        return 0, walk(d, struct.unpack_from('<I', d, 8)[0], rolf=True)
     if d[:4] not in (b'ROFS', b'ROFx'):
         raise SystemExit('not a ROFS image')
     tree_off = struct.unpack_from('<I', d, 8)[0]

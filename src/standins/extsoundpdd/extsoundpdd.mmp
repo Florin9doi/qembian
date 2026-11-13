@@ -1,0 +1,12 @@
+// Sony Ericsson P1i ExtSoundPdd.pdd stand-in (see nokiastub.h)
+#include "../../variant.mmh"
+#include <kernel/kern_ext.mmh>
+target			VariantTarget(extsoundpdd,pdd)
+linkas			extsoundpdd.pdd
+targettype		pdd
+sourcepath		.
+source			extsoundpdd.cpp
+noexportlibrary
+vendorid		0x70000001
+capability		all
+userinclude		../_shared	// src/standins/_shared: nokiastub.h

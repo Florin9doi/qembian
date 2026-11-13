@@ -14,6 +14,76 @@ class DeviceTest(unittest.TestCase):
             errs, _ = D.check(D.load(dev))
             self.assertEqual(errs, [], dev)
 
+    def test_gl_msaa_at_most_the_phones(self):
+        """2026-11-13: OpenVG surfaces were 8x multisampled; the phones' VideoCore IV offers EGL at most 4x
+        (models/nokia-n8-rm596/egl-configs.txt), and 8x costs more on a phone GPU (Pixel 3a). No profile asks for more."""
+        for dev in D.device_ids():
+            gl = D.GL_HOST_DEFAULTS_OF(D.load(dev))
+            if 'msaa' in gl:
+                self.assertLessEqual(gl['msaa'], 4, dev)
+
+    def test_panel_shows_only_posted_updates(self):
+        """2026-11-13: the 5800 and 5230 scanned out WSERV's video RAM directly, so every redraw showed half done
+        (regions blinking black). Their display stand-in now keeps a panel buffer filled only by ctl 9/8, as the real
+        driver (d_display.panel): the profiles must ask for it."""
+        import subprocess
+        for dev in ('nokia-5800-rm356', 'nokia-5230-rm588', 'nokia-n95-rm159', 'nokia-n95-8gb-rm320', 'nokia-e5-00-rm632',
+                    'nokia-n97-rm505', 'nokia-e52-rm469', 'nokia-5730-rm465', 'nokia-n79-rm348', 'nokia-e72-rm530'):
+            out = subprocess.run([sys.executable, os.path.join(ROOT, 'tools/device.py'), 'qemu-args'],
+                                 env=dict(os.environ, SYBORG_DEVICE=dev), capture_output=True, text=True).stdout
+            self.assertIn('d_display.panel=1', out, dev)
+
+    def test_registry_cli_mixed_case_code(self):
+        """2026-11-13: `device.py registry CODE` upper-cased CODE and looked it up as is, so the Sony Ericsson
+        rows (SE-P1i, lower-case letters in the code) raised KeyError"""
+        import subprocess
+        for code in ('SE-P1i', 'se-p910i', 'rm-132'):
+            r = subprocess.run([sys.executable, '-I', os.path.join(ROOT, 'tools', 'device.py'), 'registry', code],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertTrue(r.stdout.upper().startswith(code.upper()), r.stdout)
+        r = subprocess.run([sys.executable, '-I', os.path.join(ROOT, 'tools', 'device.py'), 'registry', 'XX-1'],
+                           capture_output=True, text=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn('Traceback', r.stderr)
+
+    def test_qemu_args_without_isi_modem(self):
+        """2026-11-13: qemu_args built the ISI reply table for every phone; the P1i (no ISI modem, no
+        isi-replies.txt) failed to start. Only phones whose modem is the ISI fake peer get the table."""
+        for dev in D.device_ids():
+            prof = D.load(dev)
+            isi = D.get(prof, 'modem.kind') == 'isi-fake-peer'
+            if not isi or os.path.exists(D.paths(prof)['dir']):
+                args = ' '.join(D.qemu_args(prof, None)) if not isi else None
+                if args is not None:
+                    self.assertNotIn('syborg-modem.replies', args, dev)
+
+    def test_store_accepts_se_type_codes(self):
+        """2026-11-13: the ROM store scan took RM-nnn only; roms/SE-P1i/R6E30 was invisible (no-firmware)"""
+        import tempfile
+        old = D.STORE
+        with tempfile.TemporaryDirectory() as d:
+            for tc in ('SE-P1i', 'RM-132', 'junk'):
+                os.makedirs(os.path.join(d, tc, 'V1'))
+                open(os.path.join(d, tc, 'V1', 'rom.toml'), 'w').write('type_code = "%s"\nsw_version = "V1"\n' % tc)
+            try:
+                D.STORE = d
+                got = sorted(D._store_entries())
+            finally:
+                D.STORE = old
+        self.assertEqual(got, ['RM-132/V1', 'SE-P1i/V1'])
+
+    def test_moving_model_rom_base_in_symbol_tools(self):
+        """2026-11-13: syb_sym.py and xipdis.py assumed ROM base 0x80000000; on moving-model ROMs (0xF8000000:
+        N73, P1i) the index had 0 modules and xipdis crashed. They read the base from core.json now."""
+        import subprocess
+        prof = D.load('se-p1i')
+        if not os.path.exists(D.paths(prof)['core_json']):
+            self.skipTest('se-p1i not inventoried')
+        r = subprocess.run([sys.executable, '-I', os.path.join(ROOT, 'tools', 'syb_sym.py'), 'addr', '0xf8041812'],
+                           capture_output=True, text=True, env=dict(os.environ, SYBORG_DEVICE='se-p1i'))
+        self.assertIn('DRTAEABI.dll', r.stdout, r.stderr)
+
     def test_extends(self):
         child = D.load('nokia-n95-8gb-rm321')
         self.assertEqual(child['_extends'], 'nokia-n95-8gb-rm320')

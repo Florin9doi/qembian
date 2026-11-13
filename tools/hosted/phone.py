@@ -202,6 +202,29 @@ def main():
                     break
                 p.drawText(8, y, l)
 
+    GLCHAN = os.path.join(os.path.dirname(os.path.abspath(shm)), 'gl.chan')
+    GL_FRAME, GL_W_SEQ = 56 << 20, 32          # syborg_glchan.h: GLCHAN_FRAME, GLCHAN_W_FRAME_SEQ (W, H follow)
+
+    def glchan_frame(win):
+        if state.get('gl') is None:
+            if not os.path.exists(GLCHAN) or os.path.getsize(GLCHAN) < 64 << 20:
+                return False
+            g = open(GLCHAN, 'rb')
+            state['gl'] = mmap.mmap(g.fileno(), 64 << 20, access=mmap.ACCESS_READ)
+        g = state['gl']
+        seq, w, h = struct.unpack_from('<3I', g, 4 * GL_W_SEQ)
+        if not seq or seq & 1 or not w or not h or w * h * 4 > (8 << 20):
+            return False                       # no host-composed frame now: the VM's screen
+        if seq == state.get('glseq'):
+            return True
+        data = bytes(g[GL_FRAME:GL_FRAME + w * h * 4])
+        if struct.unpack_from('<I', g, 4 * GL_W_SEQ)[0] != seq:
+            return True                        # written meanwhile: next tick
+        state['glseq'] = seq
+        win.screen.set_frame(QtGui.QImage(data, w, h, w * 4, QtGui.QImage.Format.Format_RGB32).copy())
+        win.adjustSize()
+        return True
+
     class Window(QtWidgets.QWidget):
         def __init__(self):
             super().__init__()
@@ -239,7 +262,7 @@ def main():
             self.frame = -1
             t = QtCore.QTimer(self)
             t.timeout.connect(self.poll)
-            t.start(20)
+            t.start(8)                         # frames as they come (the GL server publishes each one)
 
         def poll(self):
             if vm is not None and vm.poll() is not None:
@@ -253,6 +276,11 @@ def main():
                 f = open(shm, 'r+b')
                 state['mm'] = mmap.mmap(f.fileno(), SHM_BYTES)
             mm = state['mm']
+            # the host-composed frame straight from the GL server's channel file (one hop, as QEMU's window reads
+            # syborg-gl's frame): 2026-11-13 (tools/ui_compare.py) the three polling stages through the VM showed
+            # about half the composed frames, 25-60 ms late. The VM's copy is used when there is no GL frame.
+            if glchan_frame(self):
+                return
             magic, _ver, fw, fh, pitch, frame = struct.unpack_from('<6I', mm, 0)
             if magic != MAGIC or not fw or frame == self.frame or PIXELS + pitch * fh > SHM_BYTES:
                 return

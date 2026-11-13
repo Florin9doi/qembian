@@ -1,0 +1,12 @@
+// Sony Ericsson P1i lcd_ctrl.ldd stand-in (see nokiastub.h)
+#include "../../variant.mmh"
+#include <kernel/kern_ext.mmh>
+target			VariantTarget(lcd_ctrl,ldd)
+linkas			lcd_ctrl.ldd
+targettype		ldd
+sourcepath		.
+source			lcdctrl.cpp
+noexportlibrary
+vendorid		0x70000001
+capability		all
+userinclude		../_shared	// src/standins/_shared: nokiastub.h

@@ -2,7 +2,7 @@
 
 Status 2026-11-07: steps A, B, C (image draws, pattern paints), D (linear and radial gradients),
 colour transform, F v1 and v2 (images as render targets, read back when the CPU needs them) and
-anti-aliasing (8x MSAA) work; frames are presented and composed on the host (composition.md "Host
+anti-aliasing (4x MSAA since 2026-11-13, 8x before) work; frames are presented and composed on the host (composition.md "Host
 composition"). The first-boot screens (language, Phone switch, country, date with the virtual keypad)
 draw completely. Open: masks (logged when used: "fill with masking"), filters on the host, exact
 multiply/stencil image modes. Owner's direction: our own EGL/OpenVG, drawn on the host GPU; no
@@ -53,7 +53,7 @@ use, and the RI on the host would rasterise on the CPU (and cast pointers to 32-
   at bind; at release the host keeps the pixels as the image's texture: the guest copy is then stale,
   so CPU reads of such images (vgGetImageSubData, filters) still see old pixels: step F v2).
 - Anti-aliasing: drawables and image targets are multisampled (SYGL_SURF_MSAA, `-global
-  syborg-gl.msaa=N`, default 8, needs a GLES 3 host context): the stencil fans and the cover run per
+  syborg-gl.msaa=N`, default 4 (8 until 2026-11-13; the real VideoCore IV offers EGL at most 4x), needs a GLES 3 host context): the stencil fans and the cover run per
   sample, so path edges, strokes and image edges get coverage like the RI's 32-sample software fill.
   A surface is resolved into its texture when read (read-back, present, sampled as an image).
 - Gradients: the paint block carries the surface-to-paint matrix, spread mode, the RI's points or

@@ -120,7 +120,13 @@ enum { CLONE_VM = 0x100, CLONE_FS = 0x200, CLONE_FILES = 0x400, CLONE_SIGHAND = 
 int hclone_raw(uint32_t flags, void *stack, volatile int *ptid, uint32_t tls, volatile int *ctid,
                int (*fn)(void *), void *arg);
 
+uint32_t hthread_helper_cpus;
+
 int hthread(int (*fn)(void *), void *arg, void *stack, size_t stacksize, volatile int *ctid) {
+	return hthread_on(fn, arg, stack, stacksize, ctid, hthread_helper_cpus);
+}
+
+int hthread_on(int (*fn)(void *), void *arg, void *stack, size_t stacksize, volatile int *ctid, uint32_t cpus) {
 	uint32_t flags = CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD | CLONE_SYSVSEM |
 	                 CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID | CLONE_SETTLS;
 	void *top = (void *)(((uint32_t)stack + stacksize) & ~7u);
@@ -128,7 +134,10 @@ int hthread(int (*fn)(void *), void *arg, void *stack, size_t stacksize, volatil
 	// CLONE_SETTLS it inherited its creator's record, and the phone window's display thread (started by the
 	// main thread) passed for a nanothread in the keyboard model's lock: it masked interrupts as the main
 	// thread and hung on the first key. Regression: t_tls.
-	return hclone_raw(flags, top, ctid, 0, ctid, fn, arg);
+	int tid = hclone_raw(flags, top, ctid, 0, ctid, fn, arg);
+	if (tid > 0 && cpus)
+		hsys(241 /* sched_setaffinity */, tid, sizeof cpus, &cpus);
+	return tid;
 }
 
 void hthread_join(volatile int *ctid) {

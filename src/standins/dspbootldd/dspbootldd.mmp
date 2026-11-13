@@ -1,0 +1,12 @@
+// Sony Ericsson P1i DspBootLdd.ldd stand-in (see nokiastub.h)
+#include "../../variant.mmh"
+#include <kernel/kern_ext.mmh>
+target			VariantTarget(dspbootldd,ldd)
+linkas			dspbootldd.ldd
+targettype		ldd
+sourcepath		.
+source			dspbootldd.cpp
+noexportlibrary
+vendorid		0x70000001
+capability		all
+userinclude		../_shared	// src/standins/_shared: nokiastub.h

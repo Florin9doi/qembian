@@ -139,3 +139,13 @@ no kernel change. Record/replay (3) is still open.
   can't name a thread. Wanted: `--catch 'VA=LABEL?thread~SocketServer'` evaluated in the daemon from the
   current-thread word without a full register read, and an "exec return value" trace (kernel exec
   handler results != 0 per thread) to see failing kernel calls without breakpoints.
+
+- **A BridgeServer/OPA decoder for `SYBCAIF:` lines, and failures that cannot be filtered away.**
+  (2026-11-13, P1i APS-9 / CreateInstance) Each BServer message was decoded by hand from hex (type, proxy,
+  request id, GUIDs) and matched to its reply by eye; a `tools/caif.py log SERIAL` (like `tools/isi.py log`:
+  request/reply pairs, unanswered requests, GUIDs named from OpaClient's interface table) would have shown
+  "every CreateInstance completed 0x80030000" at once. Two time sinks of the session: `device.py build`
+  reports a stand-in compile failure as one "failed" line and keeps the previous binary in the ROM (two
+  boots tested an old stand-in), and the trace report's "likely blocked" list is empty when the stall is
+  an asynchronous wait (APS's five BServer requests), so it needs a "pending since boot, never completed"
+  view per client.

@@ -275,8 +275,15 @@ static int badPointer(int fn)
 	return -1;
 }
 
+/* SYBORG_GL_STATS: every VG call by function, and the pixels vgImageSubData uploaded (printed by syborg_gl.c) */
+extern "C" { uint64_t syvg_fn_count[128]; uint64_t syvg_subdata_pixels; }
+
 static int dispatch(int fn, const uint32_t *a, size_t n)
 {
+	if (fn >= 0 && fn < 128)
+		syvg_fn_count[fn]++;
+	if (fn == VG2_FN_vgImageSubData && n >= 8)
+		syvg_subdata_pixels += (uint64_t)a[6] * a[7];
 	switch (fn) {
 #include "vg2_dispatch.inc"
 	default:

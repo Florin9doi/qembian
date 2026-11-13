@@ -121,7 +121,19 @@ other files (custom firmware: `RM-596/111.040.1511~delight-6.7`). Archives stay 
 file name; language/customer/UDA files join the core they came with. It prints the registry row
 (`models/registry.toml`) and the profiles whose `[firmware.identity]` equals it. `layout.py` is the
 partition reader `inventory.py` extracts by (core, ROFS1, language and customer ROFS, paging), so a
-profile declares no layout. Not yet read: FIASCO tag 0x30 (E71 RM-346 files).
+profile declares no layout. Not yet read: FIASCO tag 0x30 (E71 RM-346 files). Sony Ericsson packages
+(no FIASCO): `tools/fw/semc.py` below.
+
+## Sony Ericsson firmware: `tools/fw/semc.py`
+
+```
+tools/fw/semc.py identify DIR|FILES [--json]          # what each file is: core/rofs/rofx/rolf/fat/babe/srec/emma ...
+tools/fw/semc.py extract roms/SE-P1i/R6E30 -o build/firmware/SE-P1i/R6E30
+```
+Reads the UIQ phones' flash files (P1i: plain EKA2 XIP + ROFS/ROFx + FAT; P910i: EKA1 XIP, ROLF = drive A:,
+FAT behind small headers, modem S-records), writes every layer, the merged Z: and `manifest.json`.
+`identify.py` and `store.py import` use it for SE packages (type code `SE-<product>`, version = PDA
+revision). Formats and per-phone contents: [semc-firmware.md](semc-firmware.md).
 
 ## Firmware facts: `tools/fw/probe.py`
 

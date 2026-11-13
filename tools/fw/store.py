@@ -7,7 +7,7 @@
   store.py reindex                               rewrite every rom.toml and index.toml from the files
   store.py path ID                               the firmware's directory
 
-Layout: roms/<type code>/<version>[~<label>]/ holds the original flash files with their original names,
+Layout: roms/<type code>/<version>[~<label>]/ (Sony Ericsson: roms/SE-<product>/<PDA revision>/, tools/fw/semc.py) holds the original flash files with their original names,
 package metadata (.vpl .dcp .xml .pcx .ini ...) in package/, and rom.toml, generated from the files
 (identify.py) and never edited by hand. A label tells firmwares of one version apart whose files differ
 (custom firmware: 111.040.1511~delight-6.7). Archives are expanded into a temporary directory and the
@@ -74,7 +74,7 @@ def entries():
     import tomllib
     out = []
     for tc in sorted(os.listdir(STORE)) if os.path.isdir(STORE) else []:
-        if not re.match(r'RM-\d+$', tc):
+        if not re.match(r'(RM-\d+|SE-[\w.-]+)$', tc):        # Nokia type codes, Sony Ericsson SE-<product>
             continue
         for v in sorted(os.listdir(os.path.join(STORE, tc))):
             m = os.path.join(STORE, tc, v, 'rom.toml')

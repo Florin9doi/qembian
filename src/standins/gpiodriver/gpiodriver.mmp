@@ -1,0 +1,12 @@
+// Sony Ericsson P1i GPIODRIVER.LDD stand-in (see nokiastub.h)
+#include "../../variant.mmh"
+#include <kernel/kern_ext.mmh>
+target			VariantTarget(gpiodriver,ldd)
+linkas			gpiodriver.ldd
+targettype		ldd
+sourcepath		.
+source			gpiodriver.cpp
+noexportlibrary
+vendorid		0x70000001
+capability		all
+userinclude		../_shared	// src/standins/_shared: nokiastub.h

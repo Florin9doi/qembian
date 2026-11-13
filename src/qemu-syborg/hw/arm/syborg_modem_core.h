@@ -28,6 +28,8 @@ typedef QEMUTimer SybModemTimer;
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #endif
 
+#include "syborg_ccpu.h"
+
 #define MODEM_PORTS     2
 #define MODEM_CHANNELS  64          /* ISC channel numbers 0..63 */
 #define MODEM_HANDLES   64          /* guest channel objects per port (handle 0 unused) */
@@ -40,8 +42,10 @@ typedef QEMUTimer SybModemTimer;
 #define MODEM_WINDOW    0x2000      /* register window per port */
 #define SYBMODEM_ID     0xc51d0020  /* SYBORG_ID_MODEM (syborg.h) */
 
-enum { TX_SEND = 1, TX_SUBSCRIBE = 2, TX_OPEN = 3, TX_CLOSE = 4, TX_DATA = 5 };   /* 5: ISA DataSend on a data channel */
-enum { RX_DELIVER = 1, RX_LOG = 2, RX_DATA = 3 };          /* 3: for the channel's DataReceive */
+enum { TX_SEND = 1, TX_SUBSCRIBE = 2, TX_OPEN = 3, TX_CLOSE = 4, TX_DATA = 5,   /* 5: ISA DataSend on a data channel */
+       TX_CAIF = 6 };              /* 6: a CAIF packet from the P1i's bridgedrv (channel number = its unit), syborg_ccpu.c */
+enum { RX_DELIVER = 1, RX_LOG = 2, RX_DATA = 3,            /* 3: for the channel's DataReceive */
+       RX_CAIF = 4 };              /* 4: a CAIF packet from the fake CCPU for bridgedrv */
 
 typedef struct ModemFrame {
     uint32_t kind, channel, len;
@@ -131,6 +135,7 @@ typedef struct SyborgModemState {
     uint8_t data_ch, data_port;     /* the active context's data channel (DATAPORT) and port, 0 = none */
     uint32_t data_tx, data_rx;      /* packets each way (log the first few) */
     uint32_t df_drops;
+    SybCcpu ccpu;                   /* the P1i's CCPU (syborg_ccpu.c), on port 0 */
     ModemReply *replies;
     unsigned nreplies;
 } SyborgModemState;

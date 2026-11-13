@@ -118,7 +118,17 @@ PureView (Belle FP2) boot to their home screens this way: `python3 tools/hosted/
 `python3 tools/hosted/phone.py --rom nokia-808-rm807 --gl` (808: composition on the host GPU, the mouse as
 the touchscreen, the phone's keys as buttons). Ctrl+T shows the Linux side (the whole phone is one Linux
 process, each Symbian thread a Linux thread), Ctrl+P writes a who-waits-on-whom diagnosis to the log.
-Offline only; no sound output. UI timing: `tools/hosted/uibench.py`.
+Offline only; no sound output. UI timing: `tools/hosted/uibench.py`; profiling and tracing on Ctrl+P
+(per-thread CPU, thread switches, GL round trips, IPC latency: `docs/hosted-eka2/roadmap.md`). The 808's home
+screen widgets load (GL requests wait like a GPU, swaps are paced to vsync, phone threads pinned to one CPU).
+
+**Display panel (2026-11-13).** The N95-family phones (N95, N95 8GB, 5800, 5230, N97, E52, E72, E5-00, 5730,
+N79) now show only what the window server posts, as their real display driver: no half-drawn redraws
+(regions blinking black). OpenVG `vgGetMatrix` is answered in the guest (bit-exact with the host).
+
+**Sony Ericsson P1i (UIQ 3.0, first non-Nokia phone, in progress).** Boots through its platform start-up on a
+host-side fake CCPU (the communications processor link), with stand-ins for its LCD controller, DSP, sound and
+video drivers; no window server yet, so the screen stays black (`docs/devices/se-p1i/bring-up.md`).
 
 **Host platform.** Linux on x86-64 (amd64) is the only tested host. Other systems and
 architectures may work, but they are not tested or supported.

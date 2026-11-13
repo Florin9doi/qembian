@@ -1,0 +1,42 @@
+# Family semc-uiq3: Sony Ericsson UIQ 3 phones (Symbian 9.x, EKA2) on our Syborg board (members: P1i).
+# Merged UNDER each member's model.toml (a device value always wins). Same rules as bb5-s60.toml
+# (docs/devices.md "Families"): only how we run every member (board machine, kernel set-up) and facts of
+# the family; no modem kind yet (the CCPU link is CAIF -> OPA, docs/semc-firmware.md: not modelled).
+schema = 1
+
+[platform]
+os = "symbian"
+cellular = "semc-ccpu"                     # Ericsson CCPU behind CAIF (OPA object RPC) [V names]
+
+[board]
+machine = "syborg"
+
+[board.timing]
+fast_counter_hz = 32768                    # our board's counter [I for the phones]
+nanokernel_tick_us = 1000
+rtc = "syborg-rtc"
+
+[board.audio]
+device = "syborg-audio"
+
+[board.flash]
+base = 0x60000000                          # the board's flash window that medrofs reads the ROFS images from
+content = "rofs"
+
+[board.input]
+keymap = "keymap.toml"
+translation = "qemu"
+
+[kernel]
+variant = "udeb"
+trace_mask = 0x80000000
+secondary = "sys/bin/efile.exe"
+critical_thread_policy = "spare"           # docs/hacks.md H-critical-exit
+user_memory_guards = false
+
+[rom]
+manifest = "hybrid-manifest.txt"
+
+[milestones]
+
+[props]

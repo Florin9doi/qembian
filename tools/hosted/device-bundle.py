@@ -70,7 +70,9 @@ for d in t rom seed; do
 done
 mkdir -p "$RUN"
 rm -f "$RUN/phone.shm"; truncate -s 4M "$RUN/phone.shm"
-ENVV="HTEST=1 PHONE=$RUN/phone.shm"
+# every nanothread on one CPU (the last: on the Pixel 3a a big Cortex-A75 core), helper threads on the others;
+# HPIN=ffffffff ./run.sh turns it off (lxhost.cpp)
+ENVV="HTEST=1 PHONE=$RUN/phone.shm HPIN=${HPIN:-$(printf %x $(($(nproc) - 1)))}"
 if [ "$GL" = 1 ]; then
     [ -x "$B/build/hosted/glserver/glserver" ] || { echo "run.sh: build the GL server first: ./run.sh build-gl"; exit 1; }
     rm -f "$RUN/gl.chan"; truncate -s 64M "$RUN/gl.chan"

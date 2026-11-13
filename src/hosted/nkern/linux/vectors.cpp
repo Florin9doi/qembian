@@ -130,9 +130,35 @@ EXPORT_C TInt Dispatch(TInt aFunction, TInt* aArgs)
 // htest --env GLSTAT=1: calls per exec number, for the per-second top list (hgl.cpp HostedGlStat)
 TUint32 HostedExecCount[2][256];			// [fast][number & 0xff]
 TUint32 HostedExecLastLr[2][256];
+// htest --phone --env IPCSTAT=1: synchronous sends (exec IPCEXEC, the 808's 0x4f) per sending thread and function
+// (Ctrl+P: IPCFN lines). Open addressing, 1024 entries; full: not counted.
+struct SIpcFn { TUint32 iThread, iFunction, iCount, iServer; };
+SIpcFn HostedIpcFn[1024];
+TUint32 HostedIpcExec = 0xffffffffu;		// set by the phone test when IPCSTAT is on
+TUint32 (*HostedSendTarget)(TInt aHandle);	// the session handle's server (kn_efile), 0: unknown
+static void CountSend(TInt aHandle, TUint32 aFunction)
+	{
+	TUint32 t = (TUint32)TheScheduler.iCurrentThread;
+	TUint32 sv = HostedSendTarget ? HostedSendTarget(aHandle) : 0;
+	TUint32 h = (t >> 4) * 31 + aFunction * 7 + (sv >> 4);
+	for (TInt i = 0; i < 1024; ++i)
+		{
+		SIpcFn& e = HostedIpcFn[(h + i) & 1023];
+		if (e.iCount && (e.iThread != t || e.iFunction != aFunction || e.iServer != sv))
+			continue;
+		e.iThread = t;
+		e.iFunction = aFunction;
+		e.iServer = sv;
+		++e.iCount;
+		return;
+		}
+	}
+
 static TInt ExecCall(TUint32 n, TInt* aArgs, TUint32 lr)
 	{
 	++HostedExecTraps;
+	if (n == HostedIpcExec)
+		CountSend(aArgs[0], (TUint32)aArgs[1]);
 	++HostedExecCount[(n & 0x800000) ? 1 : 0][n & 0xff];
 	HostedExecLastLr[(n & 0x800000) ? 1 : 0][n & 0xff] = lr;
 	TUint32 a0 = aArgs[0], a1 = aArgs[1], a2 = aArgs[2], a3 = aArgs[3];

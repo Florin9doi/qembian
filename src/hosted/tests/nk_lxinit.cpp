@@ -15,6 +15,15 @@ static TInt Thread(TAny*)
 	return 0;
 	}
 
+// stays alive until released (its CPU set is read while it runs)
+static volatile TInt Release;
+static TInt Waiting(TAny*)
+	{
+	Ok = 1;
+	while (!Release) hsys(SYS_sched_yield);
+	return 0;
+	}
+
 int main(int, char**)
 	{
 	TUint32 before;
@@ -35,5 +44,35 @@ int main(int, char**)
 	SLxThread* t = LxCreateThread(&Thread, 0, ETrue, 0);
 	while (!Ok) hsys(SYS_sched_yield);
 	HCHECK(Seen == t && Seen != me, "a new thread sees its own record");
+	// htest --env HPIN=<cpu> (2026-11-13): nanothreads on one CPU (hand-overs without cross-CPU wake-ups), the host
+	// helper threads (hthread) on the others
+	extern TBool LxPinTo(TUint32 aCpu);
+	TUint32 all = 0;
+	hsys(242 /* sched_getaffinity */, 0, sizeof all, &all);
+	if (all & (all - 1))
+		{
+		TUint32 cpu = __builtin_ctz(all);
+		HCHECK(LxPinTo(cpu), "pinning to CPU %u of %08x", cpu, all);
+		static TUint32 fake[64];					// a nanothread's record only needs the pointer
+		Ok = 0;
+		SLxThread* n = LxCreateThread(&Waiting, 0, ETrue, (NThread*)fake);
+		while (!Ok) hsys(SYS_sched_yield);
+		TUint32 m = 0;
+		hsys(242, n->iTid, sizeof m, &m);
+		Release = 1;
+		HCHECK(m == (1u << cpu), "a nanothread runs on CPU %u only (%08x)", cpu, m);
+		static volatile TInt hctid;
+		static TUint8 hstack[0x4000];
+		static volatile TInt hdone;
+		hdone = 0;
+		TInt tid = hthread([](void*) -> int { while (!hdone) hsys(SYS_sched_yield); return 0; }, 0, hstack, sizeof hstack, &hctid);
+		m = 0;
+		hsys(242, tid, sizeof m, &m);
+		hdone = 1;
+		hthread_join(&hctid);
+		HCHECK(m == (all & ~(1u << cpu)), "a host helper thread runs on the other CPUs (%08x)", m);
+		}
+	else
+		htest_note("one CPU: pinning not tested");
 	return htest_done();
 	}

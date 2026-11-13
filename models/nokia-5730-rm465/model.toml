@@ -156,6 +156,7 @@ name = "d_display"
 kind = "ldd"
 family = "nokia-omap2"
 role = "DisplayDriver (board config: 27 caps words, portrait panel, 960-byte stride)"
+config = { panel = 1 }                     # the panel shows only what ctl 9/8 posted, as the real driver (2026-11-13: half-drawn redraws blinked)
 
 [[standins]]
 name = "secldd"

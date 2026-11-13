@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Quick facts about an inventoried firmware (docs/adding-a-device.md steps 2-3), one subcommand each.
 Works on build/roms/<id>/<fw>/ as written by tools/fw/inventory.py (core-flat.img, core.json, rofs*.img);
-prints only, nothing from the firmware leaves build/.
+prints only, nothing from the firmware leaves build/. --device and --vs also take a directory with
+core-flat.img + core.json (a firmware with no profile yet: tools/fw/semc.py extract writes them).
 
   probe.py [--device ID] header            ROM header, memory model, kernel limit, lowest user-side address
   probe.py [--device ID] stubs [--vs ID]   EUser.dll SWI stubs: count, shape (9.1 `mov ip, lr; swi` or 9.2
@@ -23,6 +24,10 @@ import romimg, rofs
 
 
 def paths(dev):
+    if dev and os.path.isfile(os.path.join(dev, 'core-flat.img')):      # a directory: a firmware without a
+        d = os.path.abspath(dev)                                        # profile (tools/fw/semc.py extract)
+        return dict(dir=d, core_flat=os.path.join(d, 'core-flat.img'), core_json=os.path.join(d, 'core.json'),
+                    rofs=sorted(os.path.join(d, n) for n in os.listdir(d) if re.match(r'rofs\d*\.img$', n)))
     p = devmodel.paths(devmodel.load(dev))
     if not os.path.exists(p['core_flat']):
         raise SystemExit('%s: no core-flat.img; run tools/fw/inventory.py --device %s first' % (p['dir'], dev or 'ID'))
@@ -205,7 +210,8 @@ def cmd_estart(a):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--device', help='device id or alias (default: $SYBORG_DEVICE / the registry default)')
+    ap.add_argument('--device', help='device id or alias (default: $SYBORG_DEVICE / the registry default), '
+                                     'or a directory with core-flat.img + core.json')
     sub = ap.add_subparsers(dest='cmd', required=True)
     sub.add_parser('header')
     s = sub.add_parser('stubs'); s.add_argument('--vs', help='compare with this device')

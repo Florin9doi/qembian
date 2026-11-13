@@ -1,0 +1,12 @@
+// Sony Ericsson P1i BRIDGEDRV.LDD stand-in: CCPU packet link, forwards to the host fake CCPU (syborg_ccpu.c)
+#include "../../variant.mmh"
+#include <kernel/kern_ext.mmh>
+target			VariantTarget(bridgedrv,ldd)
+linkas			bridgedrv.ldd
+targettype		ldd
+sourcepath		.
+source			bridgedrv.cpp
+noexportlibrary
+library			PlatformLib	// Interrupt:: for the QEMU modem port
+vendorid		0x70000001
+capability		all

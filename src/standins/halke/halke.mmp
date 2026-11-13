@@ -1,0 +1,13 @@
+// Sony Ericsson P1i HALKE.LDD stand-in (see nokiastub.h)
+#include "../../variant.mmh"
+#include <kernel/kern_ext.mmh>
+target			VariantTarget(halke,ldd)
+linkas			halke.ldd
+targettype		ldd
+sourcepath		.
+source			halke.cpp
+noexportlibrary
+vendorid		0x70000001
+capability		all
+epocallowdlldata		// the attribute values (control 1 sets them)
+userinclude		../_shared	// src/standins/_shared: nokiastub.h, iscpeer.inl, isireplies.h, stubcert.h

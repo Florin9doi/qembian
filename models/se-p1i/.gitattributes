@@ -1,0 +1,2 @@
+# EStart only splits lines on CR LF: keep them
+ESTART.TXT -text

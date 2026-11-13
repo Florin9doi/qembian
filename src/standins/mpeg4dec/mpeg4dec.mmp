@@ -1,0 +1,13 @@
+// Sony Ericsson P1i MPEG4Dec.ldd stand-in (see nokiastub.h)
+#include "../../variant.mmh"
+#include <kernel/kern_ext.mmh>
+target			VariantTarget(mpeg4dec,ldd)
+linkas			mpeg4dec.ldd
+targettype		ldd
+sourcepath		.
+source			mpeg4dec.cpp
+noexportlibrary
+vendorid		0x70000001
+capability		all
+epocallowdlldata		// EndArmed (end-of-stream once per set-up)
+userinclude		../_shared	// src/standins/_shared: nokiastub.h

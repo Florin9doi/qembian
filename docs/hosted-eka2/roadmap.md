@@ -264,3 +264,129 @@ GL requests and their time, thread switches, interrupts, exec calls by number). 
 - `tools/hosted/device-bundle.py` + `docs/hosted-eka2/pixel-3a.md`: the phone for a real arm64 Linux device
   (Pixel 3a under postmarketOS), and `phone.py --attach`. Both phones boot with the kernel's CP15 barrier
   emulation off [V]; the N95's EUSER needs no SWP.
+
+## QEMU vs hosted, measured (2026-11-13, tools/ui_compare.py)
+
+Same actions on both, frames counted at the GL device (syborg-gl frame-file), the 808 settled 90 s after state 110
+and unlocked, medians of 2 runs:
+
+| | QEMU | hosted |
+|---|---|---|
+| Menu open: first frame / settled | 99 ms / 1.09 s | 140 ms / 1.17 s |
+| Menu close: settled | 0.46 s | 0.52 s |
+| Swipe: frames composed in 1.5 s | 15-19 | 15-17 |
+| Calendar: first frame / settled | 155 ms / 0.83 s | 179 ms / 0.94 s |
+
+So the phone itself is 7-15% slower hosted, +25-40 ms to the first frame. The large difference seen in the windows
+was the hosted display path: the GL server published on a 16 ms timer, the VM's display thread copied every 30 ms
+and the window polled every 20 ms; during a swipe 7 of 15 composed frames reached the window, 25-60 ms late.
+Fixed: the server publishes each composed frame as it completes, the window reads it from the channel file directly
+(one hop, as QEMU's window) every 8 ms; 11-15 of 15-20 composed frames now reach it (the rest are identical frames).
+Earlier per-switch estimates (future.md 3) were not measured in the UI: thread hand-overs are not shown to be the
+cause of anything. Measuring traps found on the way: the 808 locks its keypad after ~1 min idle (touch ignored);
+End returns to the application grid, not home.
+
+## Home page 2 (widget placeholders), profiled (2026-11-13)
+
+Page 2 of the 808's home screen shows widget slots with spinning placeholders that never load, on QEMU too (not a
+hosted bug). They animate at 8.5 fps on QEMU and 5-6 fps hosted. Profile of 30 s of that animation, 90 s after state
+110 (`htest --phone --env PROFILE=1 --env GLSTAT=1`; Ctrl+P opens and closes a profile window;
+`tools/hosted/profsym.py LOG --device ID` names the samples and the callers of the hot functions):
+
+| share of the process's CPU | what | why |
+|---|---|---|
+| ~23% | `MapChunk` + `TBitMapAllocator::NotAllocated` + the mmap calls | homescreen.exe, AknIconSrv.exe and sqlsrv.exe use the same window addresses (the window is full) and displace each other on every switch: ~350 switch-in remaps a second each, and `MapChunk` tests every page of the chunk's *maximum* size (13,000 pages for the home screen's heap): 8.2 M page tests a second (`LOCALSTAT` lines, HSTAT `scanned`) |
+| ~13% | `memmove` from `MM::DoProcessSwitch` | DLL writable static data swapped in and out on process switches (the emulator-kernel model) |
+| ~11% | `TLxEvent::Set/Wait` | thread hand-overs (11-12 k a second) |
+| ~4% | `HostedExecBTraceB` | the filtered-trace fast path, called from fbscli |
+| ~22% | ROM code | the phone's own work (fbscli, scdv bitmaps, euser) |
+
+So about a third of the CPU while home page 2 animates is the hosted memory model's process-switch work, which the
+phone's own kernel (flexible model: a page-table switch) does not do.
+
+Fixed the same day, measured the same way (one run each, page 2 frames over 30 s):
+
+| | page 2 | local remaps/s | process-switch share of the CPU |
+|---|---|---|---|
+| before | 6.0 fps | ~750 | MapChunk + page tests + mmap ~23%, DLL data memmove ~13% |
+| switch-in walks only displaced pages; placement by a hot map; DLL data >= 16 KB mapped with MAP_POPULATE | 6.9 fps | 0 | hmmap 18.7% (worse than the copy it replaced) |
+| the same, not populated | **8.3 fps** (QEMU: 8.5) | 0 | hmmap 2.9%, memmove 3.6% |
+
+Left: thread hand-overs (TLxEvent Set/Wait, LxSelf, Park, Resume ~17%); smaller DLL data still copied (sgresource.dll,
+2 KB, ~11,000 swaps a second: nearly every thread switch; ten more at ~1,650/s; ~90 MB/s in all, `WSDSTAT` lines on
+Ctrl+P); `memcmp` ~5% with no caller in the samples.
+
+## Home page 2 widgets never load hosted (2026-11-13): starvation, not a slow server
+
+On QEMU the page-2 widgets load in under a second; hosted they stay spinners. Found with the phone-mode tools
+(Ctrl+P with `--env PROFILE=1 --env IPCSTAT=1 --env GLSTAT=1`):
+- Page 2's widgets load only when page 2 is shown: homescreen -> cpserver -> sqlsrv (both priority 12).
+- The spinners start at once. Hosted, alfredserver (15), fbserv (19) and homescreen (19) then take the whole CPU:
+  `IDLE 0 ms of 19998 ms`, alfredserver 62%, fbserv 12%. cpserver and sqlsrv are `READY` and get 0% (LXTOP). The
+  content never arrives, so the spinners never stop.
+- On page 1 the CPU is idle 68% (41 of 60 s), drive I/O is ~8 ms/s (`NVSTAT`), and no IPC is slow (`IPCSTAT`: only
+  requests that never complete, notifications). So no server, storage or IPC path is 10x slower.
+- Proof: page 2, back to page 1 for 20 s (no animation: the loaders run), page 2 again: the widgets are there.
+
+What makes the animation cost the whole CPU hosted (alfredserver's samples: 60% our kernel, 39% ROM code): the GL
+request path (`hsys6` from `Request`, SelfCopy, PrefetchKick, ApplyWlog ~8%), the trace trampoline (4.5%), thread
+hand-overs with fbserv (fbserv's samples are all hand-overs; ~13,500 switches a second, ~1,500 per frame), `LxSelf`
+(2.5%), 80,000 slow `ChunkBase` exec calls a second (fbscli `CFbsBitmap::DataAddress`). On a native CPU (the Pixel)
+all of this is far cheaper than under TCG [I].
+
+Tools added for this: per-thread CPU samples (`PROF thread/tpc`, `profsym.py` "by Symbian thread"), `IDLE` and
+`READY <thread>: priority` on Ctrl+P, `IPCSTAT` (a 5 ms sampler of the kernel's message pool: per server and function,
+messages, ms queued and served, max, still open), `NVSTAT` (drive transfers per second and their time).
+
+Follow-up the same day:
+- Nanothreads pinned to one CPU, helpers to the others (`HPIN`, now the phone-mode default): page 2 11.2 -> 18.1
+  fps. Still `IDLE 0`: the spinner animation is not paced, it draws as fast as the CPU allows, so speed alone does
+  not free the CPU. With pinning the loaders sometimes win the race (one of two pinned runs showed the widgets on
+  page 2 without leaving it; no unpinned run did).
+- What alfredserver does per frame (`IPCFN`, synchronous sends per thread and function, 20 s): ~50,000 sends
+  (2,540/s in pairs, ~140 per frame), homescreen ~20,000; `ChunkBase` exec 114,000/s. ROM behaviour: hosted only
+  sets the price of each call.
+- Next: what paces alfredserver's frames on the phone (refresh timer, surface-update completion, vsync), and whether
+  our display path completes too early; then the remaining per-call costs (GL request wait with interrupts off,
+  `ChunkBase` and the trace trampoline).
+
+**Fixed (2026-11-13, evening): pacing.** The device answered EGL window swaps at once (swap interval 0), so nothing
+paced alfredserver's frames; and a GL request spun with interrupts disabled, so nothing else ran during the host's GL
+work. Now a thread's GL request waits blocked (hgl.cpp) and the hosted GL server answers a swap at the next 60 Hz
+vsync (glserver `--vsync-hz`), as on the phone. Page 2 (two runs, settled 90 s and 20 s): the widgets load, the
+CPU is idle 93-97%. ui_compare (medians of 3): Menu open 109 ms / settled 0.93 s (was 140 ms / 1.17 s), close
+0.43 s (0.52), Calendar 162 ms / 0.76 s (179 ms / 0.94 s).
+
+**The notification drawer and later home pages (2026-11-13, evening): no hidden stall; the frame pipeline itself.**
+Traced with new tools: `--env SCHEDTRACE=1` (every thread switch on Ctrl+P), `--env GLTRACE=1` (every GL round trip and
+every composed frame, same clock), `IPCFN` lines now name the target server, `SYBORG_GL_STATS=1` on the GL server
+prints GPU memory per process (what GOOM reads) and every VG call by function, `GLSERVER_ARGS` passes options to
+htest's GL server. Findings for one drawer pull (4-9 frames in ~1.3 s):
+- The CPU is busy for the whole animation (no idle gap between frames): ~150 ms of CPU per frame, spread over
+  akncapserver, fbserv, Wserv and alfredserver. Not a wait, not the vsync pacing (`--vsync-hz 0`: the same frames).
+- GPU memory in use stays at 2.6 of 128 MB (GOOM has no reason to act).
+- Per frame: one `vgImageSubData` of ~200,000 pixels (a near-full-screen image drawn in software and uploaded),
+  ~20 `vgGetMatrix` round trips (a client-side query on the phone's driver, a host round trip here), ~125
+  `EFbsMessBitmapDuplicate` + `EFbsMessClose` pairs from alfredserver to fbserv (akncapserver ~40).
+- QEMU's GL device shows the same per-frame pattern (`vgImageSubData` ~160,000 pixels per frame, the same call mix):
+  the ROM's normal path on our GL device, not a hosted-only fault. Hosted pays more per step.
+Leads: answer `vgGetMatrix` (and other pure state queries) in the guest without a round trip; the guest's
+`eglClientWaitSyncKHR` and endpoint poller sleep 20/16 ms (31.25 ms with the 1/64 s tick) between asks
+(GOOM polls a sync every 31 ms).
+- Done (same evening): `vgGetMatrix` answered in the guest from a bit-exact copy of the matrix state
+  (src/khr/vgshadow.cpp; KEEP IN SYNC with the host RI, tests/vgshadow_test.py): its host calls went from ~150 a second
+  during the UI tour to 0. Page 2 animated 50 frames in 5 s (was 36-40); the drawer is unchanged (4-5 frames): its
+  time is the software drawing and the fbserv round trips.
+- Measured before building the event-driven sync/endpoint waits: during a UI tour the guest's EGL calls are only
+  MakeCurrent and SwapBuffers (one each a frame) and GOOM's eglClientWaitSyncKHR poll (32 a second, constant); no
+  endpoint calls. Neither poller is in the UI path: an event-driven sync wait would only save GOOM's idle wake-ups
+  (worth it on the Pixel for battery, not for frames). A thread hand-over costs ~10 us (t_thread, TCG, with or without
+  HPIN); the drawer makes ~10,000 a second: ~10% of its CPU, the one-host-thread scheduler's (future.md 3) share.
+- Is the per-frame software drawing + full-screen upload ours? Since boot alfredserver creates one window surface
+  and one context, never a pbuffer or pixmap surface, although huirenderpluginvg.dll has offscreen classes
+  (CHuiVg10CanvasRenderBuffer, CHuiFxVg10OffscreenRenderbuffer). Tried: advertising the real phone's full EGL
+  extension list (the N8 eglprobe's 14 + image_endpoint, build/evidence/eglprobe) through the GL server's
+  --identity: no change (same EGL calls, same upload per frame, same drawer frames). So the extension string is not
+  the gate. huirenderpluginvg's only extension name, EGL_NOK_window_type_eglwindowbase, picks the window surface's
+  native type (eglwindow.dll vs RWindow), not offscreen rendering. Open: what makes it render Avkon windows in
+  software (a config/central-repository setting, a capability query, or the ROM's normal path).

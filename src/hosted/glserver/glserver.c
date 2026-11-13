@@ -40,6 +40,12 @@ static int64_t now_ns(void)
     return (int64_t)t.tv_sec * 1000000000 + t.tv_nsec;
 }
 
+/* --vsync-hz N (default 60, 0: off): a request that ran an EGL window swap answers at the next vsync */
+static int VsyncHz = 60;
+extern uint32_t syborg_gl_presents;
+static uint32_t SeenPresents;
+static uint64_t StPaced;
+
 /* poll a word until it equals a value: spin a while (latency under TCG), then sleep in small steps */
 static int wait_eq(int i, uint32_t v, int64_t timeout_ns)
 {
@@ -290,8 +296,10 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--egl-configs") && v) { s->egl_configs = slurp_arg(v); i++; }
         else if (!strcmp(argv[i], "--gpu-memory-mb") && v) { s->gpu_mem_mb = atoi(v); i++; }
         else if (!strcmp(argv[i], "--msaa") && v) { s->msaa = atoi(v); i++; }
+        else if (!strcmp(argv[i], "--frame-file") && v) { s->frame_file = slurp_arg(v); i++; }   /* as QEMU's: FSEQ counter */
         else if (!strcmp(argv[i], "--quiet")) { Quiet = 1; }
-        else { fprintf(stderr, "usage: glserver --chan FILE [--identity F] [--egl-configs F] [--gpu-memory-mb N] [--msaa N]\n"); return 2; }
+        else if (!strcmp(argv[i], "--vsync-hz") && v) { VsyncHz = atoi(v); i++; }
+        else { fprintf(stderr, "usage: glserver --chan FILE [--identity F] [--egl-configs F] [--gpu-memory-mb N] [--msaa N] [--vsync-hz N]\n"); return 2; }
     }
     if (!chan) {
         fprintf(stderr, "glserver: --chan FILE needed\n");
@@ -319,10 +327,16 @@ int main(int argc, char **argv)
     uint32_t seen = ld(GLCHAN_W_REQ_SEQ);
     st(GLCHAN_W_RESP_SEQ, seen);
     int64_t last_frame = 0;
+    uint32_t last_seq = 0;
     for (unsigned idle = 0;;) {
+        /* publish each composed frame as soon as it is complete (its frame-file sequence turns even and new);
+           without a frame file, every 16 ms as before. 2026-11-13 (tools/ui_compare.py): the 16 ms poll plus two
+           more polling stages showed about half the composed frames in the hosted window */
         int64_t now_ms = qemu_clock_get_ms(QEMU_CLOCK_REALTIME);
-        if (now_ms - last_frame >= 16) {
+        uint32_t fseq = s->frame_seq ? qatomic_read(&s->frame_seq[1]) : 0;
+        if (s->frame_seq ? (fseq != last_seq && !(fseq & 1)) : now_ms - last_frame >= 16) {
             last_frame = now_ms;
+            last_seq = fseq;
             publish_frame();
         }
         uint32_t seq = ld(GLCHAN_W_REQ_SEQ);
@@ -392,6 +406,20 @@ int main(int argc, char **argv)
         }
         InRequest = 0;
         PfN = 0;
+        /* an EGL window swap answers at the next vsync, as on the phone (eglSwapBuffers, swap interval 1): the
+           requester waits blocked meanwhile (hgl.cpp) and other threads run. 2026-11-13: unpaced, the 808's
+           home-screen spinners took the whole CPU and the widgets' loaders never ran */
+        if (VsyncHz > 0 && syborg_gl_presents != SeenPresents) {
+            SeenPresents = syborg_gl_presents;
+            int64_t period = 1000000000ll / VsyncHz, t = now_ns(), next = (t / period + 1) * period;
+            while ((t = now_ns()) < next) {
+                if (next - t > 200000) {
+                    struct timespec d = { 0, next - t - 150000 };
+                    nanosleep(&d, NULL);
+                }
+            }
+            StPaced++;
+        }
         st(GLCHAN_W_RESP_VALUE, (uint32_t)v);
         st(GLCHAN_W_RESP_SEQ, seq);
     }

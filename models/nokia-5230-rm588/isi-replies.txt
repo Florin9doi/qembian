@@ -1,0 +1,1 @@
+# Fake-modem replies of the 5230 (RM-588) that differ from the shared table (platform/isi/replies-bb5.txt): none yet.

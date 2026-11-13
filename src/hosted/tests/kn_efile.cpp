@@ -41,6 +41,7 @@ static const char* strstr_(const char* h, const char* n);
 #define strstr strstr_
 static TBool WasSeen(const char* aPart);
 static void LocalWindowTest();
+static void WsdMapTest();
 static void PhysicalCommitTest();
 extern TLinAddr HostedPhysicalToLinear(TPhysAddr aPhys, TUint32 aSize);
 static TBool HasPart(const char* aName, const char* aPart);
@@ -246,7 +247,15 @@ static void ProbeFn(TAny*)
 	// bug 2026-11-12: ARMv6K phones' user stacks started 4 mod 8 (varargs read the wrong slot: the 808's SQLite
 	// formatted 3 as "12884901891" and took every database for corrupt)
 	HCHECK(HostedUserSpMisaligned == 0, "user threads entered with sp mod 8 as the phone's kernel (ckernel.cia) leaves it (%u differ)", HostedUserSpMisaligned);
+	// 2026-11-13: GL requests from threads wait blocked (hgl.cpp), as for a GPU: other threads run meanwhile (the 808's
+	// home-screen spinners spun with interrupts off and starved the widgets' loaders). The phone booted with it.
+	if (hgetenv("GLCHAN") && !hgetenv_hex("GLSPIN", 0))
+		{
+		extern TUint32 HostedGlBlocked;
+		HCHECK(HostedGlBlocked > 0, "GL requests waited blocked (%u)", HostedGlBlocked);
+		}
 	LocalWindowTest();
+	WsdMapTest();
 	PhysicalCommitTest();
 	extern void HostedProfileReport();
 	HostedProfileReport();
@@ -390,7 +399,9 @@ static TBool WasSeen(const char* aPart)
 extern TInt HostedLocalForceUnit;
 extern TInt HostedLocalFreeUnit(TInt aUnits);
 extern void LocalSwitch(DWin32Process* aProcess);
-extern TUint32 HostedLocalDisplaced, HostedLocalCopies, HostedLocalSharedAddr;
+extern TUint32 HostedLocalDisplaced, HostedLocalCopies, HostedLocalSharedAddr, HostedLocalScanned;
+extern TUint32 HostedLocalCostAt(TInt aStart, TInt aUnits), HostedLocalHotAt(TInt aStart, TInt aUnits);
+extern TInt HostedLocalUnitsFor(DProcess* aA, DProcess* aB, TInt aUnits);
 
 static DChunk* MakeLocal(DProcess* aProcess, TInt aMax, TInt aCommit)
 	{
@@ -434,10 +445,13 @@ static void LocalWindowTest()
 	DProcess* b = user[1];
 	DThread* ta = _LOFF(a->iThreadQ.First(), DThread, iProcessLink);
 	DThread* tb = _LOFF(b->iThreadQ.First(), DThread, iProcessLink);
-	// two processes' chunks at the same address, each with its own contents
-	HostedLocalForceUnit = HostedLocalFreeUnit(2);
-	DChunk* x = MakeLocal(a, 0x20000, 0x2000);
-	DChunk* y = MakeLocal(b, 0x20000, 0x2000);
+	// two processes' chunks at the same address, each with its own contents (4 MB maxima, 2 pages committed)
+	TInt xu = HostedLocalUnitsFor(a, b, 64);		// the window is full by now: units other processes may share
+	TUint32 hot0 = xu >= 0 ? HostedLocalHotAt(xu, 64) : 0, margin0 = xu >= 0 ? HostedLocalHotAt(xu + 1, 16) : 0,
+	        beyond0 = xu >= 0 ? HostedLocalHotAt(xu + 17, 47) : 0;
+	HostedLocalForceUnit = xu;
+	DChunk* x = MakeLocal(a, 0x400000, 0x2000);
+	DChunk* y = MakeLocal(b, 0x400000, 0x2000);
 	HostedLocalForceUnit = -1;
 	HCHECK(x && y && x->Base() == y->Base() && (TLinAddr)x->Base() >= 0x01000000 && (TLinAddr)x->Base() < 0x3f000000,
 	       "local chunks of two processes at one address (%08x, %08x)", x ? x->Base() : 0, y ? y->Base() : 0);
@@ -449,11 +463,15 @@ static void LocalWindowTest()
 		TInt r1 = Kern::ThreadRawRead(ta, at, &ra, 4), r2 = Kern::ThreadRawRead(tb, at, &rb, 4);
 		HCHECK(!w1 && !w2 && !r1 && !r2 && ra == va && rb == vb, "each process reads back its own word (%x %x; %d %d %d %d)",
 		       ra, rb, w1, w2, r1, r2);
-		TUint32 d0 = HostedLocalDisplaced;
+		TUint32 d0 = HostedLocalDisplaced, s0 = HostedLocalScanned;
 		NKern::Lock();
 		LocalSwitch((DWin32Process*)b);
 		NKern::Unlock();
 		HCHECK(*(volatile TUint32*)at == vb && HostedLocalDisplaced > d0, "switching to the second maps its page there");
+		// bug 2026-11-13: a switch-in tested every page of the chunk's maximum (1024 here; 13,000 for the 808 home
+		// screen's heap, ~16% of the CPU on home page 2): only the displaced pages now
+		HCHECK(HostedLocalScanned - s0 <= 2, "the switch-in walked %u pages (2 displaced, 1024 reserved)",
+		       HostedLocalScanned - s0);
 		ra = 0;
 		HCHECK(Kern::ThreadRawRead(ta, at, &ra, 4) == KErrNone && ra == va, "the first one's word through its file meanwhile");
 		NKern::Lock();
@@ -464,10 +482,23 @@ static void LocalWindowTest()
 		HCHECK(Kern::ThreadRawRead(ta, at, &ra, 4) == KErrBadDescriptor, "a decommitted page refuses a copy");
 		HCHECK(Kern::ThreadRawRead(tb, at, &rb, 4) == KErrNone && rb == vb, "the other process's page is untouched");
 		}
+	// bug 2026-11-13 (placement): the units a chunk committed, plus a margin, count as hot for chunks placed later
+	// on shared addresses (the 808 home screen's heap went over AknIconSrv's growing one: fewest pages mapped *then*)
+	if (x && xu >= 0)
+		{
+		// each committed one unit: hot are that unit and 16 more (the margin's minimum), for both chunks
+		TUint32 m = HostedLocalHotAt(xu + 1, 16), beyond = HostedLocalHotAt(xu + 17, 47);
+		HCHECK(m == margin0 + 32 && beyond == beyond0 && HostedLocalCostAt(xu + 1, 16) >= 32 * 16,
+		       "the 16 units above two chunks' committed pages are hot, none beyond: %u -> %u, %u -> %u", margin0, m,
+		       beyond0, beyond);
+		}
 	if (x)
 		x->Close(NULL);
 	if (y)
 		y->Close(NULL);
+	if (xu >= 0)
+		HCHECK(HostedLocalHotAt(xu, 64) == hot0, "closed chunks leave no heat behind (%u, before them %u)",
+		       HostedLocalHotAt(xu, 64), hot0);
 	// full maxima: two 34 MB heaps per process, more than the window holds without sharing addresses
 	DChunk* big[96];
 	TInt made = 0, failed = 0;
@@ -488,6 +519,79 @@ static void LocalWindowTest()
 	           HostedLocalCopies, HostedLocalSharedAddr);
 	}
 
+
+// ---- large DLL data swapped by mapping (bug 2026-11-13: libc's 64 KB .data/.bss copied out and in on every process
+// switch, 13% of the CPU on the 808's home page 2). Checked in the unused bytes after .bss in the last page.
+extern TUint32 HostedWsdMaps;
+static void WsdMapTest()
+	{
+	DObjectCon& procs = *K::Containers[EProcess];
+	procs.Wait();
+	DWin32Process* live = NULL;
+	DWin32Process* other = NULL;
+	SProcessDllDataBlock bl = {0, 0, 0, -1}, bo = {0, 0, 0, -1};
+	for (TInt i = 0; i < procs.Count() && !other; ++i)
+		{
+		DWin32Process* p = (DWin32Process*)procs[i];
+		for (TInt k = 0; k < p->iDllData.Count(); ++k)
+			{
+			SProcessDllDataBlock& d = p->iDllData[k];
+			DWin32CodeSeg* s = d.iCodeSeg;
+			if (d.iFd < 0 || ((s->iRealDataSize + s->iRealBssSize) & 0xfff) == 0 || s->iLiveProcess != p)
+				continue;
+			// a second process with the same DLL
+			for (TInt j = 0; j < procs.Count() && !other; ++j)
+				{
+				DWin32Process* q = (DWin32Process*)procs[j];
+				if (q == p)
+					continue;
+				TInt ix = q->iDllData.FindInUnsignedKeyOrder(d);
+				if (ix >= 0)
+					{
+					live = p;
+					other = q;
+					bl = d;
+					bo = q->iDllData[ix];
+					}
+				}
+			if (other)
+				break;
+			}
+		}
+	if (!other)
+		{
+		procs.Signal();
+		htest_note("WSD map test: no DLL with mapped data in two processes (skipped)");
+		return;
+		}
+	DWin32CodeSeg* seg = bl.iCodeSeg;
+	TInt slack = seg->iRealDataSize + seg->iRealBssSize;		// offset of the unused bytes in the file
+	volatile TUint32* at = (volatile TUint32*)((seg->iDataDest + slack + 3) & ~3u);
+	TInt off = (TLinAddr)at - (seg->iDataDest & ~0xfffu);
+	volatile TUint32* vl = (volatile TUint32*)(((TLinAddr)bl.iDataCopy & ~0xfffu) + off);
+	volatile TUint32* vo = (volatile TUint32*)(((TLinAddr)bo.iDataCopy & ~0xfffu) + off);
+	HCHECK(HostedWsdMaps > 0, "large DLL data switched by mapping (%u maps)", HostedWsdMaps);
+	TBool fits = ((TLinAddr)at & 0xfff) <= 0xffc;
+	if (fits)
+		{
+		NKern::Lock();
+		*vl = 0x11aa11aa;
+		*vo = 0x22bb22bb;
+		TUint32 r1 = *at;
+		MM::DoProcessSwitch(other);
+		TUint32 r2 = *at;
+		*at = 0x33cc33cc;							// a write at the DLL's address while the other one is live
+		TUint32 r3 = *vo;
+		MM::DoProcessSwitch(live);
+		TUint32 r4 = *at;
+		*vl = *vo = 0;
+		NKern::Unlock();
+		HCHECK(r1 == 0x11aa11aa && r2 == 0x22bb22bb && r3 == 0x33cc33cc && r4 == 0x11aa11aa,
+		       "DLL data (%d bytes): each process's file at the DLL's address after a switch (%x %x %x %x)", slack,
+		       r1, r2, r3, r4);
+		}
+	procs.Signal();
+	}
 
 // ---- physical commits (bug 2026-11-12: Kern::ChunkCommitPhysical failed, KErrNotSupported; the 808's audio
 // stand-in got no DSP window, the audio engine panicked, start-up waited on its tone with the animation shown)
@@ -531,12 +635,188 @@ static TDfc* ProbeDfc;
 static NTimer* ProbeTimer;
 static void ProbeTimerFn(TAny*) { ProbeDfc->Enque(); }
 
+struct SLocalStat { DProcess* iProcess; TUint32 iSwitchMaps, iScanned, iDisplaced; };	// mlocal.cpp
+extern SLocalStat HostedLocalStats[16];
+
+// ---- IPC latency sampler (htest --phone --env IPCSTAT=1): every 5 ms, the kernel's message pool (K::MsgInfo: 128-byte
+// RMessageK slots) is read under the system lock; each message is followed from delivered (queued at the server) to
+// accepted (the server works on it) to free (completed). Per server and function: messages seen, ms queued and ms
+// served (sum, max). Messages shorter than one period are mostly missed: this finds the slow ones. Ctrl+P prints
+// the worst, slowest total first (IPCSTAT lines), and starts a new window.
+struct SIpcFn { TUint32 iThread, iFunction, iCount, iServer; };	// vectors.cpp
+extern SIpcFn HostedIpcFn[1024];
+extern TUint32 (*HostedSendTarget)(TInt aHandle);
+// the server behind a session handle of the current thread (IPCFN lines)
+static TUint32 SendTarget(TInt aHandle)
+	{
+	NKern::LockSystem();
+	DSession* s = (DSession*)TheCurrentThread->ObjectFromHandle(aHandle, ESession);
+	TUint32 r = s ? (TUint32)s->iServer : 0;
+	NKern::UnlockSystem();
+	return r;
+	}
+struct SIpcSlot { DSession* iSession; TInt iFunction; TUint32 iDeliv, iAcc, iLast; TUint8 iState; };
+struct SIpcStat { DServer* iServer; TInt iFunction; TUint32 iCount, iQueuedMs, iServedMs, iMaxMs, iOpen; };
+static const TInt KIpcSlots = 4096, KIpcStats = 512, KIpcPeriodMs = 5;
+static SIpcSlot* IpcSlots;
+static SIpcStat IpcStats[KIpcStats];
+static TDfc* IpcDfc;
+static NTimer* IpcTimer;
+
+static SIpcStat* IpcStat(DServer* aServer, TInt aFunction)
+	{
+	for (TInt i = 0; i < KIpcStats; ++i)
+		if (!IpcStats[i].iServer || (IpcStats[i].iServer == aServer && IpcStats[i].iFunction == aFunction))
+			{
+			IpcStats[i].iServer = aServer;
+			IpcStats[i].iFunction = aFunction;
+			return &IpcStats[i];
+			}
+	return NULL;
+	}
+
+static void IpcFinish(SIpcSlot& aSlot)
+	{
+	if (!aSlot.iState || !aSlot.iSession)
+		return;
+	SIpcStat* st = IpcStat(aSlot.iSession->iServer, aSlot.iFunction);
+	if (st)
+		{
+		TUint32 q = aSlot.iAcc ? aSlot.iAcc - aSlot.iDeliv : aSlot.iLast - aSlot.iDeliv;
+		TUint32 sv = aSlot.iAcc ? aSlot.iLast - aSlot.iAcc : 0;
+		++st->iCount;
+		st->iQueuedMs += q;
+		st->iServedMs += sv;
+		if (q + sv > st->iMaxMs)
+			st->iMaxMs = q + sv;
+		}
+	aSlot.iState = 0;
+	}
+
+static void IpcSample(TAny*)
+	{
+	TUint32 now = (TUint32)(hnow_ns() / 1000000);
+	NKern::LockSystem();
+	TInt n = Min((TInt)(K::MsgInfo.iCurrSize / RMessageK::KMessageSize), KIpcSlots);
+	for (TInt i = 0; i < n; ++i)
+		{
+		RMessageK* m = (RMessageK*)(K::MsgInfo.iBase + i * RMessageK::KMessageSize);
+		SIpcSlot& sl = IpcSlots[i];
+		TLinAddr nx = (TLinAddr)m->iServerLink.iNext;
+		TUint8 state = !nx || nx == 2 ? 0 : (nx & 3) == 3 ? 2 : (nx & 3) == 0 ? 1 : 0;	// 1 delivered, 2 accepted
+		if (state && sl.iState && (sl.iSession != m->iSession || sl.iFunction != m->iFunction || state < sl.iState))
+			IpcFinish(sl);								// the slot holds another message now
+		if (!state)
+			{
+			IpcFinish(sl);
+			continue;
+			}
+		if (!sl.iState)
+			{
+			sl.iSession = m->iSession;
+			sl.iFunction = m->iFunction;
+			sl.iDeliv = now;
+			sl.iAcc = 0;
+			}
+		if (state == 2 && !sl.iAcc)
+			sl.iAcc = now;
+		sl.iState = state;
+		sl.iLast = now;
+		}
+	NKern::UnlockSystem();
+	IpcTimer->Again(KIpcPeriodMs);
+	}
+
+static void IpcTimerFn(TAny*) { IpcDfc->Enque(); }
+
+static void IpcReport()
+	{
+	if (!IpcSlots)
+		return;
+	TUint32 now = (TUint32)(hnow_ns() / 1000000);
+	// messages still open count with their age so far (a request that never completes is the worst of all)
+	NKern::LockSystem();
+	for (TInt i = 0; i < KIpcSlots; ++i)
+		if (IpcSlots[i].iState && IpcSlots[i].iSession)
+			{
+			SIpcStat* st = IpcStat(IpcSlots[i].iSession->iServer, IpcSlots[i].iFunction);
+			if (st)
+				{
+				++st->iOpen;
+				if (now - IpcSlots[i].iDeliv > st->iMaxMs)
+					st->iMaxMs = now - IpcSlots[i].iDeliv;
+				}
+			}
+	NKern::UnlockSystem();
+	DObjectCon& servers = *K::Containers[EServer];
+	servers.Wait();
+	for (TInt k = 0; k < 40; ++k)
+		{
+		SIpcStat* best = NULL;
+		for (TInt i = 0; i < KIpcStats && IpcStats[i].iServer; ++i)
+			{
+			SIpcStat& st = IpcStats[i];
+			if (st.iCount + st.iOpen && (!best || st.iQueuedMs + st.iServedMs + st.iMaxMs * st.iOpen >
+			                                      best->iQueuedMs + best->iServedMs + best->iMaxMs * best->iOpen))
+				best = &st;
+			}
+		if (!best)
+			break;
+		char n[64] = "(gone)";
+		for (TInt j = 0; j < servers.Count(); ++j)
+			if (servers[j] == best->iServer)
+				Name(best->iServer, n, sizeof n);
+		htest_note("IPCSTAT %s fn %d: %u done (%u ms queued, %u ms served, avg %u ms), max %u ms, %u still open", n,
+		           best->iFunction, best->iCount, best->iQueuedMs, best->iServedMs,
+		           best->iCount ? (best->iQueuedMs + best->iServedMs) / best->iCount : 0, best->iMaxMs, best->iOpen);
+		best->iCount = best->iOpen = 0;			// printed: out of the next picks
+		best->iQueuedMs = best->iServedMs = best->iMaxMs = 0;
+		}
+	servers.Signal();
+	memset(IpcStats, 0, sizeof IpcStats);
+	// synchronous sends per thread and function since the last Ctrl+P, the most frequent first
+	for (TInt k = 0; k < 30; ++k)
+		{
+		TInt b = -1;
+		for (TInt i = 0; i < 1024; ++i)
+			if (HostedIpcFn[i].iCount && (b < 0 || HostedIpcFn[i].iCount > HostedIpcFn[b].iCount))
+				b = i;
+		if (b < 0)
+			break;
+		char sn[48] = "?";
+		DObjectCon& svs = *K::Containers[EServer];
+		svs.Wait();
+		for (TInt j = 0; j < svs.Count(); ++j)
+			if ((TUint32)svs[j] == HostedIpcFn[b].iServer)
+				Name(svs[j], sn, sizeof sn);
+		svs.Signal();
+		hprintf("IPCFN %08x fn %08x %u to %s\n", HostedIpcFn[b].iThread, HostedIpcFn[b].iFunction, HostedIpcFn[b].iCount, sn);
+		HostedIpcFn[b].iCount = 0;
+		}
+	memset(HostedIpcFn, 0, sizeof HostedIpcFn);
+	}
+
 static TDfc* PhoneDiagDfc;
 static NTimer* PhoneTimer;
 extern volatile TUint32* HostedDisplayShm();
 static void PhoneDiag(TAny*)
 	{
 	hprintf("PHONEDIAG begin\n");
+	// htest --env PROFILE=1: the CPU samples since the previous Ctrl+P (the first one opens the window), reported
+	// before anything is printed here (bug 2026-11-13: the trace dumps' own printing counted as the phone's CPU)
+	extern TBool HostedProfileOn();
+	extern void HostedProfileReport();
+	extern void HostedProfileReset();
+	if (HostedProfileOn())
+		HostedProfileReport();
+	// the null thread's time since the previous Ctrl+P: is the phone short of CPU?
+	extern volatile TUint64 HostedIdleNs;
+	static TUint64 Idle0, Wall0;
+	TUint64 idle = HostedIdleNs, wall = hnow_ns();
+	if (Wall0)
+		htest_note("IDLE %u ms of %u ms", (TUint32)((idle - Idle0) / 1000000), (TUint32)((wall - Wall0) / 1000000));
+	Idle0 = idle;
+	Wall0 = wall;
 	ServersReport();
 	DObjectCon& threads = *K::Containers[EThread];
 	threads.Wait();
@@ -552,8 +832,69 @@ static void PhoneDiag(TAny*)
 			Name((DObject*)t->iWaitObj, w, sizeof w);
 		if (t->iNThread.iNState != NThreadBase::EReady)
 			htest_note("thread %s: nstate %d wait %s", n, t->iNThread.iNState, w);
+		else
+			htest_note("READY %s: priority %d", n, t->iNThread.iPriority);
+		}
+	// every thread's nanothread (profsym names the profile's per-thread samples with these)
+	for (TInt i = 0; i < threads.Count(); ++i)
+		{
+		DThread* t = (DThread*)threads[i];
+		if (t->iExitType != EExitPending)
+			continue;
+		char n[96];
+		Name(t, n, sizeof n);
+		hprintf("THREADMAP %08x %s\n", (TUint32)&t->iNThread, n);
 		}
 	threads.Signal();
+	// the local window since the previous Ctrl+P: per process, the mmaps and pages scanned when it switched in, and how
+	// often its pages were displaced by another process
+	DObjectCon& procs = *K::Containers[EProcess];
+	procs.Wait();
+	for (TInt i = 0; i < 16 && HostedLocalStats[i].iProcess; ++i)
+		{
+		SLocalStat& st = HostedLocalStats[i];
+		char n[96] = "(gone)";
+		for (TInt j = 0; j < procs.Count(); ++j)
+			if (procs[j] == st.iProcess)
+				Name(st.iProcess, n, sizeof n);
+		htest_note("LOCALSTAT %s: %u switch-in maps, %u pages scanned, %u pages displaced", n, st.iSwitchMaps,
+		           st.iScanned, st.iDisplaced);
+		}
+	procs.Signal();
+	memset(HostedLocalStats, 0, sizeof HostedLocalStats);
+	// DLL static data swapped on process switches since the previous Ctrl+P, the busiest first
+	DCodeSeg::Wait();
+	for (TInt k = 0; k < 12; ++k)
+		{
+		DWin32CodeSeg* best = NULL;
+		for (SDblQueLink* l = DCodeSeg::GlobalList.First(); l != &DCodeSeg::GlobalList.iA; l = l->iNext)
+			{
+			DWin32CodeSeg* cs = (DWin32CodeSeg*)_LOFF(l, DCodeSeg, iLink);
+			if (cs->iWsdSwaps && (!best || cs->iWsdSwaps > best->iWsdSwaps))
+				best = cs;
+			}
+		if (!best)
+			break;
+		char n[64];
+		TInt l = Min(best->iRootName.Length(), 63);
+		for (TInt i = 0; i < l; ++i)
+			n[i] = (char)best->iRootName[i];
+		n[l] = 0;
+		htest_note("WSDSTAT %s: %u swaps, %d bytes (%s)", n, best->iWsdSwaps, best->iRealDataSize + best->iRealBssSize,
+		           best->iWsdMap ? "mapped" : "copied");
+		best->iWsdSwaps = 0;
+		}
+	for (SDblQueLink* l = DCodeSeg::GlobalList.First(); l != &DCodeSeg::GlobalList.iA; l = l->iNext)
+		((DWin32CodeSeg*)_LOFF(l, DCodeSeg, iLink))->iWsdSwaps = 0;
+	DCodeSeg::Signal();
+	IpcReport();
+	extern void HostedGlTraceDump();
+	HostedGlTraceDump();
+	extern void HostedSchedTraceDump();
+	HostedSchedTraceDump();
+	// the next window starts now: samples taken while this diagnosis printed (its traces) are not the phone's
+	if (HostedProfileOn())
+		HostedProfileReset();
 	hprintf("PHONEDIAG end\n");
 	}
 
@@ -581,6 +922,17 @@ static TInt ProbeEntry(TInt aReason)
 		PhoneDiagDfc = new TDfc(&PhoneDiag, 0, K::DfcQ0, 3);
 		PhoneTimer = new NTimer(&PhoneTimerFn, 0);
 		PhoneTimer->OneShot(500, ETrue);
+		if (hgetenv("IPCSTAT"))
+			{
+			extern TUint32 HostedIpcExec;
+			HostedIpcExec = hgetenv_hex("IPCEXEC", 0x4f);		// the 808's synchronous send (EXECTOP, DoSendReceive)
+			HostedSendTarget = &SendTarget;
+			IpcSlots = (SIpcSlot*)Kern::AllocZ(sizeof(SIpcSlot) * KIpcSlots);
+			IpcDfc = new TDfc(&IpcSample, 0, K::DfcQ0, 2);
+			IpcTimer = new NTimer(&IpcTimerFn, 0);
+			if (IpcSlots && IpcDfc && IpcTimer)
+				IpcTimer->OneShot(KIpcPeriodMs, ETrue);
+			}
 		return KErrNone;
 		}
 	ProbeDfc = new TDfc(&ProbeFn, 0, K::DfcQ0, 3);

@@ -89,7 +89,8 @@ def main():
     d = tempfile.mkdtemp()
     path = os.path.join(d, 'gl.chan')
     open(path, 'wb').truncate(BYTES)
-    srv = subprocess.Popen([os.path.join(ROOT, 'build/hosted/glserver/glserver'), '--chan', path],
+    frames = path + '.frames'
+    srv = subprocess.Popen([os.path.join(ROOT, 'build/hosted/glserver/glserver'), '--chan', path, '--frame-file', frames],
                            stderr=subprocess.PIPE, text=True)
     c = Chan(path)
     t0 = time.time()
@@ -97,6 +98,9 @@ def main():
         time.sleep(0.01)
     check(c.get('MAGIC') == 0x434c4753 and c.get('UP') == 1, 'server up, channel magic')
     check(c.rd('ID') == 0xc51d0011, 'ID register: SYGL_ID')
+    # 2026-11-13: the composed-frame counter (as QEMU's syborg-gl.frame-file) drives publishing each frame at once
+    # and tools/ui_compare.py; before, the server published on a 16 ms timer and the window showed half the frames
+    check(os.path.exists(frames) and open(frames, 'rb').read(4) == b'FSEQ', '--frame-file: the FSEQ counter file')
     caps = c.rd('CAPS')
     if not caps & 1:
         print('  SKIP: no host GL here (CAPS %x)' % caps)
@@ -145,6 +149,24 @@ def main():
     check(any(va == kva + 16 and d == b'\0\0\0\0' for va, d in log), 'v3 kick: the result word is in the write log')
     c.wr('BUF', 0x12345678, user=1)
     check(c.rd('BUF') == PHYS, 'a user-mode write to a kernel register is refused')
+    # bug 2026-11-13 (pacing): EGL window swaps answered at once, so the 808's home-screen spinners drew back to back,
+    # took the whole CPU and starved the widgets' loaders. A run that presents (SYGL_VG_PRESENT) answers at the next
+    # vsync (default 60 Hz, as eglSwapBuffers with swap interval 1); a run without one is not held.
+    def run(cmds):
+        b = struct.pack('<%dI' % len(cmds), *cmds)
+        RAM[0:len(b)] = b
+        c.wr('BUF', PHYS); c.wr('LEN', len(b)); c.wr('OUTLEN', 0); c.wr('PID', 5); c.wr('FLAGS', 1)
+        c.wr('EXEC', 1)
+        return time.time()
+    present = [8, 3, 5, 13, 7, 0x77, 1, 2, 3, 4]       # OWNER 5; VG_PRESENT surf 0x77 (none: a no-op swap) -> sid
+    plain = [8, 3, 5]
+    done = [run(present) for _ in range(5)]
+    gaps = [b - a for a, b in zip(done, done[1:])]
+    check(min(gaps) > 0.012, 'presenting runs answer one vsync apart (gaps %s ms)' % [round(g * 1000) for g in gaps])
+    t0 = time.time()
+    for _ in range(5):
+        run(plain)
+    check(time.time() - t0 < 0.05, 'runs without a present are not held (%d ms for 5)' % ((time.time() - t0) * 1000))
     c.put('MAGIC', 0)
     try:
         srv.wait(10)

@@ -123,13 +123,14 @@ SIS_ERRORS = {   # Software Install results (appinstall swi/inc/swi/sisinstaller
 HOOK_EXE = os.path.join(ROOT, 'build', 'n95apps', 'boothook.exe')  # the boot hook (docs/agent-autostart.md)
 
 
-def hook_name():
-    """the program of this firmware's EStart the boot hook stands in for (device.py boot_hook_name)"""
+def hook_name(required=True):
+    """the program of this firmware's EStart the boot hook stands in for (device.py boot_hook_name); None when
+    there is none and not required (Sony Ericsson P1i: EStart and SysStart start everything by z: path)"""
     try:
         n = devmodel.boot_hook_name(devmodel.load())
     except OSError:
         n = None
-    if not n:
+    if not n and required:
         die('no boot hook name for %s: its EStart starts none of %s (docs/agent-autostart.md)'
             % (DEVICE_ID, ', '.join(devmodel.BOOT_HOOK_NAMES)))
     return n
@@ -205,11 +206,16 @@ def cmd_install(sdir, a):
     # autostart, one mechanism on every OS generation (docs/agent-autostart.md): EStart starts
     # HALSettings.exe (9.2+) or LanguageSelection.exe (9.1) by bare name and the loader searches C: before
     # Z:, so the hook installed under that name starts the agent and then the real z: program
-    hook = hook_name()
+    hook = hook_name(required=False)
     for n in devmodel.BOOT_HOOK_NAMES:
         if n != hook:
             drive_rm(drives, '/sys/bin/' + n)
-    drive_put(drives, HOOK_EXE, '/sys/bin', name=hook)
+    if hook:
+        drive_put(drives, HOOK_EXE, '/sys/bin', name=hook)
+    else:
+        print('sydb: no boot hook for %s (its EStart starts none of %s by bare name): the agent is on C: but does '
+              'not start at boot; agent commands (ps, wg, strace) are unavailable' % (DEVICE_ID, ', '.join(devmodel.BOOT_HOOK_NAMES)),
+              file=sys.stderr)
     data = drive_read(drives, '/' + startlist.PATH)      # an older install's Starter record: the agent
     if data:                                             # would start twice
         new = startlist.remove(data, AGENT_PATH)
@@ -217,7 +223,7 @@ def cmd_install(sdir, a):
             drive_write(drives, '/' + startlist.PATH, new)
         else:
             drive_rm(drives, '/' + startlist.PATH)
-    print('installed devagent.exe + dafs.exe on C: and the boot hook c:\\sys\\bin\\%s' % hook)
+    print('installed devagent.exe + dafs.exe on C:' + (' and the boot hook c:\\sys\\bin\\%s' % hook if hook else ''))
 
 
 def cmd_uninstall(sdir, a):

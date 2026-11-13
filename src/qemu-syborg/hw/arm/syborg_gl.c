@@ -14,7 +14,7 @@
  *
  *   -global syborg-gl.backend=host   (default) use the host GPU when an EGL/GLES context opens
  *   -global syborg-gl.backend=off    no host GL: CAPS reads 0 and the guest rasterises in software
- *   -global syborg-gl.msaa=N         samples of OpenVG surfaces (default 8; 0 = no anti-aliasing)
+ *   -global syborg-gl.msaa=N         samples of OpenVG surfaces (default 4; 0 = no anti-aliasing)
  *   -global syborg-gl.frame-file=F   a 4 KB shared file: word 0 "FSEQ", word 1 a sequence bumped
  *                                    before and after each host-composed frame is written to the
  *                                    frame buffer (odd = writing): readers in other processes
@@ -997,6 +997,10 @@ static void refuse(SyborgGlState *s, const char *why, uint32_t a, uint32_t b)
                     gl_ex->auth_rights, a, b);
     }
 }
+
+/* EGL window swaps (SYGL_VG_PRESENT) run so far: the hosted GL server holds the answer of a request that presented
+   until the next vsync, as eglSwapBuffers with swap interval 1 on the phone (src/hosted/glserver/glserver.c) */
+uint32_t syborg_gl_presents;
 
 /* a user address space bound to its process by the kernel (SYGL_REG_BIND, d_display ctl 0x7f13) */
 typedef struct { uint64_t ttbr; uint32_t pid, rights; int shared; } SyglBind;
@@ -2288,6 +2292,43 @@ static uint32_t run(SyborgGlState *s)
                 "(sync read-back %.1f ms, async %" PRIu64 ", of which waited %" PRIu64 "), fills %" PRIu64 "\n",
                 s->st_kicks, s->st_kick_ns / 1e6, s->st_compose, s->st_compose_ns / 1e6,
                 s->st_read_ns / 1e6, s->st_async, s->st_async_wait, s->st_fills);
+        {   /* the numbers the guest's GPU memory monitor (GOOM) reads (EGL_NOK_resource_profiling) */
+            uint32_t own[16];
+            uint64_t by[16], used = 0;
+            int n = syborg_gl_mem_usage(own, by, 16, &used);
+            GString *m = g_string_new(NULL);
+            g_string_printf(m, "syborg-gl: GPU memory %.1f of %u MB in use by %d processes:", used / 1048576.0,
+                            (unsigned)(syborg_gl_mem_total() >> 20), n);
+            for (int k = 0; k < n && k < 16; k++) {
+                g_string_append_printf(m, " %u:%.1f", own[k], by[k] / 1048576.0);
+            }
+            fprintf(stderr, "%s\n", m->str);
+            g_string_free(m, TRUE);
+        }
+        {   /* every VG call since the last line (src/syvg/vg2_fn.h numbers) */
+            extern uint64_t syvg_fn_count[128], syvg_subdata_pixels;
+            static uint64_t last[128], lastpx;
+            GString *v = g_string_new("syborg-gl: VG calls (fn:count):");
+            for (int k = 0; k < 128; k++) {
+                if (syvg_fn_count[k] != last[k]) {
+                    g_string_append_printf(v, " %d:%" PRIu64, k, syvg_fn_count[k] - last[k]);
+                    last[k] = syvg_fn_count[k];
+                }
+            }
+            g_string_append_printf(v, "; vgImageSubData %.1f Mpixels", (syvg_subdata_pixels - lastpx) / 1e6);
+            extern uint64_t syvg_egl_fn_count[64];
+            static uint64_t elast[64];
+            g_string_append(v, "; EGL calls (fn:count):");
+            for (int k = 0; k < 64; k++) {
+                if (syvg_egl_fn_count[k] != elast[k]) {
+                    g_string_append_printf(v, " %d:%" PRIu64, k, syvg_egl_fn_count[k] - elast[k]);
+                    elast[k] = syvg_egl_fn_count[k];
+                }
+            }
+            lastpx = syvg_subdata_pixels;
+            fprintf(stderr, "%s\n", v->str);
+            g_string_free(v, TRUE);
+        }
         GString *e = g_string_new("syborg-gl: kicks ended by (VG fn / EGL 128+fn):");
         for (int k = 0; k < 160; k++) {
             if (s->st_end[k]) {
@@ -2409,6 +2450,7 @@ static uint32_t exec_range(SyborgGlState *s, size_t from, size_t total)
             if (!s->compose_host) return i + 1;
             if (n >= 5 && vg_present(s, a)) return i + 1;
             gl2_frame_end();                /* SYBORG_GL2_TRACE */
+            syborg_gl_presents++;           /* the hosted GL server paces these to vsync (glserver --vsync-hz) */
             break;
         case SYGL_COMPOSE: {            /* "compose" = guest: refused, gcebe copies the layers */
             if (!s->compose_host) return i + 1;
@@ -3058,10 +3100,10 @@ static char *gl_get_stats(Object *o, Error **errp)
 static void syborg_gl_instance_init(Object *o)
 {
     SyborgGlState *s = SYBORG_GL(o);
-    s->msaa = 8;
+    s->msaa = 4;                        /* 2026-11-13: was 8; the phone's own GPU offers at most 4x to EGL */
     s->compose_host = true;
     object_property_add(o, "msaa", "uint32", gl_get_msaa, gl_set_msaa, NULL, NULL);
-    object_property_set_description(o, "msaa", "OpenVG samples: 0 (off), 2, 4, 8 (default), 16; runtime");
+    object_property_set_description(o, "msaa", "OpenVG samples: 0 (off), 2, 4 (default), 8, 16; runtime");
     object_property_add_enum(o, "filter", "SyborgGlFilter", &filter_lookup, gl_get_filter, gl_set_filter);
     object_property_set_description(o, "filter", "image sampling: auto (VG image quality), nearest, linear; runtime");
     object_property_add_enum(o, "compose", "SyborgGlCompose", &compose_lookup, gl_get_compose, gl_set_compose);

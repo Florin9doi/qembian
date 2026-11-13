@@ -24,6 +24,8 @@
 #include <cstdio>
 #include <cstdlib>
 
+uint64_t syvg_egl_fn_count[64];
+
 using OpenVGRI::vgSetOwner;
 using OpenVGRI::khrHostFlush;
 using OpenVGRI::khrHostEmit;
@@ -602,6 +604,11 @@ extern "C" int syvg_egl_call(uint32_t owner, const uint32_t *w, size_t n, uint32
 			return -1;
 	}
 	Thread &t = T();
+	{
+		extern uint64_t syvg_egl_fn_count[64];      /* SYBORG_GL_STATS: every EGL call by function (syborg_gl.c) */
+		if (w[0] < 64)
+			syvg_egl_fn_count[w[0]]++;
+	}
 	if (w[0] != EGL2_FN_GetError)
 		t.err = EGL_SUCCESS;
 	switch (w[0]) {                     /* S6: a budget of EGL objects per process */

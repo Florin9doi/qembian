@@ -41,7 +41,7 @@ static inline long hsys6(long n, long a, long b, long c, long d, long e, long f)
 // ---- memory ----
 enum { PROT_NONE = 0, PROT_READ = 1, PROT_WRITE = 2, PROT_EXEC = 4,
        MAP_SHARED = 1, MAP_PRIVATE = 2, MAP_FIXED = 0x10, MAP_ANONYMOUS = 0x20,
-       MAP_NORESERVE = 0x4000, MAP_FIXED_NOREPLACE = 0x100000 };
+       MAP_NORESERVE = 0x4000, MAP_POPULATE = 0x8000, MAP_FIXED_NOREPLACE = 0x100000 };
 void *hmmap(void *addr, size_t len, int prot, int flags, int fd, uint32_t off);
 static inline int hmunmap(void *a, size_t n) { return hsys(SYS_munmap, a, n); }
 static inline int hmemfd(const char *name) { return hsys(SYS_memfd_create, name, 0); }
@@ -63,6 +63,10 @@ int hwait(int pid);                                           // exit code, or 1
 // a raw thread sharing the address space; fn runs on its own stack, returns -> thread exits.
 // *ctid is cleared and futex-woken when it exits (CLONE_CHILD_CLEARTID).
 int hthread(int (*fn)(void *), void *arg, void *stack, size_t stacksize, volatile int *ctid);
+// as hthread, the new thread's CPUs set to aCpus (0: inherited). hthread uses hthread_helper_cpus (lxhost HPIN: the
+// host helper threads stay off the CPU the nanothreads are pinned to)
+int hthread_on(int (*fn)(void *), void *arg, void *stack, size_t stacksize, volatile int *ctid, uint32_t cpus);
+extern uint32_t hthread_helper_cpus;
 void hthread_join(volatile int *ctid);
 
 // ---- futex (shared, i.e. without FUTEX_PRIVATE: works across processes on shared memory) ----

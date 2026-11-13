@@ -1,0 +1,18 @@
+qembian: a keep-in-sync note on the RI matrix functions: the guest copies them bit for bit (src/khr/vgshadow_math.h,
+vgGetMatrix answered without a host round trip). Applied by scripts/build-syvg.sh to its copy of the RI.
+
+--- a/riApi.cpp
++++ b/riApi.cpp
+@@ -1785,6 +1785,12 @@
+ * \note		
+ *//*-------------------------------------------------------------------*/
+ 
++// qembian: KEEP IN SYNC. The guest keeps a copy of each context's matrices and answers vgGetMatrix itself
++// (src/khr/vgshadow.cpp, the arithmetic in src/khr/vgshadow_math.h): vgLoadIdentity, vgLoadMatrix, vgMultMatrix,
++// vgTranslate, vgScale and vgShear below are redone there operation for operation (inputFloat, the order of
++// Matrix3x3's products, the forced affine row), and vgSeti(VG_MATRIX_MODE)'s check. Any change to these functions,
++// to inputFloat or to Matrix3x3's operator* must be made there too; tests/vgshadow_test.py compares both bit for bit.
++// vgRotate is not copied (sin/cos differ between libms): the guest asks the host after one.
+ static Matrix3x3* getCurrentMatrix(VGContext* context)
+ {
+ 	RI_ASSERT(context);

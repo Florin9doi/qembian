@@ -153,12 +153,41 @@ static void ThreadExit(NThread& aCurrent, NThread& aNext)
 
 volatile TUint32 HostedSwitches;		// host thread hand-overs (speed measurements)
 
+// htest --env SCHEDTRACE=1: every switch (time, from, to) in a ring of 16384, printed by HostedSchedTraceDump
+// (Ctrl+P, kn_efile): who ran when, and who ran just before a thread woke (its waker, usually)
+struct SSchedTrace { TUint32 iUs, iFrom, iTo; };
+static SSchedTrace SchedRing[16384];
+static TUint32 SchedRingN;
+static TInt SchedTraceOn = -1;
+
+void HostedSchedTraceDump()
+	{
+	if (SchedTraceOn <= 0)
+		return;
+	TUint32 n = SchedRingN, first = n > 16384 ? n - 16384 : 0;
+	for (TUint32 i = first; i < n; ++i)
+		{
+		const SSchedTrace& t = SchedRing[i & 16383];
+		hprintf("SCHED %u.%03u %08x %08x\n", t.iUs / 1000000, (t.iUs / 1000) % 1000, t.iFrom, t.iTo);
+		}
+	SchedRingN = 0;
+	}
+
 static void SwitchThreads(NThread& aCurrent, NThread& aNext)
 //
 // The fundamental context switch: wake the next thread, park the current one
 //
 	{
 	++HostedSwitches;
+	if (SchedTraceOn < 0)
+		SchedTraceOn = hgetenv_hex("SCHEDTRACE", 0) ? 1 : 0;
+	if (SchedTraceOn)
+		{
+		SSchedTrace& t = SchedRing[SchedRingN++ & 16383];		// kernel locked, interrupts off: one writer
+		t.iUs = (TUint32)(hnow_ns() / 1000);
+		t.iFrom = (TUint32)&aCurrent;
+		t.iTo = (TUint32)&aNext;
+		}
 	if (aCurrent.iNState == NThread::EDead)
 		ThreadExit(aCurrent, aNext);
 	else

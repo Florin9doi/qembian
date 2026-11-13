@@ -105,11 +105,16 @@ public:
 /******************************************************************
  * structure to keep static data in code segments within a process
  ******************************************************************/
+// hosted: DLL .data+.bss of at least this many bytes are swapped by mapping (DWin32CodeSeg::iWsdMap)
+const TInt KWsdMapMin = 0x4000;
+
 struct SProcessDllDataBlock
 	{
 	DWin32CodeSeg* iCodeSeg;
 	TAny* iDataCopy;			// copy of .data
 	TAny* iBssCopy;				// copy of .bss
+	TInt iFd;					// hosted: a large RAM DLL's .data+.bss: this process's memory file (iDataCopy is
+								// its kernel view, mapped at the DLL's address on switch-in), else -1
 	};
 
 /********************************************
@@ -155,6 +160,8 @@ public:
 	TBitMapAllocator* iLocalPages;	// committed pages (allocated = committed)
 	DWin32Chunk* iLocalNext;
 	TBool iLocalMapped;				// every committed page is mapped at its address (none displaced)
+	TInt iLocalDispLo, iLocalDispHi;	// the chunk's pages [lo, hi) that may be displaced: what a switch-in walks
+	TInt iLocalHotEnd;				// its first units counted in the window's hot map (committed + growth margin)
 	// hosted: a chunk that does not own its memory (physical commits: driver buffers), its contiguous memory's
 	// physical address at offset 0 (0: none)
 	TPhysAddr iPhysContig;
@@ -212,6 +219,8 @@ public:
 	DWin32Process* iLiveProcess;// process who's static data is currently loaded in the codeseg
 	// hosted: a RAM-loaded E32 image (the loader writes code and the .data template, as SRamCodeInfo)
 	TBool iRam;
+	TBool iWsdMap;				// hosted: .data+.bss swapped by mapping each process's memory file, not by copying
+	TUint32 iWsdSwaps;			// hosted: process switches that swapped its data (Ctrl+P: WSDSTAT, then reset)
 	TLinAddr iRamCodeRun;		// run = load address (mapped writable for the loader, then read/execute)
 	TInt iRamCodeSize, iRamTextSize, iRamMapSize;
 	TLinAddr iRamDataLoad;		// the .data template, after the code

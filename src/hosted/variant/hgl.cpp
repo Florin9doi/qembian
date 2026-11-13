@@ -11,6 +11,7 @@
 // Original work for qembian.
 #include <kernel/kern_priv.h>
 #include <board/syborg_glchan.h>
+#include <assp.h>
 
 extern TInt HostedIoAttach(TUint32 aBase, TUint32 aSize, TUint32 (*aRead)(TAny*, TUint32),
                            void (*aWrite)(TAny*, TUint32, TUint32), TAny* aCtx);
@@ -41,21 +42,31 @@ void HostedGlStat()
 		return;
 	extern volatile TUint32 HostedSwitches, HostedSuspends, HostedExeDataSwitches, HostedExecTraps, HostedArm11Emulated,
 	                        HostedExceptions, HostedTicks, HostedTicksSkipped;
-	extern TUint32 HostedLocalMaps, HostedLocalDisplaced, HostedLocalCopies;
-	static TUint32 S0[11];
-	TUint32 S[11] = { HostedSwitches, HostedSuspends, HostedExeDataSwitches, HostedExecTraps, HostedArm11Emulated,
+	extern TUint32 HostedLocalMaps, HostedLocalDisplaced, HostedLocalCopies, HostedLocalScanned, HostedWsdMaps,
+	               HostedWsdCopied;
+	static TUint32 S0[14];
+	TUint32 S[14] = { HostedSwitches, HostedSuspends, HostedExeDataSwitches, HostedExecTraps, HostedArm11Emulated,
 	                  HostedExceptions, HostedTicks, HostedTicksSkipped, HostedLocalMaps, HostedLocalDisplaced,
-	                  HostedLocalCopies };
+	                  HostedLocalCopies, HostedLocalScanned, HostedWsdMaps, HostedWsdCopied };
 	if (Last)
 		{
 		hprintf("GLSTAT %u req/s %u cb/s %u us/s in requests, %u us per request\n", (HostedGlRequests - R0) / 2,
 		        (HostedGlCallbacks - C0) / 2, (TUint32)((HostedGlRequestNs - N0) / 2000),
 		        HostedGlRequests - R0 ? (TUint32)((HostedGlRequestNs - N0) / 1000 / (HostedGlRequests - R0)) : 0);
 		hprintf("HSTAT per s: %u switches %u suspends %u exe-data %u exec-traps %u arm11-emul %u exceptions "
-		        "%u ticks (%u skipped) %u local-maps %u displaced %u local-copies\n", (S[0] - S0[0]) / 2,
+		        "%u ticks (%u skipped) %u local-maps %u displaced %u local-copies %u scanned %u wsd-maps %u wsd-KB-copied\n", (S[0] - S0[0]) / 2,
 		        (S[1] - S0[1]) / 2, (S[2] - S0[2]) / 2, (S[3] - S0[3]) / 2, (S[4] - S0[4]) / 2, (S[5] - S0[5]) / 2,
-		        (S[6] - S0[6]) / 2, (S[7] - S0[7]) / 2, (S[8] - S0[8]) / 2, (S[9] - S0[9]) / 2, (S[10] - S0[10]) / 2);
+		        (S[6] - S0[6]) / 2, (S[7] - S0[7]) / 2, (S[8] - S0[8]) / 2, (S[9] - S0[9]) / 2, (S[10] - S0[10]) / 2,
+		        (S[11] - S0[11]) / 2, (S[12] - S0[12]) / 2, (S[13] - S0[13]) / 2048);
 		}
+	extern TUint32 HostedNvReads, HostedNvWrites, HostedNvBytes;
+	extern TUint64 HostedNvNs;
+	static TUint32 NR0, NW0, NB0;
+	static TUint64 NN0;
+	if (Last)
+		hprintf("NVSTAT per s: %u reads %u writes %u KB, %u us in transfers\n", (HostedNvReads - NR0) / 2,
+		        (HostedNvWrites - NW0) / 2, (HostedNvBytes - NB0) / 2048, (TUint32)((HostedNvNs - NN0) / 2000));
+	NR0 = HostedNvReads; NW0 = HostedNvWrites; NB0 = HostedNvBytes; NN0 = HostedNvNs;
 	extern TUint32 HostedEventSpinHits, HostedEventSleeps;
 	static TUint32 H0, Z0;
 	if (Last)
@@ -186,12 +197,46 @@ static void ServeCallback()
 	__atomic_store_n(&ServeLock, 0, __ATOMIC_RELEASE);
 	}
 
+// A request may wait for the server blocked, as for a GPU (2026-11-13): the requesting thread sleeps on GlSem and other
+// threads run meanwhile. Before, it spun with interrupts disabled: nothing else ran during the host's GL work (~55 ms a
+// second while the 808's home page 2 animated), and the priority-12 loaders of the page's widgets starved.
+// While a thread is blocked (BlockedSeq), the helper below does not serve the server's callbacks: they read and write
+// the requesting process's memory, which is only in place while that process runs (local chunks may be displaced,
+// EXE and DLL data swapped). It wakes the requester instead, for a callback or for the answer: KGlIrq, whose ISR queues
+// an IDFC that signals the semaphore; the requester serves callbacks itself and sleeps again until the answer.
+static const TInt KGlIrq = 40;				// hosted only (the Syborg board's lines end at 16)
+static NFastSemaphore GlSem;
+static TDfc* GlIdfc;
+static volatile TUint32 BlockedSeq;			// the request a blocked thread waits for (0: none)
+static volatile TInt Woken;					// the helper raised KGlIrq for this sleep
+extern void HostedRaiseIrq(TInt aIrq);
+static TInt GlBlockState;					// 0 not set up, 1 ready, -1 not available
+TUint32 HostedGlBlocked;					// requests that waited blocked (GLSTAT, tests)
+
+static void GlIdfcFn(TAny*) { GlSem.Signal(); }
+static void GlIsr(TAny*) { GlIdfc->Add(); }
+
 static int HelperThread(void*)
 	{
 	hsys(SYS_prctl, 15 /* PR_SET_NAME */, "h-glhelper");	// its name in the Linux view (lxtop)
 	for (TUint32 idle = 0;; )
 		{
-		if (Ld(GLCHAN_W_CB_SEQ) != Ld(GLCHAN_W_CB_DONE))
+		TUint32 w = __atomic_load_n(&BlockedSeq, __ATOMIC_ACQUIRE);
+		TBool cb = Ld(GLCHAN_W_CB_SEQ) != Ld(GLCHAN_W_CB_DONE);
+		if (w)
+			{
+			// a blocked requester: wake it for a callback or its answer (this thread runs on the helper CPUs: spin,
+			// then nap)
+			if ((cb || Ld(GLCHAN_W_RESP_SEQ) == w) && !__atomic_exchange_n(&Woken, 1, __ATOMIC_ACQ_REL))
+				{
+				HostedRaiseIrq(KGlIrq);
+				idle = 0;
+				}
+			else if (++idle > 4000)
+				hsleep_us(20);
+			continue;
+			}
+		if (cb)
 			{
 			ServeCallback();
 			idle = 0;
@@ -199,6 +244,29 @@ static int HelperThread(void*)
 			}
 		hsleep_us(++idle < 200 ? 100 : 1000);
 		}
+	}
+
+// may this request wait blocked? A thread with the kernel unlocked, no fast mutex, interrupts enabled (d_display's
+// GL controls hold its DMutex in a critical section: legal to block); set up on first use
+static TBool CanBlock()
+	{
+	if (GlBlockState < 0 || !LxSelf() || !LxSelf()->iNThread || NKern::CurrentContext() != NKern::EThread ||
+	    TheScheduler.iKernCSLocked || NKern::HeldFastMutex())
+		return EFalse;
+	if (GlBlockState == 0)
+		{
+		if (hgetenv_hex("GLSPIN", 0))			// htest --env GLSPIN=1: the old spinning wait
+			{
+			GlBlockState = -1;
+			return EFalse;
+			}
+		NKern::ThreadEnterCS();
+		GlIdfc = new TDfc(&GlIdfcFn, NULL);
+		NKern::ThreadLeaveCS();
+		GlBlockState = GlIdfc && Interrupt::Bind(KGlIrq, &GlIsr, NULL) == KErrNone &&
+		               Interrupt::Enable(KGlIrq) == KErrNone ? 1 : -1;
+		}
+	return GlBlockState > 0;
 	}
 
 // v3 (syborg_glchan.h): writes to plain registers wait for the next request; a write to KICK, EXEC or BIND carries
@@ -249,8 +317,47 @@ static void PrefetchKick(TUint32 aKick)
 
 // one register access: the request, then wait for its answer and serve callbacks meanwhile. Interrupts are
 // masked on a nanothread (as the other device models): no other nanothread may start a request in between.
+// htest --env GLTRACE=1: every round trip (start, length, register, op, the requesting nanothread, blocked or not) in a
+// ring of 4096, printed by HostedGlTraceDump (Ctrl+P): where a frame's time goes
+struct SGlTrace { TUint32 iStartUs, iUs, iReg, iThread; };
+static SGlTrace GlTraceRing[4096];
+static TUint32 GlTraceN;
+static TInt GlTraceOn = -1;
+void HostedGlTraceDump()
+	{
+	if (GlTraceOn <= 0)
+		return;
+	TUint32 n = GlTraceN, first = n > 4096 ? n - 4096 : 0;
+	for (TUint32 i = first; i < n; ++i)
+		{
+		const SGlTrace& t = GlTraceRing[i & 4095];
+		if (t.iReg == 0xffffffffu)
+			hprintf("GLFRAME %u.%03u seq %u\n", t.iStartUs / 1000000, (t.iStartUs / 1000) % 1000, t.iUs);
+		else
+			hprintf("GLREQ %u.%03u %u us reg %u%s%s thread %08x\n", t.iStartUs / 1000000, (t.iStartUs / 1000) % 1000,
+			        t.iUs, t.iReg & 0xff, (t.iReg & 0x100) ? " read" : " write", (t.iReg & 0x200) ? " blocked" : "",
+			        t.iThread);
+		}
+	GlTraceN = 0;
+	}
+
+// the display thread saw a new composed frame (its sequence): marked in the same ring
+void HostedGlTraceFrame(TUint32 aSeq)
+	{
+	if (GlTraceOn < 0)
+		GlTraceOn = hgetenv_hex("GLTRACE", 0) ? 1 : 0;
+	if (GlTraceOn <= 0)
+		return;
+	SGlTrace& t = GlTraceRing[__atomic_fetch_add(&GlTraceN, 1, __ATOMIC_RELAXED) & 4095];
+	t.iStartUs = (TUint32)(hnow_ns() / 1000);
+	t.iUs = aSeq;
+	t.iReg = 0xffffffffu;
+	t.iThread = 0;
+	}
+
 static TUint32 Request(TUint32 aOp, TUint32 aReg, TUint32 aValue)
 	{
+	TBool block = CanBlock();
 	TInt irq = -1;
 	if (LxSelf() && LxSelf()->iNThread && NKern::CurrentContext() != NKern::EInterrupt)
 		irq = NKern::DisableAllInterrupts();
@@ -298,12 +405,50 @@ static TUint32 Request(TUint32 aOp, TUint32 aReg, TUint32 aValue)
 		WlogApplied = WlogOffset = 0;
 		__atomic_store_n(&ServeLock, 0, __ATOMIC_RELEASE);
 		TUint32 seq = Ld(GLCHAN_W_REQ_SEQ) + 1;
+		if (!seq)
+			seq = 1;						// 0 means "nobody waits" to the helper
 		St(GLCHAN_W_REQ_SEQ, seq);
-		for (TUint32 n = 0; Ld(GLCHAN_W_RESP_SEQ) != seq; ++n)
+		// a short spin first: an answer within it costs no hand-over
+		TUint32 n = 0;
+		for (; Ld(GLCHAN_W_RESP_SEQ) != seq && n < (block && irq == 0 ? 200u : 0xffffffffu); ++n)
 			{
 			ServeCallback();
 			if (n > 2000)
 				hsys(SYS_sched_yield);
+			}
+		TBool blockedHere = EFalse;
+		if (Ld(GLCHAN_W_RESP_SEQ) != seq)
+			{
+			blockedHere = ETrue;
+			// blocked (irq == 0: we disabled interrupts, nobody before us). Interrupts on while asleep; callbacks are
+			// served here, in this process's context, with interrupts off (no process switch in the middle of one)
+			++HostedGlBlocked;
+			// published while interrupts are still off (from now on the helper never serves a callback itself: this
+			// process may be switched out), its wake-ups held back (Woken) until the semaphore is clean
+			__atomic_store_n(&Woken, 1, __ATOMIC_RELEASE);
+			__atomic_store_n(&BlockedSeq, seq, __ATOMIC_RELEASE);
+			NKern::RestoreInterrupts(irq);
+			// a late wake-up of the previous waiter (another thread, maybe) may have left a count: start clean (no
+			// thread waits on it now; SetOwner asserts a zero count when the owner changes: fault 302, 2026-11-13)
+			NKern::Lock();
+			GlSem.iCount = 0;
+			GlSem.iOwningThread = NKern::CurrentThread();
+			NKern::Unlock();
+			__atomic_store_n(&Woken, 0, __ATOMIC_RELEASE);
+			while (Ld(GLCHAN_W_RESP_SEQ) != seq)
+				{
+				NKern::FSWait(&GlSem);
+				__atomic_store_n(&Woken, 0, __ATOMIC_RELEASE);
+				if (Ld(GLCHAN_W_CB_SEQ) != Ld(GLCHAN_W_CB_DONE))
+					{
+					TInt i2 = NKern::DisableAllInterrupts();
+					while (Ld(GLCHAN_W_CB_SEQ) != Ld(GLCHAN_W_CB_DONE))
+						ServeCallback();
+					NKern::RestoreInterrupts(i2);
+					}
+				}
+			__atomic_store_n(&BlockedSeq, 0, __ATOMIC_RELEASE);
+			irq = NKern::DisableAllInterrupts();
 			}
 		v = Ld(GLCHAN_W_RESP_VALUE);
 		while (__atomic_exchange_n(&ServeLock, 1, __ATOMIC_ACQUIRE))
@@ -315,7 +460,18 @@ static TUint32 Request(TUint32 aOp, TUint32 aReg, TUint32 aValue)
 		if (aOp == GLCHAN_REQ_WRITE)
 			v = 0;
 		++HostedGlRequests;
-		HostedGlRequestNs += MonoNs() - t0;
+		TUint64 t1 = MonoNs();
+		HostedGlRequestNs += t1 - t0;
+		if (GlTraceOn < 0)
+			GlTraceOn = hgetenv_hex("GLTRACE", 0) ? 1 : 0;
+		if (GlTraceOn)
+			{
+			SGlTrace& t = GlTraceRing[__atomic_fetch_add(&GlTraceN, 1, __ATOMIC_RELAXED) & 4095];
+			t.iUs = (TUint32)((t1 - t0) / 1000);
+			t.iStartUs = (TUint32)(hnow_ns() / 1000) - t.iUs;		// the scheduler trace's clock (SCHED lines)
+			t.iReg = (aReg >> 2) | (aOp == GLCHAN_REQ_READ ? 0x100 : 0) | (blockedHere ? 0x200 : 0);
+			t.iThread = LxSelf() && LxSelf()->iNThread ? (TUint32)NKern::CurrentThread() : 0;
+			}
 		}
 	if (irq >= 0)
 		NKern::RestoreInterrupts(irq);

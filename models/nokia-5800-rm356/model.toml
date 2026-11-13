@@ -159,6 +159,7 @@ name = "d_display"
 kind = "ldd"
 family = "nokia-omap2"
 role = "DisplayDriver (board config: 27 caps words, portrait panel, 960-byte stride)"
+config = { panel = 1 }                     # the panel shows only what ctl 9/8 posted, as the real driver (2026-11-13: half-drawn redraws blinked black)
 
 [[standins]]
 name = "secldd"
@@ -217,16 +218,6 @@ sim_service_status = { "0x01" = 0x01 }
 code_patches = []
 files = [{ rom = "Sys/Data/ESTARTCOMP.TXT", local = "ESTARTCOMP.TXT" }]
 
-# H-startuptone-none (5800): the start-up animation plays z:\data\Startup_tone.aac and Startup waits for
-# it; RAPIDO audio is not emulated (DSP shared memory), so the player never ends (EapDsp faults past the
-# stand-in's buffer). CenRep 101F8763 key 3 (tone path, cap_wr=alwaysfail) points to a missing file instead.
-[[rom.rofs_patches]]
-image = 2
-path = "private/10202be9/101F8763.txt"
-old = 'z:\\data\\Startup_tone.aac'
-new = 'z:\\data\\Startup_none.aac'
-hack = "H-startuptone-none"
-
 [gl]
 impl = "none"
 
@@ -240,4 +231,4 @@ startup = { category = 0x101F8766, state = 0x41, ui_phase = 0x46 }
 smoke_skip = { switch-off = "power key opens no power menu (power-key path not brought up on this phone)" }
 level = "L1"                               # home screen, menu, touch (2026-11-07)
 updated = "2026-11-07"
-open = ["some UI actions take seconds, e.g. Settings items (owner)", "power key: no power menu", "audio: RAPIDO DSP shared memory not emulated (EapDsp faults; start-up tone off: H-startuptone-none)", "touch latency: some controls react at once, the dialler takes seconds per tap (owner test 2026-11-07; suspects: sample rate / 1-pixel move filter of the exyin stand-in) [I]", "home-screen shortcut row ignored scripted taps", "proximity sensor has no stand-in", "applications not tried yet"]
+open = ["some UI actions take seconds, e.g. Settings items (owner)", "power key: no power menu", "audio: start-up tone path live since 2026-11-13 (H-startuptone-none removed; first boot reaches the region query); EapDsp not checked", "touch latency: some controls react at once, the dialler takes seconds per tap (owner test 2026-11-07; suspects: sample rate / 1-pixel move filter of the exyin stand-in) [I]", "home-screen shortcut row ignored scripted taps", "proximity sensor has no stand-in", "applications not tried yet"]

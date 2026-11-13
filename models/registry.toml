@@ -1,4 +1,4 @@
-# Known Nokia type codes (docs/device-model-v2.md 2.1): grows with our knowledge. A row needs no profile;
+# Known Nokia type codes (docs/device-model-v2.md 2.1), and Sony Ericsson phones as SE-<product> (tools/fw/semc.py): grows with our knowledge. A row needs no profile;
 # it lets ROM identification say "known phone, no emulation profile yet" instead of "unknown".
 #   code      type designator (sw.txt / .vpl TypeDesignator)
 #   name      marketing name;  platform: S60/Symbian release;  soc: adaptation family ([I] = not checked)
@@ -225,3 +225,29 @@ platform = "anna"
 soc = "[I]"
 model = ""
 status = "known"
+
+[[types]]
+code = "RM-588"
+name = "5230"
+platform = "s60-5.0"
+soc = "rapido [I]"
+model = "nokia-5230-rm588"
+status = "profile-draft"                     # 51.6.002 held (2026-11-13)
+
+# Sony Ericsson (UIQ): no type designator in the firmware; code = SE-<product> as tools/fw/semc.py reads it
+# (EMMA scripts / ProductInfo.rsc); docs/semc-firmware.md
+[[types]]
+code = "SE-P1i"
+name = "P1i"
+platform = "uiq-3.0"                         # Symbian 9.1, EKA2, moving memory model (romBase 0xF8000000)
+soc = "pnx4008"                              # Philips Nexperia, ARM926EJ-S 208 MHz, PowerVR MBX [I: from specs]
+model = "se-p1i"
+status = "profile-draft"                     # R6E30 held (se_roms/P1)
+
+[[types]]
+code = "SE-P910i"
+name = "P910i"
+platform = "uiq-2.1"                         # Symbian 7.0, EKA1 (rom_base 0x50000000)
+soc = "pnx4000"                              # Philips Nexperia, ARM9 156 MHz [I: from specs]
+model = ""
+status = "known"                             # R5B01 held (se_roms/P910)
