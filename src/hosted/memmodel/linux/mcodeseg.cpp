@@ -77,7 +77,12 @@ static TBool MapFixedRw(TLinAddr aBase, TInt aSize)
 
 // ---- RAM-loaded images: the regions (reserved whole at first use, so no host mapping lands there)
 static const TLinAddr KRamCodeBase = 0x70000000u, KRamCodeSize = 0x08000000u;		// as the phone: 0x7xxxxxxx
-static const TLinAddr KDllDataBase = 0x78000000u, KDllDataSize = 0x07f00000u;	// 0x7ff00000+: exec trampolines
+// RAM DLL data ends at 0x7e000000: the flexible memory model (N8, 808) puts the ROM's own DLL static data
+// just below 0x7f000000 (808: 0x7efc0000..0x7effc010), mapped at its fixed address (MapFixedRw). Bug
+// 2026-11-12: the region reached 0x7ff00000, the ROM DLL data pages stayed inside its inaccessible
+// reservation and the first process switch faulted the kernel (808 DEVAGENT.EXE). 0x7ff00000+: exec trampolines.
+// Regression: kn_efile on the 808 (the switch copies ROM DLL data).
+static const TLinAddr KDllDataBase = 0x78000000u, KDllDataSize = 0x06000000u;
 static TLinAddr RamCodeTop, DllDataTop;		// bump allocation (address space is not reused yet)
 
 static TBool ReserveRegions()
@@ -265,6 +270,59 @@ TInt DWin32CodeSeg::ProcessImports(DProcess*)
 	return KErrNone;		// ROM images are prelinked; the loader resolves their dependencies
 	}
 
+// debugging (htest --env PROBE_CODE=NAME:OFFSET[,NAME:OFFSET...]): a one-shot probe (lxhost.cpp HostedAddProbe:
+// logs pc, lr, r0, r1 when hit) at OFFSET (odd: Thumb) into the code of a RAM-loaded image whose file name
+// contains NAME, planted when the image is loaded
+void DWin32CodeSeg::ArmCodeProbes()
+	{
+	const char* spec = hgetenv("PROBE_CODE");
+	if (!spec || !iFileName)
+		return;
+	extern TInt HostedAddProbe(TUint32 aAddr);
+	TBuf8<64> name;
+	name.Copy(iFileName->Left(Min(iFileName->Length(), 64)));
+	for (TInt i = 0; i < name.Length(); ++i)
+		if (name[i] >= 'A' && name[i] <= 'Z')
+			name[i] = (TUint8)(name[i] + 32);
+	for (const char* p = spec; *p; )
+		{
+		const char* colon = p;
+		while (*colon && *colon != ':')
+			++colon;
+		if (!*colon)
+			break;
+		TPtrC8 want((const TUint8*)p, colon - p);
+		const char* e = colon + 1;
+		TUint32 off = 0;
+		if (e[0] == '0' && (e[1] == 'x' || e[1] == 'X'))
+			e += 2;
+		for (; (*e >= '0' && *e <= '9') || (*e >= 'a' && *e <= 'f'); ++e)
+			off = off * 16 + (*e <= '9' ? *e - '0' : *e - 'a' + 10);
+		TInt condReg = -1;
+		TUint32 condVal = 0;
+		if (e[0] == ':' && e[1] == 'r')			// NAME:OFFSET:rN=VALUE (hex): conditional, stays armed
+			{
+			e += 2;
+			condReg = 0;
+			while (*e >= '0' && *e <= '9')
+				condReg = condReg * 10 + (*e++ - '0');
+			if (*e == '=')
+				++e;
+			if (e[0] == '0' && (e[1] == 'x' || e[1] == 'X'))
+				e += 2;
+			for (; (*e >= '0' && *e <= '9') || (*e >= 'a' && *e <= 'f'); ++e)
+				condVal = condVal * 16 + (*e <= '9' ? *e - '0' : *e - 'a' + 10);
+			}
+		if (name.Find(want) >= 0)
+			{
+			extern TInt HostedAddProbeIf(TUint32 aAddr, TInt aReg, TUint32 aValue);
+			TInt r = condReg >= 0 ? HostedAddProbeIf(iRamCodeRun + off, condReg, condVal) : HostedAddProbe(iRamCodeRun + off);
+			Kern::Printf("HOSTED: probe at %S+%x = %08x: %d", iFileName, off, iRamCodeRun + off, r);
+			}
+		p = *e == ',' ? e + 1 : e;
+		}
+	}
+
 TInt DWin32CodeSeg::Loaded(TCodeSegCreateInfo& aInfo)
 	{
 	if (iRam)
@@ -282,6 +340,9 @@ TInt DWin32CodeSeg::Loaded(TCodeSegCreateInfo& aInfo)
 			memcpy((TAny*)(iExeProcess->iExeDataAlias + (iRamDataRun - iExeProcess->iExeDataBase)), iDataCopy, iRealDataSize);
 		hsys(SYS_ARM_cacheflush, iRamCodeRun, iRamCodeRun + iRamMapSize, 0);
 		hsys(SYS_mprotect, iRamCodeRun, (iRamMapSize + 0xfff) & ~0xfffu, PROT_READ | PROT_EXEC);
+		// the SYBCODE line (where each RAM-loaded image lives: tools/syb_sym.py, catch dumps) comes from the generic
+		// DCodeSeg::Loaded (scodeseg.cpp, patch kernelhwsrv 0007) now that GetMemoryInfo answers
+		ArmCodeProbes();
 		}
 	return DCodeSeg::Loaded(aInfo);
 	}
@@ -305,24 +366,40 @@ TBool DWin32CodeSeg::OpenCheck(DProcess* aProcess)
 	return ETrue;
 	}
 
+// a built-in hosted module (its exports are the host build's, kmodules.cpp) (tests)
+TBool HostedCodeSegBuiltIn(DCodeSeg* aSeg) { return ((DWin32CodeSeg*)aSeg)->iModule >= 0; }
+
+// as DEpocCodeSeg::Lookup (pcodeseg.cpp): ordinal 0 is the named symbol table, only for images that have one
+// (STDDLL/STDEXE: ECodeSegAttNmdExpData); an export slot holding the entry point is an absent export (NULL).
+// Bug 2026-11-12: ordinal 0 always returned the word before the export directory, so libdl's dlopen took a
+// count (2) for the table of a Qt plugin (qvggraphicssystem.dll) and weatherpublisher crashed (KERN-EXEC 3).
+// Regression: kn_efile (ordinal 0 of a DLL without named exports).
 TLibraryFunction DWin32CodeSeg::Lookup(TInt aOrdinal)
 	{
 	if (iModule >= 0)
 		return (TLibraryFunction)HostedModuleExport(iModule, aOrdinal);
+	if (aOrdinal < 0 || (aOrdinal == 0 && !(iAttr & ECodeSegAttNmdExpData)))
+		return NULL;
+	TInt count;
+	const TLinAddr* dir;
 	if (iRam)
 		{
-		if (aOrdinal >= 0 && aOrdinal <= iRamExportDirCount && iRamExportDir)
-			return (TLibraryFunction)((const TLinAddr*)iRamExportDir)[aOrdinal - 1];
-		return NULL;
+		count = iRamExportDirCount;
+		dir = (const TLinAddr*)iRamExportDir;
 		}
-	if (!iRomImage)
+	else if (iRomImage)
+		{
+		const TRomImageHeader& h = *(const TRomImageHeader*)iRomImage;
+		count = h.iExportDirCount;
+		dir = (const TLinAddr*)h.iExportDir;
+		}
+	else
 		return NULL;
-	const TRomImageHeader& h = *(const TRomImageHeader*)iRomImage;
-	TLibraryFunction f = NULL;
-	if (aOrdinal > 0 && aOrdinal <= h.iExportDirCount)
-		f = (TLibraryFunction)((const TLinAddr*)h.iExportDir)[aOrdinal - 1];
-	else if (aOrdinal == 0)
-		f = (TLibraryFunction)((const TLinAddr*)h.iExportDir)[-1];	// ordinal 0: named symbol table
+	if (!dir || aOrdinal > count)
+		return NULL;
+	TLibraryFunction f = (TLibraryFunction)dir[aOrdinal - 1];		// ordinal 0: the word before the directory
+	if ((TLinAddr)f == (TLinAddr)iFileEntryPoint)
+		f = NULL;
 	__KTRACE_OPT(KDLL,Kern::Printf("DWin32CodeSeg::Lookup(%d)->%08x", aOrdinal, f));
 	return f;
 	}
@@ -342,9 +419,37 @@ void DWin32CodeSeg::InitData()
 	{
 	}
 
-TInt DWin32CodeSeg::GetMemoryInfo(TModuleMemoryInfo&, DProcess*)
+TUint32 HostedCodeSegMemoryInfos;		// kn_efile
+
+// as DEpocCodeSeg::GetMemoryInfo (pcodeseg.cpp): code, constant data and data of a ROM image or RAM-loaded
+// segment (RLibrary::GetRamSizes, RProcess::GetMemoryInfo). Gap found 2026-11-12: KErrNotSupported (the Win32
+// emulator's answer), while the 808 asks ~1500 times by 90 s (kn_efile notes the count).
+TInt DWin32CodeSeg::GetMemoryInfo(TModuleMemoryInfo& aInfo, DProcess*)
 	{
-	return KErrNotSupported;
+	TUint32 code, text, size, data, dsize, bsize;
+	if (iRomImage && iModule < 0)
+		{
+		const TRomImageHeader& h = *(const TRomImageHeader*)iRomImage;
+		code = h.iCodeAddress; text = h.iTextSize; size = h.iCodeSize;
+		data = h.iDataBssLinearBase; dsize = h.iDataSize; bsize = h.iBssSize;
+		}
+	else if (iRam)
+		{
+		code = iRamCodeRun; text = iRamTextSize; size = iRamCodeSize;
+		data = iRamDataRun; dsize = iRealDataSize; bsize = iRealBssSize;
+		}
+	else
+		return KErrNotSupported;		// a built-in (hosted) module: no image layout
+	aInfo.iCodeBase = code;
+	aInfo.iCodeSize = text;
+	aInfo.iConstDataSize = size - text;
+	aInfo.iConstDataBase = size > text ? code + text : 0;
+	aInfo.iInitialisedDataBase = data;
+	aInfo.iInitialisedDataSize = dsize;
+	aInfo.iUninitialisedDataSize = bsize;
+	aInfo.iUninitialisedDataBase = data + dsize;
+	++HostedCodeSegMemoryInfos;
+	return KErrNone;
 	}
 
 void DWin32CodeSeg::Info(TCodeSegCreateInfo& aInfo)

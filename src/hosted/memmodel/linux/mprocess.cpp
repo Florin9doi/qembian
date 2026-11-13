@@ -42,6 +42,7 @@ DWin32Process::~DWin32Process()
 	RemoveDllData();
 	iDllData.Close();
 	MM::ExeDataRelease(this);
+	LocalSpaceRelease(this);
 	}
 
 TInt DWin32Process::NewChunk(DChunk*& aChunk, SChunkCreateInfo& aInfo, TLinAddr& aRunAddr)
@@ -142,8 +143,12 @@ TInt DWin32Process::CreateDataBssStackArea(TProcessCreateInfo& aInfo)
 	return KErrNone;
 	}
 
-TInt DWin32Process::AddChunk(DChunk* /*aChunk*/,TBool /*isReadOnly*/)
+TInt DWin32Process::AddChunk(DChunk* aChunk,TBool /*isReadOnly*/)
 	{
+	// as the multiple and flexible memory models: a process-local chunk is never opened by another process (its
+	// addresses are its own process's here too, mlocal.cpp)
+	if (((DWin32Chunk*)aChunk)->iLocalSpace && aChunk->iOwningProcess != this)
+		return KErrAccessDenied;
 	return KErrNone;
 	}
 
@@ -295,9 +300,22 @@ void DWin32Process::RemoveDllData()
 		}
 	}
 
-TInt DWin32Process::AttachExistingCodeSeg(TProcessCreateInfo& /*aInfo*/)
+// A second process of an EXE that is already loaded (as DEpocProcess::AttachExistingCodeSeg, pprocess.cpp): the
+// code is shared, the process gets its own .data/.bss from the segment's initial image (ROM header or the RAM
+// load copy) at the same run address. Bug 2026-11-12: refused here (the Win32 emulator's rule: KErrNotSupported),
+// so the 808's start-up list could not start its second cntsrv.exe ("-nontransient") and failed (system state
+// 117, the modem reset the phone). Regression: kn_efile (a second instance of a running EXE).
+TUint32 HostedExeAttaches, HostedExeAttachFailures;		// kn_efile
+
+TInt DWin32Process::AttachExistingCodeSeg(TProcessCreateInfo& aInfo)
 	{
-	return KErrNotSupported;	// never allowed
+	DWin32CodeSeg& s = *(DWin32CodeSeg*)iTempCodeSeg;
+	s.Info(aInfo);
+	TInt r = CreateDataBssStackArea(aInfo);
+	__KTRACE_OPT(KDLL, Kern::Printf("DWin32Process %O AttachExistingCodeSeg %C: data %08x+%x+%x: %d", this, &s,
+		aInfo.iDataRunAddress, aInfo.iDataSize, aInfo.iBssSize, r));
+	++(r == KErrNone ? HostedExeAttaches : HostedExeAttachFailures);
+	return r;
 	}
 
 
@@ -327,6 +345,10 @@ TInt DThread::RawRead(const TAny* aSrc, TAny* aDest, TInt aLength, TInt /*aFlags
 		return KErrDied;
 	const TUint8* pS=(const TUint8*)aSrc;
 	TUint8* pD=(TUint8*)aDest;
+	// hosted: another process's local chunk: through its memory file (mlocal.cpp)
+	TInt lr = LocalCopy(this, (TLinAddr)aSrc, aDest, aLength, EFalse);
+	if (lr <= 0)
+		return lr;
 	TBool kernelLocked = EFalse;
 	const TUint8* pC=(const TUint8*)MM::CurrentAddress(this,pS,aLength,EFalse,kernelLocked);
 	// NULL from a non-null address: an EXE data range running past the area. Bug 2026-11-12: a
@@ -366,6 +388,36 @@ TInt DThread::RawRead(const TAny* aSrc, TAny* aDest, TInt aLength, TInt /*aFlags
 	return KErrNone;
 	}
 
+// debugging (htest --env IPCSUM=NAME): every IPC write into a process whose name starts with NAME is logged
+// with its length and CRC-32, to compare what a process received with the source file on the host
+static TUint32 Crc32(const TUint8* p, TInt n)
+	{
+	TUint32 c = 0xffffffffu;
+	while (n--)
+		{
+		c ^= *p++;
+		for (TInt k = 0; k < 8; ++k)
+			c = (c >> 1) ^ (0xedb88320u & (0u - (c & 1)));
+		}
+	return ~c;
+	}
+
+static void IpcSum(DThread* aT, const TAny* aSrc, TInt aLength, const TAny* aDest)
+	{
+	static const char* who = (const char*)1;
+	if (who == (const char*)1)
+		who = hgetenv("IPCSUM");
+	if (!who || !aT->iOwningProcess || !aT->iOwningProcess->iName)
+		return;
+	const TDesC8& n = *aT->iOwningProcess->iName;
+	TInt l = 0;
+	while (who[l] && l < n.Length() && who[l] == n[l])
+		++l;
+	if (who[l])
+		return;
+	hprintf("IPCSUM %08x %d %08x\n", (TUint32)aDest, aLength, Crc32((const TUint8*)aSrc, aLength));
+	}
+
 TInt DThread::RawWrite(const TAny* aDest, const TAny* aSrc, TInt aLength, TInt /*aFlags*/, DThread* /*anOriginatingThread*/, TIpcExcTrap* /*aExcTrap*/)
 //
 // Write to the thread's process.
@@ -379,6 +431,10 @@ TInt DThread::RawWrite(const TAny* aDest, const TAny* aSrc, TInt aLength, TInt /
 		return KErrDied;
 	TUint8* pD=(TUint8*)aDest;
 	const TUint8* pS=(const TUint8*)aSrc;
+	IpcSum(this, aSrc, aLength, aDest);
+	TInt lr = LocalCopy(this, (TLinAddr)aDest, (TAny*)aSrc, aLength, ETrue);	// as RawRead
+	if (lr <= 0)
+		return lr;
 	TBool kernelLocked = EFalse;
 	TUint8* pC=(TUint8*)MM::CurrentAddress(this,pD,aLength,ETrue,kernelLocked);
 	if (!kernelLocked && !pC && pD)		// as RawRead
@@ -425,6 +481,19 @@ TInt DThread::ReadAndParseDesHeader(const TAny* aSrc, TDesHeader& aDest)
 	static const TUint8 LengthLookup[16]={4,8,12,8,12,0,0,0,0,0,0,0,0,0,0,0};
 	if (iMState == EDead)
 		return KErrDied;
+	// hosted: a header in another process's local chunk: its first word (the type) gives the length (mlocal.cpp)
+	TUint32 hdr[3];
+	TInt lr = LocalCopy(this, (TLinAddr)aSrc, hdr, 4, EFalse);
+	if (lr < 0)
+		return lr;
+	if (lr == KErrNone)
+		{
+		TInt l = (TInt)(hdr[0] >> KShiftDesType8) < 16 ? LengthLookup[hdr[0] >> KShiftDesType8] : 0;
+		if (!l || ((TLinAddr)aSrc & 3) || (l > 4 && LocalCopy(this, (TLinAddr)aSrc + 4, hdr + 1, l - 4, EFalse) != KErrNone))
+			return KErrBadDescriptor;
+		wordmove(&aDest, hdr, l);
+		return K::ParseDesHeader(aSrc, (TRawDesHeader&)aDest, aDest);
+		}
 	TBool kernelLocked = EFalse;
 	const TUint32* pS=(const TUint32*)MM::CurrentAddress(this,aSrc,sizeof(TDesC8),EFalse,kernelLocked);
 	if (!pS || (TInt(pS)&3)!=0)

@@ -89,6 +89,27 @@ static int statline(const char *path, char *comm, char *state, unsigned long *ti
 	return 0;
 }
 
+// memory of a process in KB: RSS (statm), PSS (smaps_rollup, CONFIG_PROC_PAGE_MONITOR; -1 without it) and
+// the RSS split from status (RssAnon, RssFile, RssShmem)
+static long kbfield(const char *b, const char *key) {
+	const char *p = strstr(b, key);
+	return p ? atol(p + strlen(key)) : -1;
+}
+static void memof(int pid, long *rss, long *pss, long *anon, long *file, long *shm) {
+	char path[64], b[2048];
+	snprintf(path, sizeof path, "/proc/%d/statm", pid);
+	*rss = readfile(path, b, sizeof b) > 0 ? atol(strchr(b, ' ') ? strchr(b, ' ') + 1 : b) * (sysconf(_SC_PAGESIZE) / 1024) : 0;
+	snprintf(path, sizeof path, "/proc/%d/smaps_rollup", pid);
+	*pss = readfile(path, b, sizeof b) > 0 ? kbfield(b, "\nPss:") : -1;
+	snprintf(path, sizeof path, "/proc/%d/status", pid);
+	if (readfile(path, b, sizeof b) <= 0) b[0] = 0;
+	*anon = kbfield(b, "RssAnon:"); *file = kbfield(b, "RssFile:"); *shm = kbfield(b, "RssShmem:");
+}
+static void mb(char *out, int n, long kb) {
+	if (kb < 0) snprintf(out, n, "    -");
+	else snprintf(out, n, "%5.1f", kb / 1024.0);
+}
+
 struct ttask { int id; unsigned long ticks; char comm[16]; char state; long d; };
 static struct ttask prev[512], cur[512];
 static int nprev;
@@ -121,7 +142,7 @@ static void lxtop(void) {
 		o += snprintf(out + o, sizeof out - o, "LXTOP %s %s %s  up %ldm%02lds  load %s\n", u.sysname, u.release,
 		              u.machine, up / 60, up % 60, load);
 		o += snprintf(out + o, sizeof out - o, "LXTOP Mem: %ld MB used of %ld MB\n", (tot - av) / 1024, tot / 1024);
-		o += snprintf(out + o, sizeof out - o, "LXTOP\nLXTOP   PID S  CPU%%  PROCESS\n");
+		o += snprintf(out + o, sizeof out - o, "LXTOP\nLXTOP   PID S  CPU%%  RSS MB  PSS MB  PROCESS\n");
 		DIR *d = opendir("/proc");
 		struct dirent *e;
 		while (d && (e = readdir(d))) {
@@ -133,8 +154,11 @@ static void lxtop(void) {
 			snprintf(path, sizeof path, "/proc/%d/stat", pid);
 			if (statline(path, comm, &st, &t)) continue;
 			if (ncur < 512) { cur[ncur] = (struct ttask){ -pid, t, "", st, 0 }; ncur++; }
-			o += snprintf(out + o, sizeof out - o, "LXTOP %5d %c %5.1f  %s%s\n", pid, st,
-			              100.0 * delta(-pid, t) / (hz * period), comm,
+			long rss, pss, an, fi, sh; char rs[16], ps[16];
+			memof(pid, &rss, &pss, &an, &fi, &sh);
+			mb(rs, sizeof rs, rss); mb(ps, sizeof ps, pss);
+			o += snprintf(out + o, sizeof out - o, "LXTOP %5d %c %5.1f   %s   %s  %s%s\n", pid, st,
+			              100.0 * delta(-pid, t) / (hz * period), rs, ps, comm,
 			              pid == 1 ? "  (init)" : !strcmp(comm, "symbian") ? "  <- the whole phone" : "");
 			if (!strcmp(comm, "symbian")) symbian = pid;
 		}
@@ -161,6 +185,13 @@ static void lxtop(void) {
 			qsort(th, nt, sizeof th[0], bycpu);
 			o += snprintf(out + o, sizeof out - o, "LXTOP\nLXTOP Symbian threads = Linux threads of pid %d: %d (%d running)\n",
 			              symbian, nt, running);
+			// threads share one address space: memory exists per process only. The split shows what the phone's
+			// RAM is on Linux: anon = chunks and stacks, file = the mapped ROM images, shmem = memfds (EXE data,
+			// RAM drive). PSS = RSS here, one process maps it all (it splits once Symbian processes become Linux ones)
+			long rss, pss, an, fi, sh;
+			memof(symbian, &rss, &pss, &an, &fi, &sh);
+			o += snprintf(out + o, sizeof out - o, "LXTOP RAM: chunks+stacks %.1f MB, ROM files %.1f MB, memfds %.1f MB\n",
+			              an / 1024.0, fi / 1024.0, sh / 1024.0);
 			o += snprintf(out + o, sizeof out - o, "LXTOP   TID S  CPU%%  THREAD\n");
 			for (int i = 0; i < nt && i < 24; i++)
 				o += snprintf(out + o, sizeof out - o, "LXTOP %5d %c %5.1f  %s\n", th[i].id, th[i].state,

@@ -34,6 +34,10 @@ here mean nothing; correctness and the design do. Native speed is measured in P6
 
 ## 2. Guest kernel
 
+> **As built (2026-11-12):** Linux 6.18.63, `allnoconfig` + the explicit list in `src/hosted/linux/hosted.config`
+> (every option with its reason; `scripts/build-hosted-kernel.sh` fails if one does not hold). The plan below
+> was the starting point (defconfig plus a fragment).
+
 Mainline 6.x (the sdm670-mainline tree is the one to use from P5 on, so that the configuration is
 shared with the phone), `defconfig` plus:
 
@@ -67,7 +71,7 @@ phone. Everything project-specific lives on the 9p share: `build/hosted/share/{r
 -mfloat-abi=hard -fno-exceptions -fno-rtti -ffreestanding` for the kernel parts, the EPL `kernel/eka`
 headers as today (`__EPOC32__`, a new `__LINUX__`/`__HOSTED__` platform macro next to `__WINS__`);
 `.cia` inline assembler is already GCC syntax (GCC_SURGE) [verified: architecture.md build notes].
-The GCC 14 symbianelf toolchain does not produce Linux ELF with a libc; the kernel `.so`
+The owner's GCC 14 symbianelf toolchain does not produce Linux ELF with a libc; the kernel `.so`
 needs the Linux one. The ROM user side is not rebuilt: it is the phone's.
 
 ## 5. Debugging on the virt machine (sydb-style)

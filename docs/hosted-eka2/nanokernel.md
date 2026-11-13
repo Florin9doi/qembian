@@ -48,7 +48,7 @@ nanokernel takes its portable C++ paths (no `.cia`). Flags: `tools/hosted/htest.
 ## Debugging
 
 - A crash in any host thread prints `HOSTED FAULT` with registers and stack words; symbolise with
-  `llvm-addr2line -f -C -i -e build/hosted/htest/t/<test> <pc> <lr>`.
+  `llvm-addr2line -f -C -i -e build/hosted/htest/dev/<device or generic>/t/<test> <pc> <lr>` (one build directory per device: htest --rom).
 - Every host thread has an alternate signal stack: a stack overflow is reported (`STACK OVERFLOW
   (guard page)` and the frame chain of the faulting code) instead of a silent SIGSEGV.
 - An `NKFault` prints a frame-pointer backtrace (everything is built `-fno-omit-frame-pointer`).

@@ -28,7 +28,7 @@ The `.C0R` is a BB5 "B2" FIASCO container. After the header comes a chain of blo
 - tag `0x27`/`0x28` blocks are partition records: SHA-1, name, size at desc+37, location at desc+41.
 - tag `0x17` blocks are data chunks: size at desc+6, flash location at desc+10.
 
-The APE (Symbian) side is these partitions (listing):
+The APE (Symbian) side is these partitions ([listing](../../evidence/n95/c0r-partitions.txt)):
 
 | Partition | Size | Content |
 |---|---|---|
@@ -43,7 +43,7 @@ The container header names the platform `OMAP2420 UNISTORE-II-1.5.1 ALG` with `X
 
 ## 2. Core XIP ROM [verified]
 
-Header and driver list.
+[Header and driver list](../../evidence/n95/core-rom-header.txt).
 
 - **TRomHeader:** `romBase 0x80000000`, `romSize 0x3a00000`, `kernData 0xC8000000`, multiple memory
   model layout. It is the same base address as our Syborg ROM.
@@ -82,7 +82,7 @@ Header and driver list.
     calls both tables cover, 119 agree outright. 11 more differ only in naming style
     (`ProcessId` vs `process_get_id`). Only 2 genuinely disagree: `S84` and `F05`.
     These are two independent derivations agreeing.
-  - Full table.
+  - [Full table](../../evidence/n95/swi-n95-vs-ours.txt).
 - **9.2-only semantics** visible in the table: kernel-held active scheduler and trap handler (fast
   `F06`/`F08`/`F09`), the DLL-lock and library-attach protocol (`S9b`–`Sa1`),
   `MutexWait` without a timeout, and others. A 9.2 personality must implement these, not just renumber.
@@ -91,11 +91,11 @@ Header and driver list.
     are used by 0 of 2,712 N95 images.**
   - The N95 has 19 exports beyond the SDK (2211–2229): demand-paging and loader APIs that were
     backported. Wherever the kernel calls they make can be checked, they are the same functions at
-    the same ordinals as in our `euseru.def` (notes).
+    the same ordinals as in our `euseru.def` ([notes](../../evidence/n95/euser-ordinal-notes.txt)).
 
 ## 4. How XIP binaries bind to EUSER [verified]
 
-Census.
+[Census](../../evidence/n95/xip-imports.txt).
 
 - **Import thunks:** each XIP image ends its code section with 8-byte import thunks
   `E51FF004 <absolute target>` (`ldr pc,[pc,#-4]`).

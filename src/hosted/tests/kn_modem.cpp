@@ -143,5 +143,16 @@ int main(int, char**)
 	HCHECK(HostedModemSms("123") && strstr(HostedModemSms("123"), "odd"), "SMS: odd hex refused");
 	HCHECK(HostedModemSms("zz") && strstr(HostedModemSms("zz"), "not hex"), "SMS: non-hex refused");
 	HCHECK(HostedModemSms("0400") && strstr(HostedModemSms("0400"), "no SIM"), "SMS: no SIM in this config");
+	// the phone's end: switch off exits 0, a reset (what start-up does when it fails) exits 3. Bug 2026-11-12:
+	// a reset exited 0 and kn_efile passed an 808 boot whose window server had died.
+	extern void HostedModemPower(TInt aWhat);
+	TInt pid = hfork();
+	if (pid == 0)
+		HostedModemPower(2);
+	HCHECK(pid > 0 && hwait(pid) == 3, "a modem reset ends the process with an error (3)");
+	pid = hfork();
+	if (pid == 0)
+		HostedModemPower(1);
+	HCHECK(pid > 0 && hwait(pid) == 0, "a switch-off ends it normally (0)");
 	return htest_done();
 	}

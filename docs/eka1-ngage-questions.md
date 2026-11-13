@@ -113,7 +113,8 @@ Addresses are physical unless marked virtual. ROM offsets equal physical address
 
 - **Q56. Where does the host time go?**
   - [V] QEMU runs at 100% of one core: EKA1's null thread never sleeps (it calls the NOS
-    idle hook in a loop), so CPU use alone says nothing.
+    idle hook in a loop), so CPU use alone says nothing. Fixed 2026-11-12 (H-ngage-idle): the
+    stand-in's idle hook waits for an interrupt; idle use is now 0.4% of a core.
   - [V] perf (`-e cpu-clock`; hardware events and call graphs are not permitted here)
     shows almost no time in translated code. It goes to TB lookups (`tb_tc_cmp`),
     `cpu_unwind_data_from_tb`, longjmp clean-up and big-QEMU-lock churn. Two causes:

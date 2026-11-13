@@ -11,14 +11,14 @@ For anything on a running phone (install/run/kill apps, files, processes, window
 screenshots, keyguard, P&S, IPC strace, gdb), use the sydb bridge (`docs/sydb.md`), not
 hand-made QEMU/gdb command lines:
 - MCP tools `mcp__sydb__*` (server in `.mcp.json`), or the CLI `tools/sydb/sydb.py` (`--help`).
-- The user's phones are device instances (`tools/instance.py list`; `build/instances/<name>/`:
-  instance.toml + drives, snapshots, logs; docs/sydb.md "Which phone"). For the user:
+- The owner's phones are device instances (`tools/instance.py list`; `build/instances/<name>/`:
+  instance.toml + drives, snapshots, logs; docs/sydb.md "Which phone"). For the owner:
   `python3 tools/sydb/sydb.py phone NAME [--fresh]` is ONE command (boots, opens the window, ends the
-  session when the window goes away); never hand over start + phone.
-- Agents never use the user's instances: `sydb --session build/sydb-<name> start` (`--seed
+  session when the window goes away); never hand over start + phone. Their list: `phones.txt`.
+- Agents never use the owner's instances: `sydb --session build/sydb-<name> start` (`--seed
   build/seeds/<id>` = a phone past first boot, `--fresh` = factory-fresh; `--gui` shows the window) or
   an ephemeral instance (`tools/instance.py create NAME DEVICE --ephemeral --replace`). A bare `sydb`
-  (no `--instance`/`--session`) is the primary instance of `$SYBORG_DEVICE`: the user's phone. A
+  (no `--instance`/`--session`) is the primary instance of `$SYBORG_DEVICE`: the owner's phone. A
   session refuses another phone's drives; `sydb stop` ends it.
 - `sydb dbg ...` is the persistent gdb: hw breakpoints (`dbg cmd 'condition N $r0 == -4'`),
   bt/regs/mem/eval, app ELF symbols from `SYBCODE:` lines. `sydb strace MATCH` traces IPC.
@@ -69,7 +69,7 @@ Read `docs/devices.md` (schema, layering) before touching `models/`, `src/standi
   idle, Carousel, Switch off), unit tests `tests/device_py_test.py`.
 - Flash files are in the ROM store `roms/` (git-ignored), extractions in `build/firmware/`, each device's
   build dir in `build/roms/<id>/<fw key>/` (`tools/device.py paths`: never spell these paths in a
-  script), the user's phones in `build/instances/`. Never boot the user's own drives for a test (an
+  script), the owner's phones in `build/instances/`. Never boot the owner's drives for a test (an
   instance in `tools/instance.py list`, or `run-gui.sh`, which boots one): clone it
   (`tools/instance.py clone NAME NAME-test`) or use a `--session build/sydb-<name>` session.
 
@@ -86,11 +86,12 @@ debug sessions: `eka1/tools/ngage_sess.py` (own sessions only, never `phone-*` u
 The EPL kernel runs as a 32-bit ARM Linux process with the phone's ROM code native (no CPU emulation of
 Symbian code); the N95 boots to its home screen in a QEMU aarch64 test VM. Start with
 `src/hosted/README.md` (diagram, choices, layout), `docs/hosted-eka2/` (`roadmap.md` status and speed,
-`tests.md`, `future.md`: SMP, one process per Symbian process, JIT/AOT for arm64-only CPUs) and the
+`tests.md`, `future.md`: SMP, one process per Symbian process, JIT/AOT for arm64-only CPUs; `debugging.md`: ROM code
+right on QEMU but wrong on hosted, ABI checklist first) and the
 "Hosted EKA2" section of `docs/hacks.md`. Window: `python3 tools/hosted/phone.py`; tests:
 `python3 tools/hosted/htest.py` (env values are hex). Every shortcut goes into docs/hacks.md.
 
-## Subagent research rules
+## Subagent research rules (owner's instruction)
 
 Research agents deliver **just enough API/protocol knowledge to mock a driver or system**, never a
 full reverse-engineering of it.

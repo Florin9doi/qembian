@@ -6,6 +6,7 @@
 // (HostedAddExtension) is started by P::StartExtensions late in that sequence: it proves the boot got
 // there, checks a few kernel facts and ends the test. SKIP without a ROM.
 #include <kernel/kern_priv.h>
+#include <kernel/arm/assp.h>
 #include "romload.h"
 #include <e32rom.h>
 
@@ -25,6 +26,20 @@ static TInt ExtensionEntry(TInt aReason)
 	if (aReason == KModuleEntryReasonExtensionInit0)
 		return KErrNone;		// "not started yet": start it
 	HCHECK(ETrue, "kernel boot reached the extensions (P::StartExtensions)");
+	// the RTC can be set (bug 2026-11-12: KErrNotSupported; the 808's first-boot date step failed and start-up
+	// ended on a black screen)
+	{
+	Asic* asic = Arch::TheAsic();
+	TInt t0 = 0, t1 = 0;
+	TInt g = asic ? asic->SystemTimeInSecondsFrom2000(t0) : KErrNotFound;
+	TInt r = asic ? asic->SetSystemTimeInSecondsFrom2000(t0 + 3600) : KErrNotFound;
+	if (asic)
+		asic->SystemTimeInSecondsFrom2000(t1);
+	HCHECK(g == KErrNone && r == KErrNone && t1 - t0 >= 3600 && t1 - t0 <= 3602,
+	       "the RTC is set one hour ahead and reads so (%d, %d s)", r, t1 - t0);
+	if (asic)
+		asic->SetSystemTimeInSecondsFrom2000(t1 - 3600);
+	}
 	DThread* t = &Kern::CurrentThread();
 	HCHECK(t != NULL && t->iOwningProcess == K::TheKernelProcess, "running in a kernel thread of the kernel process");
 	TBuf8<64> name;

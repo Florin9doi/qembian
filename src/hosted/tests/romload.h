@@ -14,6 +14,7 @@ struct SRomArgs
 	char iNvmem[128];			// C: drive image (seed), or empty
 	char iNvmem2[128];			// E: drive image (seed), or empty
 	TUint32 iFbWidth, iFbHeight;	// the framebuffer's size (syborg-fb.width/height), 0 = none
+	TUint32 iTouch;				// a touch phone (syborg-pointer.input=on): the pointer model
 	char iReplies[160];			// the fake modem's reply table, or empty
 	};
 
@@ -71,6 +72,7 @@ static TBool RomReadArgs(SRomArgs& a)
 			}
 		else if (kl == 3 && !memcmp(k, "fbw", 3)) a.iFbWidth = RomDec(p);
 		else if (kl == 3 && !memcmp(k, "fbh", 3)) a.iFbHeight = RomDec(p);
+		else if (kl == 5 && !memcmp(k, "touch", 5)) a.iTouch = RomDec(p);
 		else if (kl == 7 && !memcmp(k, "replies", 7))
 			{
 			TInt i = 0;

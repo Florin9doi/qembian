@@ -62,6 +62,67 @@ LPVOID VirtualAlloc(LPVOID aAddr, SIZE_T aSize, DWORD aType, DWORD aProtect)
 	return r;
 	}
 
+// User-visible chunks get addresses below 0x80000000, as in every EPOC memory model: user code treats such
+// addresses as positive TInts. Bug 2026-11-12: chunks were reserved wherever Linux put them (0xC...), FbServ's
+// session init returned a heap address that read as a negative error, and the 808's window server failed to
+// initialise (EWsPanicFailedToInitialise). First fit from a moving cursor, 64 KB aligned; MAP_FIXED_NOREPLACE
+// finds what is taken (freed chunks are found again on the next lap). Regression: kn_board.
+static TUint32 UserCursor = KUserWindowLo;
+LPVOID VirtualReserveUser(SIZE_T aSize, DWORD aProtect)
+	{
+	TUint32 size = (aSize + 0xffff) & ~0xffffu;
+	if (!size || size > KUserWindowHi - KUserWindowLo)
+		return 0;
+	Take();
+	LPVOID r = 0;
+	for (TUint32 a = UserCursor, tried = 0; tried < KUserWindowHi - KUserWindowLo; )
+		{
+		if (a + size > KUserWindowHi || a + size < a)
+			{
+			tried += KUserWindowHi - a;
+			a = KUserWindowLo;
+			continue;
+			}
+		void* m = hmmap((void*)a, size, 0, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED_NOREPLACE, -1, 0);
+		if ((TUint32)m == a)
+			{
+			SetState(a, size, 1);
+			ReservedSize[a >> KPageShift] = size;
+			UserCursor = a + size;
+			r = m;
+			break;
+			}
+		if (!HMAP_FAILED(m))
+			hsys(91 /* munmap */, m, size);		// an old kernel placed it elsewhere: not ours
+		a += 0x10000;
+		tried += 0x10000;
+		}
+	Give();
+	return r;
+	}
+
+// the user window's use, for the "no room" report: reservations by size class, total reserved and committed
+void HostedUserWindowReport()
+	{
+	TUint32 n[6] = { 0 }, total = 0, committed = 0, largest = 0, run = 0;
+	for (TUint32 a = KUserWindowLo; a < KUserWindowHi; a += 0x1000)
+		{
+		TUint32 sz = ReservedSize[a >> KPageShift];
+		if (sz)
+			{
+			total += sz;
+			n[sz <= 0x100000 ? 0 : sz <= 0x400000 ? 1 : sz <= 0x1000000 ? 2 : sz <= 0x4000000 ? 3 : 4]++;
+			}
+		committed += PageState[a >> KPageShift] == 2;
+		run = PageState[a >> KPageShift] ? 0 : run + 0x1000;
+		if (run > largest)
+			largest = run;
+		}
+	hprintf("HOSTED: user window: %u MB reserved (%u up to 1 MB, %u up to 4 MB, %u up to 16 MB, %u up to 64 MB, "
+	             "%u larger), %u MB committed, largest free run %u KB\n", total >> 20, n[0], n[1], n[2], n[3], n[4],
+	             committed >> 8, largest >> 10);
+	}
+
 TBool VirtualFree(LPVOID aAddr, SIZE_T aSize, DWORD aType)
 	{
 	TUint32 base = (TUint32)aAddr & ~0xfffu;

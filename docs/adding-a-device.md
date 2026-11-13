@@ -22,8 +22,8 @@ tool-call budget, as `CLAUDE.md` asks.
 ## 1. Import the firmware, scaffold the model
 
 ```
-tools/fw/identify.py /path/to/PACKAGE         # what it is: type code, version, roles of the files (dir or archive)
-tools/fw/store.py import /path/to/PACKAGE     # into the ROM store roms/<RM>/<version>/ (an archive stays where it is)
+tools/fw/identify.py ~/Downloads/PACKAGE         # what it is: type code, version, roles of the files (dir or archive)
+tools/fw/store.py import ~/Downloads/PACKAGE     # into the ROM store roms/<RM>/<version>/ (an archive stays where it is)
 tools/device.py registry RM-530                  # known type code? which model?
 ```
 Another firmware of a model we have: `tools/device.py firmware-add MODEL RM-xxx/<version> [--rofs2 ID]
@@ -323,9 +323,9 @@ Syborg NVMemory devices (`nvmem`, `nvmem2`), D: is RAM, Z: is the ROM + ROFS com
   `MTOOLS_SKIP_CHECK=1 mcopy -i nvmemory.img FILE ::/data/`. Never while a QEMU has the image open
   (two writers corrupt the FAT; the scripts refuse).
 - `sydb install` puts the sydb agent and its start-up record on C: (mtools, phone off).
-- Never use the user's phones (their instances, `tools/instance.py list`) for tests: make a session
+- Never use the owner's phones (their instances, `tools/instance.py list`) for tests: make a session
   (`sydb --session build/sydb-<name> start --fresh`) or a throw-away instance (`tools/instance.py
-  create NAME DEVICE --ephemeral`). When the device works, the user's phone is an instance:
+  create NAME DEVICE --ephemeral`). When the device works, the owner's phone is an instance:
   `tools/instance.py create NAME DEVICE`, opened with `python3 tools/sydb/sydb.py phone NAME`.
 
 ## Checklist (copy into the device README and tick)

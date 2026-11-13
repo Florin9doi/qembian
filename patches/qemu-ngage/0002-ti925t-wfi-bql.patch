@@ -1,0 +1,15 @@
+ngage: TI925T wait-for-interrupt (cp15 c15,c8,0) calls cpu_interrupt() from a TCG helper
+without the BQL and aborts (cpus.c:276); mark the register ARM_CP_IO so the write runs with it.
+Used by the NOS stand-in idle hook (H-ngage-idle).
+
+--- a/target/arm/cpregs-omap.c	2026-11-12 22:30:33.881359835 +0100
++++ b/target/arm/cpregs-omap.c	2026-11-12 22:30:33.919257561 +0100
+@@ -65,7 +65,7 @@
+       .writefn = omap_threadid_write },
+     { .name = "TI925T_STATUS", .cp = 15, .crn = 15,
+       .crm = 8, .opc1 = 0, .opc2 = 0, .access = PL1_RW,
+-      .type = ARM_CP_NO_RAW,
++      .type = ARM_CP_NO_RAW | ARM_CP_IO,     /* the write calls cpu_interrupt: needs the BQL */
+       .readfn = arm_cp_read_zero, .writefn = omap_wfi_write, },
+     /*
+      * TODO: Peripheral port remap register:

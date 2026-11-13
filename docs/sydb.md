@@ -51,7 +51,7 @@ refuses another phone's drives (the `device` mark file); `--fresh` wipes them.
 
 Agents and tests: a throw-away session (`--session build/sydb-<name>`) or an ephemeral instance
 (`instance.py create NAME DEVICE --ephemeral --replace`, what `tests/device-smoke.sh` does), never
-the user's instances (`instance.py list`: the ones not marked ephemeral).
+the owner's instances (`instance.py list`: the ones not marked ephemeral).
 
 ## Quick start
 

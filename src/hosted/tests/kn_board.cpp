@@ -92,6 +92,41 @@ int main(int, char**)
 	HCHECK(Transfer(0, 1, 1, 0x00001000, 0x40000) == 0xffffffffu, "a buffer outside every window fails");
 	HCHECK(Rd(ROff) == 0 && Rd(RSize) == 1 && Rd(RDir) == 1, "registers read back");
 
+	// a drive image larger than 4 GB (the 808's 8 GB E:). Bug 2026-11-12: the image was mapped whole with a
+	// 32-bit size and could not be attached in a 32-bit process. Sparse 5 GB file, marker past 4 GB.
+	{
+	const char* big = "/tmp/kn_board_big.img";
+	TInt bfd = hsys(SYS_openat, -100, big, 0x42 | 0x200 | 0x20000 /* O_LARGEFILE */, 0644);
+	const TUint64 bigSize = 5ull << 30, mark = (9ull << 29);		// 5 GB, marker at 4.5 GB
+	hsys(194 /* ftruncate64 */, bfd, 0, (TUint32)bigSize, (TUint32)(bigSize >> 32));
+	TUint8 m[512];
+	memset(m, 0x5a, sizeof m);
+	hsys(181 /* pwrite64 */, bfd, m, sizeof m, 0, (TUint32)mark, (TUint32)(mark >> 32));
+	hsys(SYS_close, bfd);
+	const TUint32 nv2 = KIo + 0x0d * 0x1000;
+	HCHECK(HostedNvmemAttach(1, nv2, 14, big) == KErrNone, "a 5 GB drive image attaches");
+	HCHECK(HostedIoRead(nv2 + (RNvSize << 2)) == (TUint32)(bigSize / 512), "its size in sectors (%u)", HostedIoRead(nv2 + (RNvSize << 2)));
+	TUint32 sec = (TUint32)(mark / 512);
+	auto T2 = [&](TUint32 aSec, TUint32 aDir) {
+		HostedIoWrite(nv2 + (ROff << 2), aSec); HostedIoWrite(nv2 + (RSize << 2), 1); HostedIoWrite(nv2 + (RDir << 2), aDir);
+		HostedIoWrite(nv2 + (RShm << 2), a); HostedIoWrite(nv2 + (RShmSize << 2), 0x40000); HostedIoWrite(nv2 + (RExec << 2), aDir);
+		return HostedIoRead(nv2 + (RStatus << 2)); };
+	memset(shm, 0, 512);
+	HCHECK(T2(sec, 1) == 1 && shm[0] == 0x5a && shm[511] == 0x5a, "a sector past 4 GB reads the image's bytes");
+	memset(shm, 0xc3, 512);
+	HCHECK(T2(sec + 1, 2) == 1, "a write past 4 GB goes to the overlay");
+	memset(shm, 0, 512);
+	HCHECK(T2(sec + 1, 1) == 1 && shm[0] == 0xc3 && shm[511] == 0xc3, "and reads back");
+	HCHECK(T2(sec, 1) == 1 && shm[0] == 0x5a, "the neighbouring sector in the same block is still the image's");
+	bfd = hsys(SYS_openat, -100, big, 0x20000, 0);
+	TUint8 x2 = 0;
+	TUint64 p2 = mark + 512;
+	hsys(180 /* pread64 */, bfd, &x2, 1, 0, (TUint32)p2, (TUint32)(p2 >> 32));
+	hsys(SYS_close, bfd);
+	HCHECK(x2 == 0, "the image file itself is unchanged (%02x)", x2);
+	HCHECK(T2((TUint32)(bigSize / 512), 1) == 0xffffffffu, "the sector after the end fails");
+	}
+
 	// syborg-snd sink: a ring drains at its playback rate, watermark and end-of-stream interrupts
 	extern TInt HostedSndAttach();
 	HCHECK(HostedSndAttach() == KErrNone, "sound device attached");
@@ -165,5 +200,167 @@ int main(int, char**)
 	HCHECK(ring[0x104 / 4] == head + 2, "the VM consumed the ring (tail %u)", ring[0x104 / 4]);
 	TUint32 k1 = HostedIoRead(kb + 4), k2 = HostedIoRead(kb + 4);
 	HCHECK(k1 == 0x400000a4u && k2 == 0xc00000a4u, "ring -> keyboard: press %08x, release %08x", k1, k2);
+	// the touch screen (bug 2026-11-12: the hosted board had none, the 808 could not be used): registers as QEMU's
+	// syborg-pointer v2, and the window's pointer ring through the display thread (moves between two polls merged)
+	{
+	extern TInt HostedPtrAttach();
+	extern void HostedPtrPush(TUint32 aX, TUint32 aY, TUint32 aButtons);
+	const TUint32 pt = KIo + 0x04 * 0x1000;
+	HCHECK(HostedPtrAttach() == KErrNone && HostedIoRead(pt) == 0xc51d0006u && HostedIoRead(pt + 9 * 4) == 2,
+	       "touch screen: ID SYBORG_ID_TOUCHSCREEN, version 2");
+	HostedIoWrite(pt + 7 * 4, 1);
+	HostedPtrPush(100, 200, 1);
+	HostedPtrPush(300, 400, 1);
+	HostedPtrPush(300, 400, 0);
+	HCHECK(HostedIoRead(pt + 2 * 4) == 3 && HostedIrqRaised(3), "three samples queued, EIntPointer raised");
+	TUint32 f[3], x[3], y[3];
+	for (TInt i = 0; i < 3; ++i)
+		{
+		HostedIoWrite(pt + 1 * 4, 1);
+		f[i] = HostedIoRead(pt + 14 * 4);
+		x[i] = HostedIoRead(pt + 3 * 4);
+		y[i] = HostedIoRead(pt + 4 * 4);
+		}
+	HCHECK(f[0] == 1 && f[1] == 4 && f[2] == 2 && x[0] == 100 && y[0] == 200 && x[2] == 300 && y[2] == 400,
+	       "DOWN at 100,200, MOVE, UP at 300,400 (flags %x %x %x)", f[0], f[1], f[2]);
+	HCHECK(HostedIoRead(pt + 2 * 4) == 0, "the FIFO is empty after three latches");
+	TUint32 ph = ring[0x400 / 4];
+	TUint32 ents[5][2] = { { 10 | 20 << 16, 1 }, { 11 | 21 << 16, 1 }, { 12 | 22 << 16, 1 }, { 13 | 23 << 16, 1 },
+	                       { 14 | 24 << 16, 0 } };
+	for (TInt i = 0; i < 5; ++i)
+		{
+		ring[0x408 / 4 + 2 * ((ph + i) % 64)] = ents[i][0];
+		ring[0x408 / 4 + 2 * ((ph + i) % 64) + 1] = ents[i][1];
+		}
+	ring[0x400 / 4] = ph + 5;
+	for (TInt i = 0; i < 50 && ring[0x404 / 4] != ph + 5; ++i)
+		hsleep_us(5000);
+	TUint32 n = HostedIoRead(pt + 2 * 4);
+	HostedIoWrite(pt + 1 * 4, 1);
+	TUint32 f0 = HostedIoRead(pt + 14 * 4);
+	HostedIoWrite(pt + 1 * 4, 1);
+	TUint32 f1 = HostedIoRead(pt + 14 * 4), x1 = HostedIoRead(pt + 3 * 4);
+	HostedIoWrite(pt + 1 * 4, 1);
+	TUint32 f2 = HostedIoRead(pt + 14 * 4), x2 = HostedIoRead(pt + 3 * 4);
+	HCHECK(n == 3 && f0 == 1 && f1 == 4 && x1 == 13 && f2 == 2 && x2 == 14,
+	       "ring -> touch: down, the last of three moves, up (%u entries; %x %x/%u %x/%u)", n, f0, f1, x1, f2, x2);
+	HostedIoWrite(pt + 7 * 4, 0);
+	}
+	// a modelled device page is not mapped for user mode (stores would bypass the model)
+	{
+	DPlatChunkHw* hw = NULL;
+	HCHECK(DPlatChunkHw::New(hw, 0xC0000000u + 0x03 * 0x1000, 0x1000, EMapAttrUserRw) == KErrNotSupported,
+	       "user mapping of the keyboard's (modelled) page refused");
+	// (the mappings that are allowed allocate a DPlatChunkHw from the kernel heap: not here, no kernel booted)
+	}
+	// user-visible chunks are reserved below 0x80000000 (bug 2026-11-12: a heap address returned as a TInt read
+	// as a negative error and the 808's window server failed to initialise)
+	{
+	extern TAny* VirtualReserveUser(TUint32 aSize, TUint32 aProtect);
+	TUint32 u1 = (TUint32)VirtualReserveUser(0x30000, 4), u2 = (TUint32)VirtualReserveUser(0x10000, 4);
+	HCHECK(u1 >= 0x01000000u && u1 + 0x30000 <= 0x70000000u && u2 >= 0x01000000u && u2 < 0x70000000u,
+	       "user reservations in the user window (%08x, %08x)", u1, u2);
+	HCHECK(u2 >= u1 + 0x30000 || u2 + 0x10000 <= u1, "they do not overlap");
+	HCHECK((TInt)u1 > 0 && (TInt)u2 > 0, "their addresses are positive TInts");
+	}
+	// the panel's view of the frame buffer (bug 2026-11-12: orientation and partial mode were stored, not shown,
+	// so the N95 screensaver's landscape picture, ORIENTATION 3, came out cut and sheared)
+	{
+	extern void HostedFbCompose(const TUint32* aPic, TInt aPitch, TInt aW, TInt aH, TUint32 aRot, TUint32 aPartialMode,
+	                            TUint32 aStart, TUint32 aEnd, TBool aDim, TInt aDimPercent, TUint32* aOut);
+	TUint32 pic[4 * 2], out[8];
+	for (TInt py = 0; py < 2; ++py)
+		for (TInt px = 0; px < 4; ++px)
+			pic[py * 4 + px] = 0x10 * py + px + 1;		// a 3x2 picture, pitch 4 words (padding column 4)
+	HostedFbCompose(pic, 16, 3, 2, 0, 0, 0, 0, EFalse, 25, out);
+	HCHECK(out[0] == 1 && out[2] == 3 && out[3] == 0x11 && out[5] == 0x13, "orientation 0: memory as it is, pitch honoured");
+	HostedFbCompose(pic, 16, 2, 3, 3, 0, 0, 0, EFalse, 25, out);	// screen 2x3: the picture turned 3 quarters
+	HCHECK(out[0] == 3 && out[1] == 0x13 && out[2] == 2 && out[4] == 1 && out[5] == 0x11,
+	       "orientation 3: picture top on the screen's left (%x %x / %x %x / %x %x)", out[0], out[1], out[2], out[3], out[4], out[5]);
+	HostedFbCompose(pic, 16, 2, 3, 1, 0, 0, 0, EFalse, 25, out);
+	HCHECK(out[0] == 0x11 && out[1] == 1 && out[4] == 0x13 && out[5] == 3, "orientation 1: picture top on the screen's right");
+	HostedFbCompose(pic, 16, 3, 2, 2, 0, 0, 0, EFalse, 25, out);
+	HCHECK(out[0] == 0x13 && out[5] == 1, "orientation 2: upside down");
+	TUint32 band[4] = { 0x808080, 0x7f80ff, 0x123456, 0xffffff };
+	HostedFbCompose(band, 16, 4, 1, 0, 1, 1, 2, EFalse, 25, out);	// columns 1..2, 8 colours
+	HCHECK(out[0] == 0 && out[1] == 0x00ffff && out[2] == 0 && out[3] == 0,
+	       "partial mode: outside the band black, inside 8 colours (%06x %06x)", out[1], out[2]);
+	HostedFbCompose(band, 16, 4, 1, 0, 3, 1, 2, EFalse, 25, out);
+	HCHECK(out[1] == 0x7f80ff && out[2] == 0x123456, "partial mode with full colour");
+	HostedFbCompose(pic, 16, 3, 2, 0, 5, 1, 1, EFalse, 25, out);	// a band of rows: row 1 only
+	HCHECK(out[0] == 0 && out[3] == 0 && out[5] == 0, "partial mode by rows: row 0 black, row 1 in 8 colours");
+	TUint32 grey = 0xc8c8c8;
+	HostedFbCompose(&grey, 4, 1, 1, 0, 0, 0, 0, ETrue, 25, out);
+	HCHECK(out[0] == 0x323232, "a blanked panel is dimmed to 25%% (%06x)", out[0]);
+	}
+	// the host-composed frame as the screen (bug 2026-11-12: with GL on the host the 808's window stayed black:
+	// the screen read only video RAM). A fake channel file stands in for the GL server.
+	{
+	extern TInt HostedFbAttach(TInt aWidth, TInt aHeight);
+	extern TInt HostedGlAttach(const char* aPath);
+	extern TBool HostedFbScreen(TUint32* aOut, TInt aMaxPixels, TInt& aWidth, TInt& aHeight);
+	const char* chanPath = "/tmp/kn_board-gl.chan";
+	TInt cfd = hsys(SYS_openat, -100, chanPath, 0x42 | 0x200, 0644);
+	hftruncate(cfd, 64u << 20);
+	volatile TUint32* ch = (volatile TUint32*)hmmap(0, 64u << 20, PROT_READ | PROT_WRITE, MAP_SHARED, cfd, 0);
+	hsys(SYS_close, cfd);
+	ch[0] = 0x434c4753u; ch[1] = 3; ch[2] = 1;			// magic, version 3, server up
+	HCHECK(HostedFbAttach(4, 2) == KErrNone && HostedGlAttach(chanPath) == KErrNone, "framebuffer and a fake GL channel attached");
+	TPhysAddr vram = 0;
+	HCHECK(Epoc::AllocPhysicalRam(0x1000, vram) == KErrNone, "video RAM");
+	TUint32* v = (TUint32*)HostedPhysicalToLinear(vram, 0x1000);
+	for (TInt i = 0; i < 8; ++i)
+		v[i] = 0x111111;
+	const TUint32 fb = 0xC6005000u;
+	HostedIoWrite(fb + 1 * 4, vram); HostedIoWrite(fb + 13 * 4, 1); HostedIoWrite(fb + 4 * 4, 0);
+	TUint32 scr[8];
+	TInt sw = 0, sh = 0;
+	HCHECK(HostedFbScreen(scr, 8, sw, sh) && sw == 4 && sh == 2 && scr[0] == 0x111111, "no frame published: video RAM (%06x)", scr[0]);
+	volatile TUint32* frame = ch + (56u << 20) / 4;
+	for (TInt i = 0; i < 8; ++i)
+		frame[i] = 0x220000 + i;
+	ch[33] = 4; ch[34] = 2; ch[32] = 3;				// size; sequence odd: being written
+	HostedFbScreen(scr, 8, sw, sh);
+	HCHECK(scr[0] == 0x111111, "a frame being written (odd sequence) is not shown");
+	ch[32] = 4;
+	HostedFbScreen(scr, 8, sw, sh);
+	HCHECK(scr[0] == 0x220000 && scr[7] == 0x220007, "a whole frame is the screen (%06x %06x)", scr[0], scr[7]);
+	HostedIoWrite(fb + 4 * 4, 1);					// a quarter turn: the picture must be 2x4, the frame is 4x2
+	HostedFbScreen(scr, 8, sw, sh);
+	HCHECK(scr[0] == 0x111111, "a frame of another size than the picture is not used");
+	HostedIoWrite(fb + 4 * 4, 0);
+	HostedIoWrite(fb + 5 * 4, 1);					// blanked: the host frame is dimmed as video RAM would be
+	HostedFbScreen(scr, 8, sw, sh);
+	HCHECK(scr[0] == 0x080000, "a blanked panel dims the host frame too (%06x)", scr[0]);
+	ch[0] = 0;
+	}
+	// the framebuffer interrupt (bug 2026-11-12: none on the hosted board; the N95 display stand-in posts frames
+	// and completes EndUpdate on VSYNC, so the screensaver never reached the screen)
+	{
+	extern void HostedLowerIrq(TInt aIrq);
+	const TUint32 fb = 0xC6005000u;
+	HostedIoWrite(fb + 6 * 4, 0);
+	HostedIoWrite(fb + 7 * 4, 3);
+	HostedLowerIrq(4);
+	TUint32 f0 = HostedIoRead(fb + 17 * 4);
+	hsleep_us(60000);
+	TUint32 f1 = HostedIoRead(fb + 17 * 4);
+	HCHECK(f1 >= f0 + 2 && f1 <= f0 + 6, "FRAME_COUNT counts vsyncs at 60 Hz (%u in 60 ms)", f1 - f0);
+	HCHECK((HostedIoRead(fb + 7 * 4) & 1) && !HostedIrqRaised(4), "VSYNC sets INT_CAUSE; masked: no interrupt");
+	HostedIoWrite(fb + 6 * 4, 1);
+	HCHECK(HostedIrqRaised(4), "unmasking a pending VSYNC raises EIntFb");
+	HostedLowerIrq(4);
+	HostedIoWrite(fb + 7 * 4, 1);
+	HCHECK(!(HostedIoRead(fb + 7 * 4) & 1) && !HostedIrqRaised(4), "writing 1 clears the cause");
+	hsleep_us(40000);
+	HCHECK(HostedIrqRaised(4), "the next vsync raises it again");
+	HostedIoWrite(fb + 6 * 4, 2);
+	HostedIoWrite(fb + 7 * 4, 3);
+	HostedLowerIrq(4);
+	HostedIoWrite(fb + 1 * 4, HostedIoRead(fb + 1 * 4));
+	hsleep_us(40000);
+	HCHECK((HostedIoRead(fb + 7 * 4) & 2) && HostedIrqRaised(4), "a BASE write raises BASE_UPDATE at the next vsync");
+	HostedIoWrite(fb + 6 * 4, 0);
+	}
 	return htest_done();
 	}

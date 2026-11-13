@@ -46,25 +46,8 @@ KMODULES = [
     ('Exstart', 'EXSTART.DLL', ['kernel/exstart.cpp']),
     ('Elocd', 'ELOCD.LDD', ['drivers/locmedia/locmedia.cpp', 'drivers/locmedia/dmasupport.cpp']),
     ('Medint', 'MEDINT.PDD', ['drivers/medint/iram.cpp']),
-    ('Medrofs', 'medrofs.pdd', [os.path.join(ROOT, 'src/standins/medrofs/medrofs.cpp')]),
     ('Mednvmem', 'MEDNVMEMORY.PDD', [os.path.join(ROOT, 'build/epocroot/sf/adapt/qemu/baseport/syborg/mednvmemory/syborg_mednvmemory.cpp')]),
-    ('Mednvmem2', 'mednvmem2.pdd', [STANDINS + 'mednvmem2/mednvmem2.cpp']),
-    # the Nokia ISC stack: our stand-ins (iscpeer.inl forwards to the board's fake modem)
-    ('Xbus', 'xbus.ldd', [STANDINS + 'xbus/xbus.cpp']),
-    ('Iscdrv', 'nokiaiscdriver.ldd', [STANDINS + 'nokiaiscdriver/nokiaiscdriver.cpp']),
-    ('Iscmux', 'iscisimultiplexer.ldd', [STANDINS + 'iscisimultiplexer/iscisimultiplexer.cpp']),
-    ('Iscext', 'nokiaiscdriverextension.ldd', [STANDINS + 'nokiaiscdriverextension/nokiaiscdriverextension.cpp']),
-    # the other stand-ins the N95 loads (sources from their .mmp)
-    ('Custom', 'custom.ldd', STANDINS + 'custom/custom.mmp'),
-    ('Sosadl', 'sosadlserver.ldd', STANDINS + 'sosadlserver/sosadlserver.mmp'),
-    ('Ddisplay', 'd_display.ldd', STANDINS + 'd_display/d_display.mmp'),
-    ('Secldd', 'secldd.ldd', STANDINS + 'secldd/secldd.mmp'),
-    ('Ehwa', 'ehwa.ldd', STANDINS + 'ehwa/ehwa.mmp'),
-    ('Ehwaomap', 'ehwaomap.pdd', STANDINS + 'ehwaomap/ehwaomap.mmp'),
-    ('Dvfs', 'dvfs_interface.ldd', STANDINS + 'dvfs_interface/dvfs_interface.mmp'),
-    ('Mobcrash', 'mobilecrashdriver.ldd', STANDINS + 'mobilecrashdriver/mobilecrashdriver.mmp'),
-    ('Lightldd', 'lightldd.ldd', STANDINS + 'lightldd/lightldd.mmp'),
-    ('Lightpdd', 'lightpdd.pdd', STANDINS + 'lightpdd/lightpdd.mmp'),
+    # the device's stand-ins (src/standins) come from its profile's [[standins]]: device_standins()
     # EPL drivers
     ('Pipelib', 'PIPELIB.LDD', 'drivers/pipe/pipe.mmp'),
     ('Ecomm', 'ECOMM.LDD', 'drivers/ecomm/ecomm.mmp'),
@@ -98,6 +81,15 @@ def mmp_sources(mmp):
 MMP_MACROS = {}        # .mmp -> its MACRO definitions
 SRC_MACROS = {}        # source -> -D flags from its module's .mmp
 DEVICE = None          # the device the kernel's per-device modules are built for (htest --rom)
+# Everything compiled with kernel flags goes to a directory of its own per device: the kernel's CPU flavour
+# (thread-ID registers) and the per-device modules (LCD.DLL from the profile) differ. Bug 2026-11-12: one shared
+# kmod/Lcd.o was rebuilt only when its sources were newer, so another device's LCD.DLL could be reused.
+BOUT = os.path.join(OUT, 'dev', 'generic')
+
+# CPUs with the CP15 user thread-ID registers (cpudefs.h: ARMv6K and later): their EUSER keeps the thread's
+# local data (TLS, heap) in a block TPIDRURW points at, and the kernel must reserve and fill it
+# (__USERSIDE_THREAD_DATA__, u32std.h). The ARM kernels get it from the CPU type (the N8/808's syborgfx = ARM1176).
+THREAD_ID_CPUS = {'arm1176', 'arm11mp', 'cortex-a8', 'cortex-a9'}
 
 
 def device_get(key):
@@ -112,8 +104,40 @@ def device_get(key):
         return None
 
 
+_CPU = []
+def device_cpu():
+    """the device's CPU (board.cpu: arm1136 when the profile does not say)"""
+    if not _CPU:
+        _CPU.append((device_get('board.cpu') or 'arm1136').lower())
+    return _CPU[0]
+
+
+STANDIN_EXT = {'ldd': 'ldd', 'pdd': 'pdd', 'extension': 'pdd', 'kext': 'dll', 'kext-ldd': 'ldd'}
+
+
+def device_standins():
+    """the profile's [[standins]] as built-in modules: (module name, ROM file name, .mmp), resolved as the ARM
+    ROM build does (tools/device.py standin_mmp / standins_oby). Until 2026-11-12 the list was the N95's,
+    written out here; the 808's ISA modem driver (isaaccessldd) had no hosted build and every IscApi client
+    panicked IADUserApiPanic."""
+    if not DEVICE:
+        return []
+    raw = device_get('standins')
+    if not raw:
+        return []
+    sys.path.insert(0, os.path.join(ROOT, 'tools'))
+    import device as devmodel
+    out = []
+    for st in json.loads(raw):
+        name = st['name']
+        mod = 'S' + ''.join(p.capitalize() for p in re.split(r'[^A-Za-z0-9]+', name) if p)
+        rom = '%s.%s' % (st.get('file', name), STANDIN_EXT[st['kind']])
+        out.append((mod, rom, os.path.join(STANDINS, devmodel.standin_mmp(name))))
+    return out
+
+
 def device_kmodules():
-    """KMODULES with the per-device entries resolved from the profile ('device:KEY')"""
+    """KMODULES with the per-device entries resolved from the profile ('device:KEY') and its stand-ins"""
     out = []
     for mname, romname, msrcs in KMODULES:
         if isinstance(msrcs, str) and msrcs == 'device:kernel.lcd':
@@ -122,6 +146,8 @@ def device_kmodules():
             msrcs = mmp if mmp and os.path.exists(mmp) else \
                 os.path.join(ROOT, 'build/epocroot/sf/adapt/qemu/baseport/syborg/fb/fb.mmp')
         out.append((mname, romname, msrcs))
+    have = {r.lower() for _, r, _ in out}
+    out += [m for m in device_standins() if m[1].lower() not in have]
     return out
 
 
@@ -198,6 +224,7 @@ def kernel_flags():
             # Symbian_OS.hrh) only with this; without it ExecHandler::LeaveStart is the invalid-exec
             # handler and the phone's EUSER panics on its first Leave (bug 2026-11-12, kn_efile)
             '-D__SUPPORT_CPP_EXCEPTIONS__',
+            ] + (['-D__CPU_HAS_CP15_THREAD_ID_REG'] if device_cpu() in THREAD_ID_CPUS else []) + [
             '-I', os.path.join(SRC, 'include'), '-I', NKLINUX, '-I', os.path.join(EKA, 'include/nkern'), '-I', os.path.join(EKA, 'include'),
             '-I', EINC, '-I', os.path.join(EINC, 'platform')]
 
@@ -223,14 +250,15 @@ def newer(out, srcs):
 
 
 def build():
-    os.makedirs(os.path.join(OUT, 'obj'), exist_ok=True)
+    os.makedirs(BOUT, exist_ok=True)
+    os.makedirs(os.path.join(BOUT, 'obj'), exist_ok=True)
     ld = tool('aarch64-suse-linux-ld', 'aarch64-linux-gnu-ld', 'ld.lld')
     gcc64 = tool('aarch64-suse-linux-gcc', 'aarch64-linux-gnu-gcc')
     objcopy = tool('aarch64-suse-linux-objcopy', 'aarch64-linux-gnu-objcopy', 'llvm-objcopy')
     hdrs = glob.glob(os.path.join(SRC, 'rt', '*.h'))
     rt = []
     for s in sorted(glob.glob(os.path.join(SRC, 'rt', '*.[cS]'))):
-        o = os.path.join(OUT, 'obj', os.path.basename(s) + '.o')
+        o = os.path.join(BOUT, 'obj', os.path.basename(s) + '.o')
         if newer(o, [s] + hdrs):
             run(CC32 + ['-c', s, '-o', o])
         rt.append(o)
@@ -241,7 +269,7 @@ def build():
         srcs = [os.path.join(EKA, 'nkern', n + '.cpp') for n in NKERN_GENERIC] + \
             sorted(glob.glob(os.path.join(NKLINUX, '*.cpp')))
         for s in srcs:
-            o = os.path.join(OUT, 'nkobj', os.path.basename(s) + '.o')
+            o = os.path.join(BOUT, 'nkobj', os.path.basename(s) + '.o')
             os.makedirs(os.path.dirname(o), exist_ok=True)
             if newer(o, [s] + khdrs):
                 run(CC32 + kernel_flags() + ['-c', s, '-o', o])
@@ -274,7 +302,7 @@ def build():
             for m in msrcs:
                 kmods[m if os.path.isabs(m) else os.path.join(EKA, m)] = mname
         ksrcs += list(kmods)
-        table = os.path.join(OUT, 'kmodules_table.cpp')
+        table = os.path.join(BOUT, 'kmodules_table.cpp')
         lines = ['// generated by tools/hosted/htest.py from KMODULES', '#include <e32def.h>',
                  'struct SHostedModule { const char* iName; TInt (*iEntry)(TInt); TAny* (*iFactory)(); '
                  'void (**iCtors)(); void (**iCtorsEnd)(); TUint8* iData; TUint8* iDataEnd; TUint8* iBss; TUint8* iBssEnd; };']
@@ -301,7 +329,7 @@ def build():
         ksrcs.append(table)
         modobjs = {}
         for s in ksrcs:
-            o = os.path.join(OUT, 'kobj', s.replace(EKA + '/', '').replace(SRC + '/', '').replace('/', '_') + '.o')
+            o = os.path.join(BOUT, 'kobj', s.replace(EKA + '/', '').replace(SRC + '/', '').replace('/', '_') + '.o')
             if SRC_MACROS.get(s):      # per-device builds of one source (lcd_n95 vs fb): own objects
                 import hashlib
                 o = o[:-2] + '-' + hashlib.md5(' '.join(SRC_MACROS[s]).encode()).hexdigest()[:8] + '.o'
@@ -343,7 +371,7 @@ def build():
                 kern.append(o)
         # the fake modem's core, shared with the QEMU device (C, built for the hosted runtime)
         core = os.path.join(MODEM_CORE_DIR, 'syborg_modem_core.c')
-        o = os.path.join(OUT, 'kobj', 'syborg_modem_core.c.o')
+        o = os.path.join(BOUT, 'kobj', 'syborg_modem_core.c.o')
         chdrs = [os.path.join(MODEM_CORE_DIR, 'syborg_modem_core.h'), os.path.join(SRC, 'include/board/syborg_modem_env.h')]
         if newer(o, [core] + chdrs):
             run(CC32 + ['-x', 'c', '-std=gnu11', '-DSYBMODEM_HOSTED', '-I', MODEM_CORE_DIR,
@@ -359,7 +387,7 @@ def build():
             out = subprocess.run([nmtool, '-u'] + objs, capture_output=True, text=True, check=True).stdout
             return {l.split()[-1] for l in out.splitlines() if l.strip() and not l.endswith(':')}
         for mname, objs in sorted(modobjs.items()):
-            mo = os.path.join(OUT, 'kmod', mname + '.o')
+            mo = os.path.join(BOUT, 'kmod', mname + '.o')
             os.makedirs(os.path.dirname(mo), exist_ok=True)
             others = kern + [o for n, os_ in modobjs.items() if n != mname for o in os_]
             if newer(mo, objs) or newer(mo, others) or newer(mo, [os.path.abspath(__file__)]):
@@ -381,14 +409,14 @@ def build():
                 lf = mo + '.localize'
                 open(lf, 'w').write('\n'.join(loc) + '\n')
                 run([objcopy, '--remove-section=.group', '--localize-symbols=' + lf, mo])
-        kern += [os.path.join(OUT, 'kmod', n + '.o') for n in sorted(modobjs)]
+        kern += [os.path.join(BOUT, 'kmod', n + '.o') for n in sorted(modobjs)]
     tests = []
     for s in sorted(glob.glob(os.path.join(SRC, 'tests', 'kn_*.cpp'))):
         if not kern:
             continue
         name = os.path.splitext(os.path.basename(s))[0]
-        o = os.path.join(OUT, 'obj', name + '.o')
-        exe = os.path.join(OUT, 't', name)
+        o = os.path.join(BOUT, 'obj', name + '.o')
+        exe = os.path.join(BOUT, 't', name)
         os.makedirs(os.path.dirname(exe), exist_ok=True)
         if newer(o, [s] + hdrs + glob.glob(os.path.join(SRC, 'tests', '*.h'))):
             run(CC32 + kernel_flags() + kflags + ['-I', os.path.join(SRC, 'tests'), '-c', s, '-o', o])
@@ -402,7 +430,7 @@ def build():
     # Symbian's standalone nanokernel suite (kerneltest/e32test/nkernsa) on the hosted platform: nk_sa
     sa = os.path.join(ROOT, 'build/epocroot/sf/os/kernelhwsrv/kerneltest/e32test/nkernsa')
     if nk and os.path.isdir(sa):
-        inc = os.path.join(OUT, 'nkinc')
+        inc = os.path.join(BOUT, 'nkinc')
         os.makedirs(inc, exist_ok=True)
         if not os.path.islink(os.path.join(inc, 'nktest')):
             os.symlink(sa, os.path.join(inc, 'nktest'))
@@ -411,13 +439,13 @@ def build():
         srcs.append(os.path.join(SRC, 'nkern', 'nksa', 'nksa_hosted.cpp'))
         objs = []
         for s in srcs:
-            o = os.path.join(OUT, 'saobj', os.path.basename(s) + '.o')
+            o = os.path.join(BOUT, 'saobj', os.path.basename(s) + '.o')
             os.makedirs(os.path.dirname(o), exist_ok=True)
             if newer(o, [s] + hdrs + glob.glob(os.path.join(NKLINUX, '*.h'))):
                 run(CC32 + kernel_flags() + ['-I', inc, '-I', os.path.join(EKA, 'include/kernel'),
                                              '-D__STANDALONE_NANOKERNEL__', '-c', s, '-o', o])
             objs.append(o)
-        exe = os.path.join(OUT, 't', 'nk_sa')
+        exe = os.path.join(BOUT, 't', 'nk_sa')
         os.makedirs(os.path.dirname(exe), exist_ok=True)
         if newer(exe, objs + nk + rt):
             run([ld, '-m', 'armelf_linux_eabi', '-static', '-e', '_start', '-Ttext-segment=0x10000',
@@ -428,8 +456,8 @@ def build():
             print('htest: no EKA2 tree (scripts/setup-epocroot.sh): skipping %s' % os.path.basename(s))
             continue
         name = os.path.splitext(os.path.basename(s))[0]
-        o = os.path.join(OUT, 'obj', name + '.o')
-        exe = os.path.join(OUT, 't', name)
+        o = os.path.join(BOUT, 'obj', name + '.o')
+        exe = os.path.join(BOUT, 't', name)
         os.makedirs(os.path.dirname(exe), exist_ok=True)
         if newer(o, [s] + hdrs + glob.glob(os.path.join(NKLINUX, '*.h'))):
             run(CC32 + kernel_flags() + ['-c', s, '-o', o])
@@ -440,8 +468,8 @@ def build():
     plain = sorted(glob.glob(os.path.join(SRC, 'tests', 't_*.c')) + glob.glob(os.path.join(SRC, 'tests', 't_*.cpp')))
     for s in plain:
         name = os.path.splitext(os.path.basename(s))[0]
-        o = os.path.join(OUT, 'obj', name + '.o')
-        exe = os.path.join(OUT, 't', name)
+        o = os.path.join(BOUT, 'obj', name + '.o')
+        exe = os.path.join(BOUT, 't', name)
         os.makedirs(os.path.dirname(exe), exist_ok=True)
         if newer(o, [s] + hdrs):
             cxx = ['-x', 'c++', '-fno-rtti'] if s.endswith('.cpp') else []
@@ -451,7 +479,7 @@ def build():
             run([ld] + lflag + ['-static', '-e', '_start', '-Ttext-segment=0x10000', '--gc-sections',
                                 '-o', exe, o] + rt)
         tests.append(exe)
-    init = os.path.join(OUT, 'init')
+    init = os.path.join(BOUT, 'init')
     isrc = os.path.join(SRC, 'init', 'init.c')
     if newer(init, [isrc]):
         run([gcc64, '-static', '-O2', '-Wall', '-o', init, isrc])
@@ -478,6 +506,33 @@ def cpio(path, entries):
 
 
 SEED_SHARE = None
+
+
+def hosted_seed(src, dev):
+    """the device's drive seed with every SQLite log checkpointed (tools/hosted/cleanseed.py: hosted boots replay
+    the logs a running QEMU phone left, and the 808's SQL server took those databases for corrupt); rebuilt when
+    the seed changes"""
+    if not os.path.exists(os.path.join(src, 'nvmemory.img')):
+        return src
+    out = os.path.join(ROOT, 'build/hosted/seeds', dev)
+    stamp = os.path.join(out, '.from')
+    want = '%s %d' % (src, os.path.getmtime(os.path.join(src, 'nvmemory.img')))
+    if not os.path.exists(stamp) or open(stamp).read() != want:
+        r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools/hosted/cleanseed.py'), src, out],
+                           capture_output=True, text=True)
+        if r.returncode:
+            print('htest: cleanseed failed, using the seed as it is: %s' % (r.stdout + r.stderr).strip()[-300:])
+            return src
+        open(stamp, 'w').write(want)
+    return out
+
+
+# Fake-modem replies the hosted board holds back for now (QEMU keeps them):
+# - 8C 21 (UICC power control, NFC secure element; 2026-11-13): with it nfcserver finishes starting, and right after
+#   it the state manager's command thread panics USER 11 (a descriptor overflow in TDes16::AppendFormatList) while
+#   running dcmostartupcustcmd.dll, on the hosted kernel only: system state 117, the modem resets the phone. Without
+#   it Settings -> Phone hangs (as before). Open: docs/hosted-eka2/roadmap.md.
+HOSTED_HOLD_REPLIES = ('8C 21 ',)
 
 
 def rom_setup(dev):
@@ -529,11 +584,20 @@ def rom_setup(dev):
         for x in qa:
             if x.startswith('syborg-platform.config='):
                 args += 'boardconfig %s\n' % x.split('=', 1)[1]
+            if x == 'syborg-pointer.input=on':
+                args += 'touch 1\n'                                  # a touch phone: the pointer model (hptr.cpp)
             if x.startswith('syborg-fb.width=') or x.startswith('syborg-fb.height='):
                 args += 'fb%s %s\n' % (x[10], x.split('=', 1)[1])      # fbw / fbh
             if x.startswith('syborg-modem.replies='):
-                # the fake modem's reply table (generated next to the ROM: inside the /rom share)
-                rel = os.path.relpath(os.path.realpath(x.split('=', 1)[1]), os.path.dirname(real))
+                # the fake modem's reply table (generated next to the ROM: inside the /rom share). Hosted copy
+                # without the replies in HOSTED_HOLD_REPLIES (docs/hacks.md: held back on the hosted board)
+                tab = os.path.realpath(x.split('=', 1)[1])
+                held = tab[:-4] + '-hosted.tab'
+                lines = open(tab).read().splitlines(True)
+                text = ''.join(l for l in lines if not any(l.startswith(h) for h in HOSTED_HOLD_REPLIES))
+                if not os.path.exists(held) or open(held).read() != text:
+                    open(held, 'w').write(text)
+                rel = os.path.relpath(held, os.path.dirname(real))
                 if not rel.startswith('..'):
                     args += 'replies /rom/%s\n' % rel
     except subprocess.CalledProcessError:
@@ -542,7 +606,7 @@ def rom_setup(dev):
         args += 'rofs /rom/%s.rofs\n' % os.path.basename(real)      # the flash window (medrofs)
     # the drives past first boot (C: and E: NVMemory images), shared read-only; tests map them private
     global SEED_SHARE
-    seed = os.path.join(ROOT, 'build/seeds', dev)
+    seed = hosted_seed(os.path.join(ROOT, 'build/seeds', dev), dev)
     if os.path.exists(os.path.join(seed, 'nvmemory.img')):
         SEED_SHARE = seed
         args += 'nvmem /seed/nvmemory.img\n'
@@ -569,20 +633,61 @@ SLOW = {'nk_sa': 900}
 MATRIX = [('cortex-a55', 1), ('cortex-a55', 2), ('cortex-a55', 4), ('max', 4)]
 
 
+PHONE_GL_ADDR = 6           # the GL channel's ivshmem device: PCI 00:06.0 (the screen's is PHONE_SHM_ADDR)
+GL_SERVERS = []
+
+
+def gl_setup(a, chan):
+    """--gl: the host GL server (src/hosted/glserver) on a fresh channel file, and what the VM needs for it
+    (QEMU args, the env the hosted board reads). The server runs syborg_gl.c on this machine's GPU with the
+    device's GL identity, EGL configs and graphics memory (its syborg-gl QEMU properties)."""
+    r = subprocess.run(['bash', os.path.join(ROOT, 'scripts/build-glserver.sh')], capture_output=True, text=True)
+    if r.returncode:
+        sys.exit('htest: glserver build failed:\n' + r.stdout + r.stderr)
+    with open(chan, 'wb') as f:
+        f.truncate(64 << 20)
+    args = [os.path.join(ROOT, 'build/hosted/glserver/glserver'), '--chan', chan]
+    if DEVICE:
+        qa = subprocess.run([sys.executable, os.path.join(ROOT, 'tools/device.py'), 'qemu-args'],
+                            env=dict(os.environ, SYBORG_DEVICE=DEVICE), capture_output=True, text=True).stdout.split()
+        for x in qa:
+            for prop, opt in (('identity', '--identity'), ('egl-configs', '--egl-configs'),
+                              ('gpu-memory-mb', '--gpu-memory-mb'), ('msaa', '--msaa')):
+                if x.startswith('syborg-gl.%s=' % prop):
+                    args += [opt, x.split('=', 1)[1]]
+    log = open(chan + '.log', 'w')
+    GL_SERVERS.append(subprocess.Popen(args, stdout=log, stderr=subprocess.STDOUT))
+    qemu = ['-object', 'memory-backend-file,id=glchan,size=64M,mem-path=%s,share=on' % chan,
+            '-device', 'ivshmem-plain,memdev=glchan,addr=0x%x' % PHONE_GL_ADDR]
+    return qemu, 'GLCHAN=/sys/bus/pci/devices/0000:00:%02x.0/resource2' % PHONE_GL_ADDR
+
+
+def gl_stop():
+    for p in GL_SERVERS:
+        if p.poll() is None:
+            p.terminate()
+            try:
+                p.wait(5)
+            except subprocess.TimeoutExpired:
+                p.kill()
+
+
 def boot_one(img, tests, cpu, smp, a, tag):
     """one QEMU run of `tests` (all when empty); returns (results {name: (res, code, ms)}, summary, log, lines)"""
     append = 'console=ttyAMA0 panic=-1 quiet'
     if tests:
         append += ' htest=' + ','.join(tests)
     append += ' htest.timeout=%d htest.cp15=%s %s' % (a.timeout, a.cp15, a.append)
-    for kv in a.env + (['KTRACE=%s' % a.trace] if a.trace else []) + (['XTRACE=%d' % a.xtrace] if a.xtrace else []):
+    glq, glenv = gl_setup(a, os.path.join(OUT, 'gl-%s.chan' % (tag or 'run'))) if a.gl else ([], None)
+    for kv in a.env + (['KTRACE=%s' % a.trace] if a.trace else []) + (['XTRACE=%d' % a.xtrace] if a.xtrace else []) + \
+            ([glenv] if glenv else []):
         append += ' htest.env.' + kv
     for n in (tests or SLOW):
         if n in SLOW and not a.timeout_given:
             append += ' htest.t.%s=%d' % (n, SLOW[n])
     cmd = [QEMU, '-M', 'virt,gic-version=3', '-accel', 'tcg', '-cpu', cpu, '-smp', str(smp), '-m', '1024',
            '-kernel', KERNEL, '-initrd', img, '-append', append.strip(),
-           '-nographic', '-no-reboot', '-serial', 'stdio', '-monitor', 'none']
+           '-nographic', '-no-reboot', '-serial', 'stdio', '-monitor', 'none'] + glq
     if a.rom_share:
         cmd += ['-virtfs', 'local,path=%s,mount_tag=rom,security_model=none,readonly=on' % a.rom_share]
     if SEED_SHARE:
@@ -613,6 +718,7 @@ def boot_one(img, tests, cpu, smp, a, tag):
                 lines.append('htest: overall time limit reached')
                 break
     p.wait()
+    gl_stop()
     return results, summary, log, lines
 
 
@@ -630,6 +736,7 @@ def test_output(lines, name):
     return out
 
 
+PHONE_SHM_BYTES = 4 << 20   # the screen (up to 1024x1000 XRGB), key and pointer rings (hdisplay.cpp)
 PHONE_SHM_ADDR = 5        # the ivshmem device's PCI slot: /sys/bus/pci/devices/0000:00:05.0/resource2 in the VM
 
 
@@ -640,16 +747,17 @@ def run_phone(img, a):
     shm = a.shm or os.path.join(OUT, 'phone.shm')
     serial = a.serial or os.path.join(OUT, 'phone.log')
     with open(shm, 'wb') as f:
-        f.truncate(1 << 20)
+        f.truncate(PHONE_SHM_BYTES)
     append = ('console=ttyAMA0 panic=-1 quiet htest=kn_efile htest.timeout=100000000 htest.cp15=%s '
               'htest.env.PHONE=/sys/bus/pci/devices/0000:00:%02x.0/resource2 %s' % (a.cp15, PHONE_SHM_ADDR, a.append))
-    for kv in a.env:
+    glq, glenv = gl_setup(a, os.path.join(os.path.dirname(shm), 'gl.chan')) if a.gl else ([], None)
+    for kv in a.env + ([glenv] if glenv else []):
         append += ' htest.env.' + kv
     cmd = [QEMU, '-M', 'virt,gic-version=3', '-accel', 'tcg', '-cpu', a.cpu, '-smp', str(a.smp), '-m', '1024',
            '-kernel', KERNEL, '-initrd', img, '-append', append.strip(), '-no-reboot', '-display', 'none',
-           '-object', 'memory-backend-file,id=phonefb,size=1M,mem-path=%s,share=on' % shm,
+           '-object', 'memory-backend-file,id=phonefb,size=%dM,mem-path=%s,share=on' % (PHONE_SHM_BYTES >> 20, shm),
            '-device', 'ivshmem-plain,memdev=phonefb,addr=0x%x' % PHONE_SHM_ADDR,
-           '-name', 'hosted %s' % a.rom, '-serial', 'file:%s' % serial, '-monitor', 'none']
+           '-name', 'hosted %s' % a.rom, '-serial', 'file:%s' % serial, '-monitor', 'none'] + glq
     if a.qmp:
         cmd += ['-qmp', 'unix:%s,server,nowait' % a.qmp]
     if a.rom_share:
@@ -663,10 +771,13 @@ def run_phone(img, a):
     q = subprocess.Popen(cmd)
     def stop(*_):
         q.terminate()       # never leave the VM behind (an interrupted or timed-out htest)
+        gl_stop()
         sys.exit(130)
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    return q.wait()
+    r = q.wait()
+    gl_stop()
+    return r
 
 
 def run_all(img, names, a):
@@ -725,6 +836,9 @@ def main():
     ap.add_argument('--build-only', action='store_true')
     ap.add_argument('--phone', action='store_true',
                     help='boot the device to its home screen in a window (virtio-gpu, keyboard); runs until closed')
+    ap.add_argument('--gl', action='store_true',
+                    help='syborg-gl on the host GL server (src/hosted/glserver, this machine\'s GPU): needed by phones '
+                         'that compose on the GPU (N8, 701, 808)')
     ap.add_argument('--serial', help='--phone: the serial log file (default build/hosted/htest/phone.log; '
                     'a second phone at once needs its own --shm and --serial)')
     ap.add_argument('--shm', help='--phone: the shared screen/keys file (default build/hosted/htest/phone.shm)')
@@ -749,8 +863,9 @@ def main():
     a.timeout_given = a.timeout is not None
     if a.timeout is None:
         a.timeout = 60
-    global DEVICE
+    global DEVICE, BOUT
     DEVICE = a.rom
+    BOUT = os.path.join(OUT, 'dev', a.rom or 'generic')
     init, tests = build()
     if a.tests:
         known = {os.path.basename(t) for t in tests}

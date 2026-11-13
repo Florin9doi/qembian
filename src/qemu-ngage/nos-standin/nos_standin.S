@@ -226,6 +226,12 @@ slot\slot:
         ldr     r0, [r0]
         cmp     r0, #0
         bne     3f
+        @ Nothing to do: sleep until the next interrupt (H-ngage-idle). The null thread calls
+        @ this from a privileged mode with IRQs enabled [V: cpsr 0x6000001b at idle]; ekern's
+        @ own ASIC idle (0x5031dc78) is an empty function, so on the phone the CPU sleeps
+        @ here, in the NOS. Without it QEMU ran one host core at 100% at idle.
+        @ TI925T wait-for-interrupt: cp15 c15,c8,0 (QEMU's TI925T_STATUS write).
+        mcr     p15, 0, r0, c15, c8, 0
         ldmfd   sp!, {r0}
         mov     r0, #0
         mov     pc, lr

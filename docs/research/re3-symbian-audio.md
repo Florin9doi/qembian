@@ -1,7 +1,7 @@
 # re3-symbian (GTA III port): why there is no audio traffic on the N8
 
 Source: https://gitlab.com/shinovon/re3-symbian, branch `master`, commit 653d3134 (2026-05-15).
-Static read only (a shallow clone of the repository above).
+Static read only (shallow clone in `tmp/re3-symbian-src/repo`, untrusted data; delete when done).
 Line numbers refer to that commit.
 
 ## 1. Audio backend: there is none yet

@@ -27,17 +27,30 @@ public:
 		}
 	virtual void Idle() {}
 	virtual TInt MsTickPeriod() { return 1000; }
-	virtual TInt SystemTimeInSecondsFrom2000(TInt& aTime)
+	// the RTC: host time plus an offset that setting the time moves (as QEMU's syborg-rtc). Bug 2026-11-12:
+	// setting it was refused (KErrNotSupported), so the 808's first-boot date step failed ("adtupdater: Feature
+	// not supported") and start-up ended on a black screen instead of the home screen. Regression: kn_boot.
+	static TInt HostSecondsFrom2000()
 		{
 		struct { TInt32 s, ns; } ts;
 		hsys(SYS_clock_gettime, 0 /* CLOCK_REALTIME */, &ts);
-		aTime = ts.s - 946684800;		// 1970 -> 2000
+		return ts.s - 946684800;		// 1970 -> 2000
+		}
+	virtual TInt SystemTimeInSecondsFrom2000(TInt& aTime)
+		{
+		aTime = HostSecondsFrom2000() + iRtcOffset;
 		return KErrNone;
 		}
-	virtual TInt SetSystemTimeInSecondsFrom2000(TInt) { return KErrNotSupported; }
+	virtual TInt SetSystemTimeInSecondsFrom2000(TInt aTime)
+		{
+		iRtcOffset = aTime - HostSecondsFrom2000();
+		return KErrNone;
+		}
 	virtual TUint32 NanoWaitCalibration() { return 1; }
 	virtual TInt VariantHal(TInt aFunction, TAny* a1, TAny* a2);
 	virtual TPtr8 MachineConfiguration() { return TPtr8(iMachineConfig, sizeof(iMachineConfig), sizeof(iMachineConfig)); }
+public:
+	TInt iRtcOffset;			// seconds the phone's clock is ahead of the host's (kept for the run)
 private:
 	char iLine[256];
 	TInt iLen;

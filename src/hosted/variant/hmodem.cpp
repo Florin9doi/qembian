@@ -60,7 +60,7 @@ static void HostTimerMod(void*, SybModemTimer* aT, int aMs)
 	aT->iDue = hnow_ns() + (TUint64)(aMs > 0 ? aMs : 0) * 1000000u;
 	aT->iArmed = ETrue;
 	__atomic_add_fetch(&TimerSeq, 1, __ATOMIC_SEQ_CST);
-	hfutex_wake(&TimerSeq, 1);
+	hpfutex_wake(&TimerSeq, 1);
 	}
 
 static void HostTimerDel(void*, SybModemTimer* aT)
@@ -75,9 +75,15 @@ static void HostGuestError(void*, const char* aText)
 
 static void HostPower(void*, int aWhat)
 	{
+	// switch off = the phone's own end (exit 0); a reset is what start-up does when it fails (sysstatemgr
+	// gives up), so it ends the process with an error. Bug 2026-11-12: it exited 0 and kn_efile reported
+	// PASS for an 808 boot whose window server had died. Regression: kn_modem (reset exit code).
 	hprintf("HOSTED: the modem %s the phone\n", aWhat == 1 ? "switches off" : "resets");
-	hexit(0);
+	hexit(aWhat == 1 ? 0 : 3);
 	}
+
+// tests: the modem's power request as the core makes it (1 = switch off, else reset); does not return
+void HostedModemPower(TInt aWhat) { HostPower(NULL, aWhat); }
 
 static bool HostNetPresent(void*) { return false; }
 static void HostNetSend(void*, const uint8_t*, size_t) {}
@@ -97,6 +103,7 @@ static const SybModemHost ModemHost =
 // ---- timers: one host thread fires them in due order (under the modem lock)
 static int TimerThread(void*)
 	{
+	hsys(SYS_prctl, 15 /* PR_SET_NAME */, "h-modemtimer");	// its name in the Linux view (lxtop)
 	for (;;)
 		{
 		TInt seq = __atomic_load_n(&TimerSeq, __ATOMIC_SEQ_CST);
@@ -124,7 +131,7 @@ static int TimerThread(void*)
 			us = d > 1000000 ? 1000000 : (TUint32)d;
 			}
 		if (us)
-			hfutex_wait_us(&TimerSeq, seq, us);
+			hpfutex_wait_us(&TimerSeq, seq, us);
 		}
 	}
 

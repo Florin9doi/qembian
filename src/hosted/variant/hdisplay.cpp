@@ -1,6 +1,6 @@
 // Hosted EKA2: the phone's screen for a host window. The test VM has an ivshmem device whose memory is a file
 // on the host (tools/hosted/htest.py --phone, tools/hosted/phone.py); a host thread here copies the board's
-// framebuffer (the phone's video RAM, HostedFbPixels) into it about 30 times a second, only the rows that
+// framebuffer as the panel shows it (HostedFbScreen: rotation, partial mode, dimming) into it about 30 times a second, only the rows that
 // changed, and bumps a frame counter; the host viewer maps the same file and draws it. The same memory carries
 // key events the other way (a ring, read by the keypad model). Original work for qembian.
 //
@@ -8,11 +8,15 @@
 //   0x000 magic 'HPFB'  0x004 version 1  0x008 width  0x00c height  0x010 pitch (bytes)  0x014 frame counter
 //   0x100 key ring: 0x100 head (host writes)  0x104 tail (guest writes)  0x108 + 4 * i: 64 entries
 //         (entry: bit 31 pressed, bits 0..15 the key code)
+//   0x080 diagnosis requests (host bumps: kn_efile PhoneDiag lists who waits on whom)
+//   0x400 pointer ring (touch phones): 0x400 head (host writes)  0x404 tail (guest writes)  0x408 + 8 * i: 64
+//         entries {x | y << 16 (absolute 0..32767 over the screen), buttons (bit 0: the finger is down)}
 //   0x1000 pixels, XRGB8888, height rows of pitch bytes
 
 #include <kernel/kern_priv.h>
 
-extern const TUint32* HostedFbPixels(TInt& aWidth, TInt& aHeight, TInt& aPitch);
+extern TBool HostedFbScreen(TUint32* aOut, TInt aMaxPixels, TInt& aWidth, TInt& aHeight);
+extern const TUint32* HostedFbPlain(TInt& aWidth, TInt& aHeight, TInt& aPitch, TUint32& aGlSeq);
 
 static const TUint32 KMagic = 0x42465048;		// "HPFB"
 static const TUint32 KPixels = 0x1000;
@@ -23,11 +27,34 @@ static TInt ShadowBytes;
 static volatile TInt DisplayTid;
 volatile TUint32 HostedDisplayFrames;
 
+static TUint32* Frame;
+static const TInt KMaxPixels = 1024 * 1024;
+
 static void Present()
 	{
-	TInt w = 0, h = 0, pitch = 0;
-	const TUint32* src = HostedFbPixels(w, h, pitch);
-	if (!src || w <= 0 || h <= 0 || KPixels + (TUint32)(w * h * 4) > ShmBytes)
+	if (!Frame)
+		{
+		TAny* m = hmmap(0, KMaxPixels * 4, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+		if (HMAP_FAILED(m))
+			return;
+		Frame = (TUint32*)m;
+		}
+	TInt w = 0, h = 0;
+	// fast path: the picture as it is (HostedFbPlain): nothing to do for an unchanged host frame, else the changed
+	// rows straight from it
+	TInt pitch = 0;
+	TUint32 glSeq = 0;
+	static TUint32 LastGlSeq;
+	const TUint32* plain = HostedFbPlain(w, h, pitch, glSeq);
+	if (plain && glSeq && glSeq == LastGlSeq)
+		return;
+	LastGlSeq = 0;
+	if (plain)
+		{
+		if (KPixels + (TUint32)(w * h * 4) > ShmBytes)
+			return;
+		}
+	else if (!HostedFbScreen(Frame, KMaxPixels, w, h) || KPixels + (TUint32)(w * h * 4) > ShmBytes)
 		return;
 	if (ShadowBytes < w * h * 4)
 		{
@@ -45,7 +72,7 @@ static void Present()
 	TUint32* dst = (TUint32*)((TUint8*)Shm + KPixels);
 	for (TInt y = 0; y < h; ++y)
 		{
-		const TUint32* row = (const TUint32*)((const TUint8*)src + y * pitch);
+		const TUint32* row = plain ? (const TUint32*)((const TUint8*)plain + y * pitch) : Frame + y * w;
 		TUint32* sh = Shadow + y * w;
 		if (!memcmp(sh, row, w * 4))
 			continue;
@@ -53,6 +80,9 @@ static void Present()
 		memcpy(dst + y * w, row, w * 4);
 		any = ETrue;
 		}
+	extern TUint32 HostedGlFrameSeq();
+	if (glSeq && HostedGlFrameSeq() == glSeq)
+		LastGlSeq = glSeq;				// copied whole: skip it until the server publishes another
 	if (any)
 		{
 		__atomic_thread_fence(__ATOMIC_RELEASE);
@@ -63,10 +93,50 @@ static void Present()
 
 TBool HostedDisplayNextKey(TUint32& aEntry);
 extern void HostedKeybPush(TUint32 aCode);
+extern void HostedPtrPush(TUint32 aX, TUint32 aY, TUint32 aButtons);
+extern void HostedGlStat();
+static TBool GlStat;
+
+// the pointer ring into the touch model: every press and release, of the moves between two only the last
+// (one sample per 10 ms poll: the panel's report rate)
+static void DrainPointer()
+	{
+	if (!Shm)
+		return;
+	TUint32 head = Shm[0x400 / 4], tail = Shm[0x404 / 4];
+	if (head == tail)
+		return;
+	__atomic_thread_fence(__ATOMIC_ACQUIRE);
+	TUint32 lastXy = 0, lastButtons = 0;
+	TBool held = EFalse;
+	static TUint32 Buttons;
+	for (; tail != head; ++tail)
+		{
+		TUint32 xy = Shm[0x408 / 4 + 2 * (tail % 64)], b = Shm[0x408 / 4 + 2 * (tail % 64) + 1];
+		if ((b & 1) == (Buttons & 1))
+			{
+			lastXy = xy;
+			lastButtons = b;
+			held = ETrue;					// a move: the latest wins
+			continue;
+			}
+		if (held)
+			HostedPtrPush(lastXy & 0xffff, lastXy >> 16, lastButtons);
+		held = EFalse;
+		HostedPtrPush(xy & 0xffff, xy >> 16, b);
+		Buttons = b;
+		}
+	if (held)
+		HostedPtrPush(lastXy & 0xffff, lastXy >> 16, lastButtons);
+	__atomic_thread_fence(__ATOMIC_RELEASE);
+	Shm[0x404 / 4] = tail;
+	}
 
 // keys every 10 ms (a host thread's poll of the shared ring, no system call), the screen every 30 ms
 static int DisplayThread(void*)
 	{
+	hsys(SYS_prctl, 15 /* PR_SET_NAME */, "h-display");	// its name in the Linux view (lxtop)
+	GlStat = hgetenv("GLSTAT") != NULL;
 	for (TInt n = 0;; ++n)
 		{
 		for (TUint32 v; HostedDisplayNextKey(v); )
@@ -75,11 +145,17 @@ static int DisplayThread(void*)
 			// (bit 30: already a scan code; bit 31: released)
 			HostedKeybPush(0x40000000u | (v & 0xff) | ((v & 0x80000000u) ? 0 : 0x80000000u));
 			}
+		DrainPointer();
 		if (n % 3 == 0)
 			Present();
+		if (n % 100 == 0 && GlStat)
+			HostedGlStat();
 		hsleep_us(10000);
 		}
 	}
+
+// the shared memory (kn_efile's phone diagnosis reads its request word, 0x80); NULL without a window
+volatile TUint32* HostedDisplayShm() { return Shm; }
 
 // the key ring in the same memory: the next entry, EFalse when empty
 TBool HostedDisplayNextKey(TUint32& aEntry)

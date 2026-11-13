@@ -12,6 +12,7 @@
 # light, MTC state machine) stay in src/standins/stubs/iscpeer.inl.
 # tools/isi.py turns the reply lines into build/roms/<id>/<fw>/gen/isireplies.h (scripts/build-standins.sh).
 
+res 01 PN_CALL                ref       # ISI call server
 res 09 PN_SIM                 verified
 res 0A PN_NETWORK             verified
 res C8 PN_MODEM_NETWORK       ref       # the Symbian^3 TSY's network resource (same messages as PN_NETWORK)
@@ -36,6 +37,8 @@ res D9 PN_PIPE                ref
 res DB PN_NAMESERVICE         verified
 res F3 PN_DSP_MDAIF?           inferred  # 5730 RAPIDO audio DSP setup (Aamm.DLL); docs/devices/nokia-5730-rm465/rapido-audio.md
 
+msg 01 28 CALL_EMERGENCY_NBR_CHECK_REQ   ref  # the TSY checks every key typed while the keypad is locked
+msg 01 29 CALL_EMERGENCY_NBR_CHECK_RESP  ref  # status: 00 not an emergency number
 msg 09 19 SIM_NETWORK_INFO_REQ            ref
 msg 09 1D SIM_IMSI_REQ_READ_IMSI          ref
 msg 09 1F SIM_LANGUAGE_PREF_REQ?          inferred

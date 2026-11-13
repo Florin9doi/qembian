@@ -6,7 +6,7 @@
 > The text below is the evaluation written before any code (some guesses in it turned out otherwise:
 > e.g. the N95's EUSER has no SWP, and the first build runs everything in one Linux process).
 
-The idea: instead of QEMU full-system emulation (what we run today, also on an Android phone,
+Owner's idea: instead of QEMU full-system emulation (what we run today, also on an Android phone,
 `docs/research/android-port.md`), host the EKA2 kernel on Linux the way Symbian's own Win32 emulator
 kernel did (`kernel/eka/nkern/win32`, `memmodel/emul/win32`), but execute the phone's unmodified ARM32
 ROM binaries natively as AArch32 user code on an AArch64 Linux: first `qemu-system-aarch64 -M virt`,
@@ -22,6 +22,9 @@ or a cited source, [inferred] = best guess.
 | `nanokernel.md` | the nanokernel's Linux platform layer as built, bugs found, the kernel layer |
 | `tests.md` | every hosted test and what it pins |
 | `future.md` | future designs: speed steps, one host thread, one process per Symbian process, SMP, JIT/AOT |
+| `chunk-address-space.md` | why the user window fills (one window for every process's chunks), how the real memory models do it, options, the per-process local window plan |
+| `pixel-3a.md` | the first run on a real Pixel 3a: postmarketOS (netboot without installing, or installed), the device bundle, what can go wrong |
+| `debugging.md` | ROM code right on QEMU, wrong on hosted: the 808 SQLite case (user stack alignment), ABI checklist per CPU flavour, probe tools |
 
 ## Verdict in six lines
 
@@ -67,7 +70,7 @@ or a cited source, [inferred] = best guess.
 
 ## First three steps
 
-1. P0 on the Pixel 3a (stock or rooted): `getprop ro.product.cpu.abilist`, run a static
+1. P0 on the Pixel 3a (owner's unit, stock or rooted): `getprop ro.product.cpu.abilist`, run a static
    armhf binary from `adb shell`, read `dmesg | grep -i "EL[12]"` or the boot log for the exception
    level, test `/proc/sys/abi/swp`, `cp15_barrier`. Exit: 32-bit EL0 confirmed, EL2 confirmed absent.
 2. Build the `virt` reference machine (`qemu-setup.md`): arm64 kernel with `COMPAT`, `ARMV8_DEPRECATED`,

@@ -109,13 +109,16 @@ registration, packet data bridged to the host network (QEMU user networking) and
 settings message that creates the Internet access point. The N8 can also use an Ethernet device on
 the host network (`docs/devices/nokia-n8-rm596/ethernet.md`).
 
-**Hosted EKA2 (experimental, 2026-11-12).** A second way to run a phone: the EKA2 kernel as a
+**Hosted EKA2 (experimental, 2026-11-13).** A second way to run a phone: the EKA2 kernel as a
 32-bit ARM Linux process, with the phone's ROM code running natively instead of under CPU emulation
 (`src/hosted/README.md`, `docs/hosted-eka2/`). Today it runs inside a QEMU aarch64 virtual machine;
-the target is a phone or board whose CPU still executes 32-bit ARM code (e.g. a Pixel 3a). The N95 8GB
-boots to its home screen this way with a live screen and keypad: `python3 tools/hosted/phone.py`
-(Ctrl+T shows the Linux side: the whole phone is one Linux process, each Symbian thread a Linux thread).
-Offline only; no sound output, no 3D graphics; the N8 and later phones need the graphics path first.
+the target is a phone or board whose CPU still executes 32-bit ARM code (a Pixel 3a: first-run guide in
+`docs/hosted-eka2/pixel-3a.md`, bundle tool `tools/hosted/device-bundle.py`). The N95 8GB and the Nokia 808
+PureView (Belle FP2) boot to their home screens this way: `python3 tools/hosted/phone.py` (N95) or
+`python3 tools/hosted/phone.py --rom nokia-808-rm807 --gl` (808: composition on the host GPU, the mouse as
+the touchscreen, the phone's keys as buttons). Ctrl+T shows the Linux side (the whole phone is one Linux
+process, each Symbian thread a Linux thread), Ctrl+P writes a who-waits-on-whom diagnosis to the log.
+Offline only; no sound output. UI timing: `tools/hosted/uibench.py`.
 
 **Host platform.** Linux on x86-64 (amd64) is the only tested host. Other systems and
 architectures may work, but they are not tested or supported.

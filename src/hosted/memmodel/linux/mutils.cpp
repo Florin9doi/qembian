@@ -174,6 +174,7 @@ void MM::DoProcessSwitch(TAny* aAddressSpace)
 	if (proc == K::TheKernelProcess) return;
 
 	ExeDataSwitch(proc);
+	LocalSwitch(proc);				// hosted: its local chunks displaced by another process's (mlocal.cpp)
 
 	int count = proc->iDllData.Count();
 	for (int ii=0; ii<count; ii++)

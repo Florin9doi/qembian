@@ -30,6 +30,8 @@ Related documents:
 - **Cellular side (NOS).** It doesn't run: its code is scrambled. A stand-in stub and a
   reply table answer what Symbian asks of it: product data, the RTC hand-over, ISI over
   PhoNet (self-test, SIM, security, network "searching", audio, SMS).
+- **Idle (2026-11-12).** The CPU sleeps at idle (H-ngage-idle): 0.4% of a host core on the idle
+  screen, ~18% during a Crash Nitro Kart race (was 100% always, Q56).
 - **Display.** The board shows the window server's screen chunk (H-ngage-fb); lcd.ldd's own
   transfers (probably DMA) aren't modelled.
 
@@ -43,7 +45,9 @@ Related documents:
   (`ngage_lprf.c`, H-ngage-bt): the phone's stack starts, Bluetooth is "off" by the phone's own
   setting, RHostResolver::GetHostName works. Needs H-ngage-selftest-stop (an ISI message that
   ends SelfTestServer so BTTestServer frees btldd's only channel). docs/research/ngage-bluetooth.md.
-- **Games.** Snakes (card) starts and plays (menu, single-player level).
+- **Games.** Snakes (card) starts and plays (menu, single-player level). Crash Nitro Kart (3D,
+  software-rendered) runs unchanged: menus, Arcade > Quick Race, a race on screen at >= 21 frames/s
+  (screendump-limited; ~18% of a host core since H-ngage-idle), the kart drives (key 5 accelerates). No sound.
 
 Not working or not modelled yet: see "Next" below.
 

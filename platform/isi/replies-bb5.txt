@@ -26,6 +26,7 @@ reply 54 50 51 00 00                                      # res 0x54 msg 0x50 (o
 reply C8 40 41 01 00 00                                   # PN_MODEM_NETWORK 0x40 (on: real N8 Delight, phonet)
 reply C8 0B F0 01 0B 00 00 00 00                          # PN_MODEM_NETWORK 0x0B: the real modem answers F0 {01 0B ...} (message not supported) (on: real N8 Delight, phonet)
 reply DB 01 02 00 01 00 01 00 00 00 00 00 31 00 33 00 00  # PNS_NAME_QUERY (GPDS)
+reply 01 28 29 00 00                                      # PN_CALL CALL_EMERGENCY_NBR_CHECK_REQ -> RESP: status 00 = not an emergency number [I: shape, TSY parser not read; V: A/B on the N95 2026-11-12, unlock at once, no panic]; unanswered, the TSY waited ~10 s per key while the keypad is locked (keyguard checks every typed key), so unlock took 10-20 s
 reply 09 19 1A 2F 24                                      # SIM read: data not available
 reply 23 04 05 len=18 00 01 01 10                         # PN_PERMANENT_DATA read
 reply 47 06 07 00 00                                      # light control set: status OK (SysAp->HWRM->SAServer waited on this)
@@ -131,6 +132,15 @@ reply 19 19 1A 00 00   # on: n8
 # 00 -> 01 server status: [10] svc B1, [11] 00 OK, [13] 11 = start-up completed [I] (TSY default 10).
 reply 8C 00 01 B1 00 00 11 00 00                           # on: 701
 reply 8C 03 04 C5 00 00 00 00 01 00 01 00 08 00 00 00 23   # on: 701
+# 8C 21 {F7} -> 22 (UICC_PWR_CTRL_RESP [I name]) (2026-11-13): nfcserver.exe asks ETel at start-up whether the
+# SIM supports an NFC secure element (etelmm ord1003, synchronous); the TSY sends 8C 21 {F7}. Unanswered,
+# nfcserver never finished starting and Settings -> Phone (gsapp starts NfcServer and waits for its rendezvous)
+# hung for good, on QEMU and hosted. Parser [V: 701 nokiatsy 0x80f7c6ac, same platform release; request builder
+# 0x80f7c3a6 matches the 808's bytes]: [10] service echoed, [11] status (else -> KErrGeneral, nfcserver retries 3x),
+# [15] nsb, sub-block 002A (16-bit id/len) at [16], [sb+7] = 0 no SE / 1 SE present (status 0 without it panics the
+# TSY). The TSY does not subscribe to F0 for UICC: a "not supported" reply is dropped. Answered "no SE": nfcserver
+# logs "No SE support from UICC server" and starts.
+reply 8C 21 22 F7 00 00 00 00 01 00 2A 00 08 00 00 00 00   # on: 808 (701 parser)
 
 # ---- C9 24 -> C9 25 (PN_MODEM_CALL? [I]), Belle (N8 111.040, 701, 808): nokiatsy (channel 7) sends it for
 # emergencyservice.exe's ETel request (fn 23036) as phoneui starts. Unanswered, the request stayed open and

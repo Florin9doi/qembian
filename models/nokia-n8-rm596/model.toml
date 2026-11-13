@@ -298,7 +298,7 @@ gpu_memory_mb = 64                         # EGL_NOK_resource_profiling total [I
 impl = "none"
 egl_configs = "egl-configs.txt"               # [V] the 37 configs of the owner's N8 (eglprobe, tools/egl-configs.py)
 [gl.identity]                              # H-gles-identity; OpenGL ES 1.1 (src/khr/gl1.c) answers glGetString with these
-vendor = "Broadcom"                        # [V] eglprobe on a real N8 (Delight 6.7)
+vendor = "Broadcom"                        # [V] eglprobe on the owner's N8 (build/evidence/eglprobe/n8-delight-real-1.txt)
 renderer = "VideoCore III HW"              # [V]
 version = "OpenGL ES-CM 1.1"               # [V]
 extensions = "GL_OES_compressed_ETC1_RGB8_texture GL_OES_compressed_paletted_texture GL_OES_EGL_image"   # [V] the phone's own list

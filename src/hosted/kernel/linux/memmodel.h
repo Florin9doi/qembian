@@ -57,7 +57,21 @@ public:
  ********************************************/
 class DWin32CodeSeg;
 class DWin32Chunk;
+class DWin32Process;
 struct SProcessDllDataBlock;
+
+// hosted: a process's local address space for its process-local chunks (mlocal.cpp, docs/hosted-eka2/
+// chunk-address-space.md): an allocator of the local window (every process has all of it, as the multiple
+// memory model's local section), a sparse memory file holding the committed pages at offset (address - window
+// base), the process's local chunks. Shared by the process and its chunks (a chunk may outlive its process).
+struct SLocalSpace
+	{
+	TInt iRefs;
+	TInt iFd;
+	TBitMapAllocator* iUnits;		// 64 KB units of the window this process has reserved
+	DWin32Chunk* iChunks;			// its local chunks (DWin32Chunk::iLocalNext); kernel locked to walk or change
+	DWin32Process* iProcess;		// NULL once the process is gone
+	};
 class DWin32Process : public DProcess
 	{
 public:
@@ -85,6 +99,7 @@ public:
 	TInt iExeDataSize;
 	TInt iExeDataFd;
 	TLinAddr iExeDataAlias;
+	SLocalSpace* iLocalSpace;		// hosted: its process-local chunks (NULL until the first)
 	};
 
 /******************************************************************
@@ -135,7 +150,30 @@ public:
 	TBitMapAllocator* iPageBitMap;
 	TBitMapAllocator* iUnlockedPageBitMap;
 	TBitMapAllocator* iPermanentPageBitMap;
+	// hosted: a process-local chunk in the local window (mlocal.cpp), else iLocalSpace is NULL
+	SLocalSpace* iLocalSpace;
+	TBitMapAllocator* iLocalPages;	// committed pages (allocated = committed)
+	DWin32Chunk* iLocalNext;
+	TBool iLocalMapped;				// every committed page is mapped at its address (none displaced)
+	// hosted: a chunk that does not own its memory (physical commits: driver buffers), its contiguous memory's
+	// physical address at offset 0 (0: none)
+	TPhysAddr iPhysContig;
+private:
+	TInt DoCommitPhysical(TInt aOffset, TInt aSize, TPhysAddr aPhys, const TUint32* aPageList);
 	};
+
+// hosted: process-local chunks (mlocal.cpp)
+// [KLocalWindowLo, KLocalWindowHi): below it the EXE data (0x00400000), above it 16 MB for the multiple memory model's
+// ROM DLL static data, which grows down from 0x40000000 (the N95's: 0x3ffed000 on), then the shared window
+const TLinAddr KLocalWindowLo = 0x01000000u, KLocalWindowHi = 0x3f000000u;
+TBool LocalChunkWanted(DWin32Chunk* aChunk);
+TInt LocalChunkCreate(DWin32Chunk* aChunk);
+void LocalChunkDestroy(DWin32Chunk* aChunk);
+TInt LocalCommit(DWin32Chunk* aChunk, TInt aOffset, TInt aSize);
+TInt LocalDecommit(DWin32Chunk* aChunk, TInt aOffset, TInt aSize);
+void LocalSwitch(DWin32Process* aProcess);
+void LocalSpaceRelease(DWin32Process* aProcess);
+TInt LocalCopy(DThread* aThread, TLinAddr aAddr, TAny* aBuf, TInt aLength, TBool aWrite);
 
 /********************************************
  * Code segment
@@ -154,6 +192,7 @@ public:
 	virtual TInt DoCreate(TCodeSegCreateInfo& aInfo, DProcess* aProcess);
 	TInt DoCreateRam(TCodeSegCreateInfo& aInfo, DProcess* aProcess, TBool aExe);
 	virtual TInt Loaded(TCodeSegCreateInfo& aInfo);
+	void ArmCodeProbes();			// hosted debugging: PROBE_CODE (mcodeseg.cpp)
 	virtual void InitData();
 	virtual void ReadExportDir(TUint32* aDest);
 	virtual TBool FindCheck(DProcess* aProcess);

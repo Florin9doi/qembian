@@ -75,6 +75,17 @@ static inline int hfutex_wait_us(volatile int *a, int v, uint32_t aUs) {
 	return hsys(SYS_futex, a, FUTEX_WAIT, v, &ts);
 }
 
+// private futexes (keyed by the process's address space: a cheaper lookup than the shared key by backing page):
+// the hosted kernel's hand-overs, interrupt and device threads, all in one Linux process (docs/hosted-eka2/
+// future.md 2.2; back to shared ones with one Linux process per Symbian process). Thread join stays shared:
+// Linux wakes the clear-tid word with a shared wake.
+static inline int hpfutex_wait(volatile int *a, int v) { return hsys(SYS_futex, a, FUTEX_WAIT | FUTEX_PRIVATE, v, 0); }
+static inline int hpfutex_wake(volatile int *a, int n) { return hsys(SYS_futex, a, FUTEX_WAKE | FUTEX_PRIVATE, n); }
+static inline int hpfutex_wait_us(volatile int *a, int v, uint32_t aUs) {
+	struct { int32_t s, ns; } ts = { (int32_t)(aUs / 1000000), (int32_t)(aUs % 1000000) * 1000 };
+	return hsys(SYS_futex, a, FUTEX_WAIT | FUTEX_PRIVATE, v, &ts);
+}
+
 // ---- time ----
 uint64_t hnow_ns(void);                                       // monotonic ns (generic timer, else syscall)
 uint64_t hnow_ns_syscall(void);                               // CLOCK_MONOTONIC through the syscall

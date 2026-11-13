@@ -171,6 +171,7 @@ static TBool AnyRunning()
 
 static int PumpThread(void*)
 	{
+	hsys(SYS_prctl, 15 /* PR_SET_NAME */, "h-sndpump");	// its name in the Linux view (lxtop)
 	for (;;)
 		{
 		TInt seq = __atomic_load_n(&PumpSeq, __ATOMIC_SEQ_CST);
@@ -183,14 +184,14 @@ static int PumpThread(void*)
 		if (busy)
 			hsleep_us(5000);			// 5 ms steps while something plays
 		else
-			hfutex_wait(&PumpSeq, seq);	// idle until a slot starts
+			hpfutex_wait(&PumpSeq, seq);	// idle until a slot starts
 		}
 	}
 
 static void Wake()
 	{
 	__atomic_add_fetch(&PumpSeq, 1, __ATOMIC_SEQ_CST);
-	hfutex_wake(&PumpSeq, 1);
+	hpfutex_wake(&PumpSeq, 1);
 	}
 
 static TUint32 SndRead(TAny*, TUint32 aOff)

@@ -7,7 +7,7 @@ description: Playbook for debugging a qembian phone (Symbian on our EKA2 kernel 
 
 Tool reference: `docs/tools.md` (each tool), `docs/sydb.md` (the bridge), `docs/hacks.md` (every
 workaround). This file is the method: what to look at first, how to get the facts, and how not to fool
-yourself. Rules from CLAUDE.md still apply (own sydb sessions, never the user's drives, stop your
+yourself. Rules from CLAUDE.md still apply (own sydb sessions, never the owner's drives, stop your
 sessions, no QEMU in research subagents unless asked).
 
 ## 0. Session hygiene
@@ -15,8 +15,8 @@ sessions, no QEMU in research subagents unless asked).
 - Your own session: `SYBORG_DEVICE=<id> python3 tools/sydb/sydb.py --session build/sydb-<name> ...`.
   Every sydb command for that phone needs the same `SYBORG_DEVICE` and `--session`. Or a throw-away
   instance: `tools/instance.py create <name> <id> --ephemeral --replace`, then `sydb --instance <name> ...`
-  (the instance sets the device). Never a bare `sydb` and never the user's instances
-  (`tools/instance.py list`): those are the user's phones. To reproduce on the user's phone state,
+  (the instance sets the device). Never a bare `sydb` and never the owner's instances
+  (`tools/instance.py list`): those are the owner's phones. To reproduce on the owner's phone state,
   `tools/instance.py clone NAME NAME-test` (drives copied; delete it after).
 - `start --fresh` = blank drives (first-boot wizard, no agent on the first boot); `start --seed
   build/seeds/<id>` = drives past the wizard, agent installed (the boot hook starts it ~1 s in).
@@ -143,7 +143,7 @@ Read `docs/devices/nokia-5800-rm356/settings-delay.md` and the review in
 The 5800 cause was a wrong SIM service byte in a delivered response, not a missing
 packet. The earlier IPC investigation incorrectly excluded the modem.
 
-- Reproduce the exact timing and navigation the user gives. A visible UI may
+- Reproduce the exact timing and navigation the owner gives. A visible UI may
   still be initializing synchronously and unable to process the next tap.
 - Treat IPC duration rankings as leads, not a wait graph. Separate asynchronous
   notifications from synchronous requests. Inspect raw matching calls/completions;
@@ -165,3 +165,13 @@ unanswered ISI lists, draw activity per second, composition commits (`GCEBE: com
 deaths, kernel call numbering (`abi/swi-n95-vs-ours.txt`). The first difference that blocks something
 is usually the cause. Record each finding in the device's bring-up notes
 (`docs/devices/<id>/bring-up.md`) with [V]/[I] marks, and every workaround in `docs/hacks.md`.
+
+## 8. Hosted EKA2: right on QEMU, wrong on hosted
+
+When ROM code that works on QEMU gives wrong data on the hosted kernel (an error code with no crash, a
+"corrupt" file, a shifted reply), read `docs/hosted-eka2/debugging.md` first. Check the ABI before the data
+path: the 808's KSqlErrCorrupt was user stacks 4 mod 8 (varargs read 64-bit arguments from the wrong slot:
+`printf("%lld", 3)` gave "12884901891"). That page has the per-CPU-flavour ABI checklist (sp at thread entry,
+TLocalThreadData, TPIDRURW/URO, exec-call realignment, 64-bit helpers) and the probe tools: SYBCODE,
+`PROBE_CODE=name:off[:rN=V]` with register and stack dumps, IPCSUM, NVDELTA, XTRACE_THREAD. Signs of an ABI
+fault: a value made of two copies of one word, halves swapped, `d + 6` computed as `d | 6`.

@@ -111,6 +111,16 @@ Values from `models/<id>/device.toml` unless noted ([bring-up] = the device's no
 | nokia-5800-rm356 | 360x640 UI on a native-landscape panel (rotation 270) | resistive single touch (`exyin` stand-in on the Syborg pointer, `rotate = 270`), few keys | none | RAPIDO, silent; start-up tone patched out (H-startuptone-none) |
 | nokia-n8-rm596 (+v13) | 360x640, portrait panel, Color16MAP | capacitive multitouch (Synaptics behind exyin; single touch in the stand-in), 3 keys | VideoCore replaced: our libEGL/libOpenVG (H-khr) + gcebe composition (H-gcebe), frames composed and presented on the host GPU (`[gl.host]`: msaa 8, compose host); `gl.impl = none` (no sygl patches) | RAPIDO ring model (virtual DSP clock), silent; tone patched out |
 
+### 2.2a Hosted EKA2 (the kernel as a Linux process; `docs/hosted-eka2/`)
+
+| Profile id | Hosted state (2026-11-13) | How to run | Open |
+|---|---|---|---|
+| nokia-n95-8gb-rm320 | home screen, keypad, screensaver (panel rotation, partial mode, VSYNC); start-up as fast as on the QEMU board | `tools/hosted/phone.py` | GL apps (the host GL server works, not wired by default); sound |
+| nokia-808-rm807 | home screen, touch, keys, apps (Calendar, Settings); composition on the host GPU; seed past the first-boot wizard | `tools/hosted/phone.py --rom nokia-808-rm807 --gl` | Settings -> Phone (UICC 21 reply held back: USER 11 in the state manager); intermittent stop at state 104; thread hand-over cost |
+| others | not tried hosted | - | - |
+
+On a real device (Pixel 3a, postmarketOS): `tools/hosted/device-bundle.py --rom ID`, `docs/hosted-eka2/pixel-3a.md` [untested].
+
 ### 2.3 Firmware, level, boot time, status
 
 | Profile id | Firmware held [roms] | Tested | Level (`[status]`) | Boot to idle | Key hacks / stand-ins | Open / next |

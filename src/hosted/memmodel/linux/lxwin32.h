@@ -23,6 +23,10 @@ struct MEMORY_BASIC_INFORMATION
 
 LPVOID VirtualAlloc(LPVOID aAddr, SIZE_T aSize, DWORD aType, DWORD aProtect);
 TBool VirtualFree(LPVOID aAddr, SIZE_T aSize, DWORD aType);
+// hosted: reserve aSize bytes in the user window [KUserWindowLo, KUserWindowHi): chunks user code sees
+LPVOID VirtualReserveUser(SIZE_T aSize, DWORD aProtect);
+// (shared chunks: global ones, shared buffers; process-local chunks have their own window below, mlocal.cpp)
+const TUint32 KUserWindowLo = 0x40000000u, KUserWindowHi = 0x70000000u;
 SIZE_T VirtualQuery(LPVOID aAddr, MEMORY_BASIC_INFORMATION* aInfo, SIZE_T aLength);
 
 // emulator host lock (Win32 calls are not reentrant there); nothing to do on Linux

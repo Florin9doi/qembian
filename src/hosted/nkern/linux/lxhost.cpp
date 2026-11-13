@@ -18,27 +18,55 @@ static const TUint KLxAltSize = 0x4000;		// per-thread signal stack for fault du
 
 static inline TInt AtomicLoad(volatile TInt* a) { return __atomic_load_n(a, __ATOMIC_SEQ_CST); }
 
+// iState: 0 clear, 1 set, 2 clear with its waiter asleep in the futex. Set wakes only a sleeper; Wait spins a little
+// first if asked (HostedEventSpin polls, htest --env HSPIN=hex; off by default: no gain measured). A Set that finds
+// its waiter still awake saves the wake call. One waiter per event (a thread's own schedule event).
+TInt HostedEventSpin = -1;				// polls before sleeping (htest --env HSPIN=hex); default below
+TUint32 HostedEventSpinHits, HostedEventSleeps;	// waits ended while spinning / after sleeping (speed measurements)
+
 void TLxEvent::Set()
 	{
-	if (__atomic_exchange_n(&iState, 1, __ATOMIC_SEQ_CST) == 0)
-		hfutex_wake(&iState, 1);
+	if (__atomic_exchange_n(&iState, 1, __ATOMIC_SEQ_CST) == 2)
+		hpfutex_wake(&iState, 1);
 	}
 
 void TLxEvent::Wait()
 	{
+	if (HostedEventSpin < 0)
+		HostedEventSpin = hgetenv_hex("HSPIN", 0);	// measured 2026-11-13: spinning caught ~18% of the 808's
+													// hand-overs and cost more than it saved (N95 start-up +2%)
+	for (TInt n = 0; n < HostedEventSpin; ++n)
+		{
+		if (__atomic_load_n(&iState, __ATOMIC_RELAXED) == 1)
+			{
+			TInt one = 1;
+			if (__atomic_compare_exchange_n(&iState, &one, 0, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
+				{
+				++HostedEventSpinHits;
+				return;
+				}
+			}
+		__asm__ volatile("yield");
+		}
 	for (;;)
 		{
 		TInt one = 1;
 		if (__atomic_compare_exchange_n(&iState, &one, 0, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
+			{
+			++HostedEventSleeps;
 			return;
-		hfutex_wait(&iState, 0);
+			}
+		TInt zero = 0;
+		if (__atomic_compare_exchange_n(&iState, &zero, 2, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST) ||
+		    zero == 2)
+			hpfutex_wait(&iState, 2);
 		}
 	}
 
 void TLxSemaphore::Signal()
 	{
 	__atomic_add_fetch(&iCount, 1, __ATOMIC_SEQ_CST);
-	hfutex_wake(&iCount, 1);
+	hpfutex_wake(&iCount, 1);
 	}
 
 void TLxSemaphore::Wait()
@@ -52,7 +80,7 @@ void TLxSemaphore::Wait()
 				return;
 			continue;
 			}
-		hfutex_wait(&iCount, v);
+		hpfutex_wait(&iCount, v);
 		}
 	}
 
@@ -107,10 +135,10 @@ static void Park(SLxThreadFull* me)
 		TInt q = AtomicLoad(&me->iSeq);
 		TInt s = AtomicLoad(&me->iSuspend);
 		__atomic_store_n(&me->iAckGen, AtomicLoad(&me->iGen), __ATOMIC_SEQ_CST);
-		hfutex_wake(&me->iAckGen, 8);
+		hpfutex_wake(&me->iAckGen, 8);
 		if (s <= 0)
 			break;
-		hfutex_wait(&me->iSeq, q);
+		hpfutex_wait(&me->iSeq, q);
 		}
 	}
 
@@ -127,15 +155,17 @@ static void SuspendHandler(int, hsiginfo*, hucontext* aUc)
 static void Poke(SLxThreadFull* t)
 	{
 	__atomic_add_fetch(&t->iSeq, 1, __ATOMIC_SEQ_CST);
-	hfutex_wake(&t->iSeq, 8);
+	hpfutex_wake(&t->iSeq, 8);
 	}
 
 // Returns the previous suspend count, or -1 if the thread is gone (exited or exiting): like Win32's
 // SuspendThread failing on a dead thread. Bug 2026-11-12 (nk_kill hung once on 2 CPUs): an interrupt
 // read iCurrentThread just as a dying thread handed over to the next one, signalled it, and the thread
 // exited without handling the signal: the suspender waited for an ack forever. Regression: nk_exitrace.
+volatile TUint32 HostedSuspends;		// threads suspended for an interrupt (speed measurements)
 TInt LxSuspend(SLxThread* aT)
 	{
+	++HostedSuspends;
 	SLxThreadFull* t = static_cast<SLxThreadFull*>(aT);
 	if (t->iState != ELxLive)
 		return -1;
@@ -161,7 +191,7 @@ TInt LxSuspend(SLxThread* aT)
 				if (self) self->iSuspending = 0;
 				return -1;
 				}
-			hfutex_wait_us(&t->iAckGen, a, 1000);
+			hpfutex_wait_us(&t->iAckGen, a, 1000);
 			}
 		if (self) self->iSuspending = 0;
 		}
@@ -180,10 +210,27 @@ TInt LxResume(SLxThread* aT)
 // ---- code probes: an undefined instruction at an address in loaded code; the first hit prints the
 // thread, pc and lr, puts the original instruction back and continues (a one-shot breakpoint without a
 // debugger). Thumb (bit 0 of the address set): 16-bit UDF 0xde00; ARM: 0xe7f000f0.
-struct SProbe { TUint32 iAddr; TUint32 iOrig; TBool iThumb; };
+struct SProbe { TUint32 iAddr; TUint32 iOrig; TBool iThumb; TInt iCondReg; TUint32 iCondVal; TInt iLogged; };
 static SProbe Probes[256];
 static TInt ProbeCount;
 TInt HostedProbeHits;
+
+TInt HostedAddProbe(TUint32 aAddr);
+// a conditional probe: logs only when register aReg (0..12) equals aValue (up to 4 times) and stays armed;
+// the probed instruction must be a Thumb PUSH (a function entry), which the handler emulates
+TInt HostedAddProbeIf(TUint32 aAddr, TInt aReg, TUint32 aValue)
+	{
+	TInt r = HostedAddProbe(aAddr);
+	if (r == KErrNone)
+		{
+		SProbe& p = Probes[ProbeCount - 1];
+		if (!p.iThumb || (p.iOrig & 0xfe00) != 0xb400)
+			return KErrNotSupported;		// left as a one-shot probe
+		p.iCondReg = aReg;
+		p.iCondVal = aValue;
+		}
+	return r;
+	}
 
 TInt HostedAddProbe(TUint32 aAddr)
 	{
@@ -196,10 +243,12 @@ TInt HostedAddProbe(TUint32 aAddr)
 	SProbe& p = Probes[ProbeCount++];
 	p.iAddr = a;
 	p.iThumb = thumb;
+	p.iCondReg = -1;
+	p.iLogged = 0;
 	if (thumb)
 		{
 		p.iOrig = *(volatile TUint16*)a;
-		*(volatile TUint16*)a = 0xde00 | (ProbeCount & 0xff);
+		*(volatile TUint16*)a = 0xdeee;		// a Thumb UDF Linux reports as SIGILL (0xde01 is its breakpoint: SIGTRAP)
 		}
 	else
 		{
@@ -215,12 +264,47 @@ static TBool ProbeHit(hucontext* aUc)
 	for (TInt i = 0; i < ProbeCount; ++i)
 		{
 		SProbe& p = Probes[i];
+		if (p.iAddr == pc && p.iCondReg >= 0)
+			{
+			// conditional: log when it matches, and run the PUSH it replaced either way (stays armed)
+			if (aUc->mc.r[p.iCondReg] == p.iCondVal && p.iLogged < 4)
+				{
+				++p.iLogged;
+				++HostedProbeHits;
+				hprintf("PROBE %08x hit (r%d = %x): lr %08x sp %08x r0 %08x r1 %08x r2 %08x r3 %08x\n", pc | 1,
+				        p.iCondReg, p.iCondVal, aUc->mc.lr, aUc->mc.sp, aUc->mc.r[0], aUc->mc.r[1], aUc->mc.r[2],
+				        aUc->mc.r[3]);
+				const TUint32* st = (const TUint32*)aUc->mc.sp;
+				for (TInt i = 0; i < 256; i += 8)
+					hprintf("PROBE stack +%03x: %08x %08x %08x %08x %08x %08x %08x %08x\n", i * 4, st[i], st[i + 1],
+					        st[i + 2], st[i + 3], st[i + 4], st[i + 5], st[i + 6], st[i + 7]);
+				}
+			TUint32 list = p.iOrig & 0xff, withLr = p.iOrig & 0x100, n = __builtin_popcount(list) + (withLr ? 1 : 0);
+			TUint32* sp = (TUint32*)(aUc->mc.sp - 4 * n);
+			TInt k = 0;
+			for (TInt r = 0; r < 8; ++r)
+				if (list & (1 << r))
+					sp[k++] = aUc->mc.r[r];
+			if (withLr)
+				sp[k++] = aUc->mc.lr;
+			aUc->mc.sp = (TUint32)sp;
+			aUc->mc.pc += 2;
+			return ETrue;
+			}
 		if (p.iAddr == pc)
 			{
 			SLxThread* me = LxSelf();
 			++HostedProbeHits;
-			hprintf("PROBE %08x hit: lr %08x sp %08x r0 %08x r1 %08x thread %p\n", pc | p.iThumb, aUc->mc.lr,
-			        aUc->mc.sp, aUc->mc.r[0], aUc->mc.r[1], me ? me->iNThread : 0);
+			hprintf("PROBE %08x hit: lr %08x sp %08x r0 %08x r1 %08x r2 %08x r3 %08x thread %p\n", pc | p.iThumb,
+			        aUc->mc.lr, aUc->mc.sp, aUc->mc.r[0], aUc->mc.r[1], aUc->mc.r[2], aUc->mc.r[3],
+			        me ? me->iNThread : 0);
+			hprintf("PROBE regs r4 %08x r5 %08x r6 %08x r7 %08x r8 %08x r9 %08x r10 %08x r11 %08x\n", aUc->mc.r[4],
+			        aUc->mc.r[5], aUc->mc.r[6], aUc->mc.r[7], aUc->mc.r[8], aUc->mc.r[9], aUc->mc.r[10], aUc->mc.fp);
+			// the stack above sp (call chain: return addresses among these words)
+			const TUint32* st = (const TUint32*)aUc->mc.sp;
+			for (TInt i = 0; i < 256; i += 8)
+				hprintf("PROBE stack +%03x: %08x %08x %08x %08x %08x %08x %08x %08x\n", i * 4, st[i], st[i + 1],
+				        st[i + 2], st[i + 3], st[i + 4], st[i + 5], st[i + 6], st[i + 7]);
 			if (p.iThumb)
 				*(volatile TUint16*)p.iAddr = (TUint16)p.iOrig;
 			else
@@ -525,3 +609,12 @@ EXPORT_C SLxThread* CreateLinuxThread(TEmulThreadType aType, TLxThreadFunction a
 	(void)aType;
 	return LxCreateThread(aThreadFunc, aPtr, aRun, 0);
 	}
+
+// the lowest address of the calling host thread's stack (above its guard page) that user code may use, or 0
+// for a thread we did not create (kplat.cpp HostedEnterUser wipes the stack below sp from here)
+extern "C" TLinAddr HostedUserStackLo()
+	{
+	SLxThreadFull* t = static_cast<SLxThreadFull*>(LxSelf());
+	return t && t->iStack ? (TLinAddr)t->iStack + 0x1000 + 64 : 0;
+	}
+

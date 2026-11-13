@@ -65,6 +65,15 @@ TInt DPlatChunkHw::DoNew(DPlatChunkHw*& aChunk, TPhysAddr aAddr, TInt aSize, TUi
 		Kern::Printf("HOSTED: DPlatChunkHw %08x+%x: no board window there", aAddr, aSize);
 		return KErrArgument;
 		}
+	// A user mapping of a device page that has a model would let stores bypass the model (the hosted I/O area
+	// is plain memory under it): refused, so drivers fall back to kernel register access (d_display's GL
+	// kick: ctl 0x7f12 instead of the user-written KICK). Regression: kn_board.
+	extern TBool HostedIoModelled(TLinAddr aLin, TUint32 aSize);
+	if ((aAttribs & 0x444) && HostedIoModelled(lin, aSize))
+		{
+		Kern::Printf("HOSTED: DPlatChunkHw %08x+%x: a modelled device page is not mapped for user mode", aAddr, aSize);
+		return KErrNotSupported;
+		}
 	DPlatChunkHw* c = new DPlatChunkHw;
 	if (!c)
 		return KErrNoMemory;

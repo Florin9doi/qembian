@@ -645,6 +645,7 @@ extern "C" TInt KernLocalThreadDataIdOffset;
 static const TInt KernLocalThreadDataSize = 0;
 static const TInt KernLocalThreadDataIdOffset = -1;
 #endif
+TUint32 HostedUserSpMisaligned;		// user threads entered with sp mod 8 unlike the phone's kernel (kn_efile)
 extern "C" void HostedEnterUser(TLinAddr aEntry, TInt aReason, const TAny* aBlock, TInt aBlockSize, TInt aLtdSize, TUint32 aThreadId, TInt aIdOffset);
 __asm__(
 	".text\n .arm\n .balign 4\n .global HostedEnterUser\n HostedEnterUser:\n"
@@ -656,6 +657,7 @@ __asm__(
 	"	ldr	r6, [sp, #4]\n"			// thread ID
 	"	ldr	r7, [sp, #8]\n"			// its offset (< 0: none)
 	"	bic	sp, sp, #7\n"
+	"	mov	r4, sp\n"				// the stack top (callee-saved: kept over the calls below)
 	"	sub	sp, sp, r5\n"				// TLocalThreadData
 	"	mov	r0, sp\n"
 	"	mcr	p15, 0, r0, c13, c0, 2\n"	// TPIDRURW -> it
@@ -664,15 +666,46 @@ __asm__(
 	"	bl	memset\n"
 	"	cmp	r7, #0\n"
 	"	strge	r6, [sp, r7]\n"
-	"	sub	sp, sp, #4\n"
+	// a word below the thread data only without a user-side thread data block (ckernel.cia: with one, the
+	// creation info sits right below it). Bug 2026-11-12: always skipped a word, so on ARMv6K phones (the
+	// 808) every user stack started 4 mod 8: AAPCS varargs read 64-bit arguments from the wrong slot,
+	// SQLite's printf("%lld", 3) gave "12884901891", its schema had root page 0 and every database read as
+	// corrupt (KSqlErrCorrupt). Regression: kn_efile (user sp mod 8 at entry as the phone's kernel sets it).
+	"	cmp	r5, #0\n"
+	"	subeq	sp, sp, #4\n"
 	"	sub	sp, sp, r11\n"			// the creation info block
 	"	mov	r0, sp\n"
 	"	mov	r1, r10\n"
 	"	mov	r2, r11\n"
 	"	bl	memcpy\n"
-	"	mov	r4, r9\n"
+	// check: sp mod 8 as ckernel.cia leaves it (with thread data: top - ltd - size; without: top + 4 - size,
+	// its copy loop starts at the top word). Not 8-aligned on ARMv5 phones either; the phone's value is what counts.
+	"	sub	r0, r4, r11\n"
+	"	cmp	r5, #0\n"
+	"	addeq	r0, r0, #4\n"
+	"	subne	r0, r0, r5\n"
+	"	eor	r0, r0, sp\n"
+	"	tst	r0, #7\n"
+	"	ldrne	r0, =HostedUserSpMisaligned\n"
+	"	ldrne	r1, [r0]\n"
+	"	addne	r1, r1, #1\n"
+	"	strne	r1, [r0]\n"
+	// the stack below sp as the memory model leaves a new user stack: 0x29292929 (flexible mkernel.cpp
+	// "wipe user thread stack"), instead of the host thread's zeros/leftovers: user code that reads an
+	// uninitialised local sees what it sees on a phone. (Tried for the 808's SQL "corrupt" databases: not
+	// their cause.)
+	"	bl	HostedUserStackLo\n"			// r0 = the lowest usable address of this thread's stack, or 0
+	"	cmp	r0, #0\n"
+	"	beq	2f\n"
+	"	sub	r1, sp, #8\n"
+	"	ldr	r2, =0x29292929\n"
+	"1:	cmp	r0, r1\n"
+	"	strlo	r2, [r0], #4\n"
+	"	blo	1b\n"
+	"2:	mov	r4, r9\n"
 	"	mov	r0, #0\n mov r1, #0\n mov r2, #0\n mov r3, #0\n"
-	"	bx	r8\n");
+	"	bx	r8\n"
+	"	.ltorg\n");
 
 extern void HostedNameHostThread(DThread& aThread);		// kthreadname.cpp
 
@@ -891,3 +924,19 @@ static void ExecTraceWho(char* aBuf, TInt aMax)
 	aBuf[l] = 0;
 	}
 static struct SExecTraceWhoInit { SExecTraceWhoInit() { HostedExecTraceWho = &ExecTraceWho; } } ExecTraceWhoInit;
+
+// The exec dispatcher's fast path (vectors.cpp Dispatch, before entering the kernel): a BTraceOut whose category is
+// filtered out returns EFalse, as its handler's first line does (sbtrace.cpp ExecHandler::BTraceOut). The 808's
+// font and bitmap client and server call it ~480,000 times a second while the UI draws (2026-11-13, EXECTOP);
+// each paid the whole slow-exec entry. Regression: kn_efile (filtered BTraceOuts take the fast path).
+extern "C" TBool _ZN11ExecHandler9BTraceOutEmmRKN6BTrace14SExecExtensionEi(TUint32, TUint32, const TAny*, TInt);
+extern TLinAddr HostedBTraceOutHandler;
+extern const TUint8* HostedBTraceFilter;
+static struct SBTraceFastInit
+	{
+	SBTraceFastInit()
+		{
+		HostedBTraceOutHandler = (TLinAddr)&_ZN11ExecHandler9BTraceOutEmmRKN6BTrace14SExecExtensionEi;
+		HostedBTraceFilter = BTraceData.iFilter;
+		}
+	} BTraceFastInit;

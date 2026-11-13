@@ -6,13 +6,13 @@ work back to (d) (today's QEMU, incl. Android) or, for a non-Qualcomm phone with
 
 | Phase | Content | Exit criteria | Effort | Kill criteria |
 |---|---|---|---|---|
-| **P0 feasibility on real hardware** | On a Pixel 3a (stock + adb, or rooted): `getprop ro.product.cpu.abilist`; run a static armhf binary; `cat /proc/cpuinfo`; boot log / `dmesg` for "started at EL1/EL2"; on a pmOS or Mobian boot (`fastboot boot`, no flash): `/proc/sys/abi/swp`, `cp15_barrier`, a 32-bit test that `mmap`s `0x80000000`, `0x90000000`, `0xC8000000` `MAP_FIXED`, executes `swp`, a CP15 `dmb` and a `svc #0x800001` under a seccomp filter keyed on `instruction_pointer`; `getconf PAGE_SIZE`; display/touch/evdev/DRM present | 32-bit EL0 works; the three mappings succeed; `swp` and `svc` are trapped as designed; `/dev/kvm` absent (documents option b as dead); pmOS/Mobian boots with display and touch | 1-2 days | 32-bit processes refused by the mainline kernel on this SoC, or a fixed mapping impossible, or no Linux image boots with a display: stop, keep (d) |
+| **P0 feasibility on real hardware** | On the owner's Pixel 3a (stock + adb, or rooted): `getprop ro.product.cpu.abilist`; run a static armhf binary; `cat /proc/cpuinfo`; boot log / `dmesg` for "started at EL1/EL2"; on a pmOS or Mobian boot (`fastboot boot`, no flash): `/proc/sys/abi/swp`, `cp15_barrier`, a 32-bit test that `mmap`s `0x80000000`, `0x90000000`, `0xC8000000` `MAP_FIXED`, executes `swp`, a CP15 `dmb` and a `svc #0x800001` under a seccomp filter keyed on `instruction_pointer`; `getconf PAGE_SIZE`; display/touch/evdev/DRM present | 32-bit EL0 works; the three mappings succeed; `swp` and `svc` are trapped as designed; `/dev/kvm` absent (documents option b as dead); pmOS/Mobian boots with display and touch | 1-2 days | 32-bit processes refused by the mainline kernel on this SoC, or a fixed mapping impossible, or no Linux image boots with a display: stop, keep (d) |
 | **P1 hosted nanokernel** | `nkern/linux` from `nkern/win32` + the generic `nkern/*.cpp`, built with `arm-linux-gnueabihf-g++`; scheduler lock, futex parks, timer thread (1 ms), DFC threads, `NKern::Sleep`, fast mutexes, nanokernel timers; a 64-bit nucleus only as launcher; runs on the `virt` machine (`qemu-setup.md`) | a test exe with two nanothreads and a semaphore, timers firing at 1 ms, round-robin at one priority, a DFC queue, all under the EKA2 scheduler's decisions (trace shows the same reschedule sequence as the Win32/ARM kernel for the same program) | 2-3 weeks | the Win32 scheduling model cannot be reproduced with futexes/signals without touching `nkern/*.cpp` beyond `#ifdef` glue |
 | **P2 first unmodified ARM32 Symbian exe** | `kernel/linux` (exec dispatch, personality tables from `exec.map`, exceptions via signals), minimal `memmodel/emul/linux` (ROM mapping, kernel data memfd, chunks, one process), trampoline patching of EUSER stubs by the composer, seccomp safety net; the ROM's EUSER + a tiny ROM-resident test exe (our own, built with GCCE as today, placed in the composed ROM) | the test exe runs from the ROM at `0x80000000+`, allocates on `User::Heap()` through fast exec F01, creates a thread, waits on a semaphore, `User::After`, `RDebug::Print` arrives on the trace socket; exec count per second measured with and without stub patching; `swp` sites counted | 3-5 weeks | patched-stub exec cost > 1 us or SIGSYS path needed for > 5 % of execs after patching; or EUSER needs a kernel service that only the MMU can give (none expected: the Win32 emulator proves EUSER's needs are logical) |
 | **P3 processes and client/server IPC** | one Linux process per Symbian process; the agent thread; shared kernel data across processes; global chunks; IPC descriptor copies (memfd alias); `RServer2`/`RSessionBase`, `RMessage2` read/write, request completion across processes, thread/process death and cleanup | two ROM exes (our own) as client and server exchange descriptors both ways 100,000 times; a client death mid-message is handled (KERN-EXEC panics as in the reference); the exec/IPC traces match the syborg reference for the same binaries | 4-6 weeks | cross-process kernel state cannot be kept coherent without a lock per exec (performance), or thread creation/kill across processes is unreliable under signals |
 | **P4 F32 and system start-up** | RAM-loaded code segments (memfd at the fixed code address, the loader path), local media PDD over drive images, ROFS media stand-in, `ESTART`, the phone's `efile.exe` loader, then the real boot: `domainSrv`, Starter/SSM, the fake modem (compiled in), `ECOM`, `FBSERV`; no display yet | the N95 ROM (sym92 personality) boots to `100058f4/1 = 3` (start-up done) headless with every Nokia server of the reference boot started; exec trace of `efile` start matches the reference call-for-call; a sum of unanswered requests equal to the reference | 6-10 weeks | the loader/codeseg model needs per-process code addresses that the multiple model does not have (then the moving-model path, Win32-style data copying, would be required: an extra 4-6 weeks, decide then) |
 | **P5 WSERV with a framebuffer** | LCD stand-in with a DRM/KMS (virt: `virtio-gpu`) back end, keys/touch from evdev, sound to ALSA (optional), `sydb` `hosted` session type: log, screenshot, keys, strace, catch, gdbserver | the N95 home screen, Carousel and Switch off (`tests/device-smoke.sh` steps) on the `virt` machine; screenshots match the reference within tolerance; the N8 (flexible model, ARMv6K EUSER with TPIDRURW) boots to its home screen without the GPU path | 4-8 weeks | WSERV/alf depend on a display driver behaviour only an MMU-backed shared chunk gives (unexpected) |
-| **P6 the Pixel 3a** | pmOS/mainline (sdm670-mainline tree) on the phone, the same user-space tree, DRM panel + touch, ALSA; measure: boot time, app start, exec cost; then the N8/808 host-GPU path through Mesa freedreno | N95 home screen on the phone's display with touch/keys at native speed; boot time measured against the Android TCG build (expect >= 5x faster [inferred]); N8 home screen; a written comparison | 3-6 weeks (+4-8 for the GPU path) | panel/touch on mainline unreliable on a given unit (aftermarket displays break touch [verified: ferdiOS note]) with no Halium fallback; or native speed < 2x the TCG build (then the signal/trap overheads dominate and the design is wrong) |
+| **P6 the Pixel 3a** | pmOS/mainline (sdm670-mainline tree) on the phone, the same user-space tree, DRM panel + touch, ALSA; measure: boot time, app start, exec cost; then the N8/808 host-GPU path through Mesa freedreno | N95 home screen on the phone's display with touch/keys at native speed; boot time measured against the Android TCG build (expect >= 5x faster [inferred]); N8 home screen; a written comparison | 3-6 weeks (+4-8 for the GPU path) | panel/touch on mainline unreliable on the owner's unit (aftermarket displays break touch [verified: ferdiOS note]) with no Halium fallback; or native speed < 2x the TCG build (then the signal/trap overheads dominate and the design is wrong) |
 
 Total to a phone home screen: 24-40 weeks; with the GPU path and the 808: 30-50 weeks.
 
@@ -34,7 +34,7 @@ Total to a phone home screen: 24-40 weeks; with the GPU path and the 808: 30-50 
 6. **Hardware window.** AArch32 user mode exists on the 3a and on 2022-23 SoCs' little/mid cores only
    (Linux asymmetric 32-bit); Pixel 7+/X3-A715 class cannot run it. (d) stays the portable path.
 
-## What each exit delivers
+## What the owner gets at each exit
 
 - P0: a one-page fact sheet about the phone (cheap, useful for (b)/(c) decisions too).
 - P2: a measured answer to "is a hosted EKA2 fast and sane on this hardware", with the trampoline
@@ -43,7 +43,7 @@ Total to a phone home screen: 24-40 weeks; with the GPU path and the 808: 30-50 
 - P5/P6: a native-speed N95/N8 on the Pixel 3a with sydb; the QEMU machine stays the reference and the
   only option for 64-bit-only hosts.
 
-## First real phone environment (decided 2026-11-12)
+## First real phone environment (owner's decision, 2026-11-12, reprioritised the same day)
 
 The hosted kernel targets a real phone user side (unmodified ROM; drivers replaced by stand-ins, the ROM
 recomposed as today), in QEMU first.
@@ -78,7 +78,7 @@ LanguageSelection (~54k exec calls in 8 s under TCG). What made it possible:
 
 **The fake modem (done 2026-11-12):** the QEMU device was split into a modem core shared by QEMU and the
 hosted board (src/qemu-syborg/hw/arm/syborg_modem_core.c/.h, dual licensed GPL-2.0-or-later OR EPL-1.0 by
-the project) and two hosts: syborg_modem.c (QEMU: properties, MMIO, timers, NIC, migration) and
+the owner) and two hosts: syborg_modem.c (QEMU: properties, MMIO, timers, NIC, migration) and
 src/hosted/variant/hmodem.cpp (I/O bus windows, interrupts 15/16, a timer thread; no network or sound
 yet). iscpeer.inl reaches the registers through ModemRead/ModemWrite (volatile accesses on ARM, the I/O
 bus hosted). With replies the boot goes on to the System Agent and the window server (kn_efile).
@@ -110,7 +110,7 @@ framebuffer shows the Nokia splash (kn_efile writes it to build/hosted/htest/vmo
 display window instead of a dump, the keyboard device model (keys), speed (several times slower than
 the ARM QEMU board under TCG).
 
-## Speed (2026-11-12, priority: speed, then a live display, then the home screen)
+## Speed (2026-11-12, owner's priority: speed, then a live display, then the home screen)
 
 Measured by the time each process starts (kn_efile notes `started: NAME at N ms`), QEMU TCG cortex-a55:
 
@@ -125,7 +125,7 @@ Measured by the time each process starts (kn_efile notes `started: NAME at N ms`
 
 Start-up is 5.2x faster than this morning (EikSrvs 29 s -> 5.6 s) and within ~1.4x of the ARM board
 (intentengine 16 s vs 11.7 s). Tools: kn_efile `started: X at N ms`, `htest --env PROFILE=1` (sampling
-profiler, nkern/linux/hprof.cpp: region split and hottest pcs, symbolise with llvm-addr2line on t/kn_efile),
+profiler, nkern/linux/hprof.cpp: region split and hottest pcs, symbolise with llvm-addr2line on dev/<device>/t/kn_efile),
 counters in the probe (thread switches, interrupts/suppressed ticks, idle). Where the rest goes (20 s at
 1.07 M exec calls): the process is on the CPU ~25% of the time; ~109k thread switches, each a futex hand-over
 between Linux threads (TLxEvent Set/Wait = ~27% of the CPU samples, plus wake-up latency); the interrupt lock
@@ -167,3 +167,100 @@ single-host-thread design (future.md section 3) is the fix for this phase, and n
 per-switch cost by an order of magnitude [inferred]. The null thread spun at 100% after boot (fixed: idle =
 WFI in NKIdle; now ~14% at rest, mostly the Supervisor thread, the display copy and lxtop).
 
+**Explicit minimal guest kernel (2026-11-12):** the test VM's Linux went from arm64 `defconfig` (4,693 options,
+78 MB Image) to `allnoconfig` + 51 listed options (558 after dependencies, 4.8 MB Image;
+src/hosted/linux/hosted.config). Under TCG the guest kernel's own work is emulated too, so the boot got faster:
+EikSrvs starts at 3.95 s (5.65 s), the phone settles after its boot-time scans at ~34 s (~63 s). One trap on the
+way: with `CONFIG_EXPERT`, `COMPAT_32BIT_TIME` must be listed, or every 32-bit sleep and clock call fails.
+
+## Belle FP2 (Nokia 808) on the hosted kernel (2026-11-12, owner's goal: the 808 on the Pixel 3a)
+
+Headless (`htest --rom nokia-808-rm807 kn_efile`), no network or sound needed. Fixed so far, each with a test:
+the user-side thread-data block (ARM1176 kernel flavour per device), inline exec svcs outside EUSER's stub block
+(trapped and patched on first use), drive images larger than 4 GB (pread + overlay), the flexible model's ROM DLL
+data area (our RAM DLL data region moved below it), the profile's stand-ins built in (ISA modem driver, surface
+manager, touch, accelerometer, boot properties, audio), a modem reset as a failure. The boot now runs EStart, the
+system servers and system state management (~75k exec calls) until the window server: it fails to initialise
+(EWsPanicFailedToInitialise) because its render stages (alf, compositor: GCE, EGL/OpenVG) need the syborg-gl
+device, which the hosted board does not have yet. Next: the graphics path (syborg-gl as a QEMU-free core).
+
+**808 graphics on the host (2026-11-12):** syborg-gl runs in a host GL server (src/hosted/glserver: QEMU's
+syborg_gl.c unchanged, against a small QEMU shim) on the host GPU; the hosted board forwards its registers and
+serves guest memory over a shared-memory channel (`htest --gl`, tests: tests/glserver_test.py, kn_gl). With user
+chunks below 0x80000000 (FbServ hands out heap addresses as TInts) the 808's window server initialises, GCE
+composition and EGL run on the host GPU (Mesa radeonsi here). Open: the SQL server reports its databases corrupt
+(KSqlErrCorrupt: tzserver, wmdrmserver), start-up then resets the phone.
+
+**808 status, late 2026-11-12:** start-up runs to the system-state sequence; the window server, GCE and EGL work on
+the host GPU. Blocker: the SQL server reports databases corrupt (KSqlErrCorrupt) on the hosted kernel and not on
+QEMU, even a database it creates fresh: tzserver dies, start-up resets the phone. Measured so far: the bytes the
+server receives match the files (IPCSUM CRCs vs host copies); SQLite's corruption point is pager.c:4970
+(sqlite3PagerAcquire with page 0, PROBE_CODE on sqlite3CorruptError in sqlsrv.exe at +0x11074); not the CPU model,
+the heap clamp, the RAM size, IPC copy chunking or user stack contents. Tools added: SYBCODE lines and PROBE_CODE
+probes for RAM-loaded code, IPCSUM, NVDELTA (+ tools/hosted/nvdelta.py), clean seeds (tools/hosted/cleanseed.py).
+
+**Fixed (2026-11-12): user stack alignment.** On ARMv6K phones (user-side thread data) every user thread started
+with sp 4 mod 8; the phone's kernel gives 0 there. Varargs read 64-bit arguments from the wrong slot: SQLite's
+`printf("%lld", 3)` wrote "12884901891", schemas had root page 0, every database read as corrupt. Found by
+reading the stack at the corruption probe. Method, ABI checklist and tools: `debugging.md`. The 808 now passes the
+SQL stage, loads its locale and runs system states 101-103; it then goes to state 117 (start-up failure) and
+resets at ~37 s. Next: why 103 -> 117 (compare the state manager's commands with QEMU's IPC trace).
+
+**Fixed (2026-11-12): second instances of an EXE; the composed screen.** The diff of sysstatemgr's IPC after state
+103 (hosted `--trace 80000800` vs `build/sydb-h808ipc`) showed the loader answering -5 to the start-up list's
+`cntsrv.exe -nontransient`: a second process of a loaded EXE, which the hosted memory model refused as the Win32
+emulator does. With `AttachExistingCodeSeg` the 808 reaches state 104 (start-up phase "critical OK") and stays up.
+The GL server now publishes the composed frame and the board shows it: the 808's start-up animation (the progress
+dots) on the host GPU. Open: state 110 not reached by 90 s (QEMU: 51 s); weatherpublisher dies with KERN-EXEC 3
+(not on QEMU). Fixed the same day: `Lookup(0)` returned the word before the export directory (libdl's dlopen of a Qt
+plugin took it for a named symbol table); `GetMemoryInfo` answered. Open: the user window (1.75 GB shared by every
+process's chunks, heaps clamped to 16 MB) fills up at ~100 processes (welcome2 STDLIBS-INIT -4, timing-dependent);
+design reviews: `chunk-address-space.md` (plan: per-process local window, as the multiple model).
+At 150 s the 808 shows its start-up animation (the Nokia "hands", host GPU). The N95 board gained the
+framebuffer interrupt (VSYNC): its screensaver band now shows the clock instead of black.
+
+**Local window (2026-11-12):** process-local chunks get a window every process has whole, as the multiple model
+(`chunk-address-space.md`, `src/hosted/memmodel/linux/mlocal.cpp`). The 808 runs ~130 processes with 34 MB
+heaps without running out and reaches system state 110 (start-up complete, as QEMU); the screen still shows the
+start-up animation at 150 s.
+
+**808 past the animation (2026-11-12):** physical commits for driver chunks (the audio DSP window): the audio engine
+lives and start-up shows the first-boot language dialog, as QEMU. The phone window takes the device's screen size,
+takes the mouse as the finger (hosted syborg-pointer) and shows the device's keys as buttons. With a settable RTC the first-boot wizard
+(language, region, date, time) ends on the **home screen**; Menu opens the application grid, the lock key locks,
+taps open apps (Calendar), all composed on the host GPU.
+
+
+
+## Speed, 2026-11-13 (the 808's UI)
+
+Tool: `tools/hosted/uibench.py` (headless boot with the post-wizard seed; start-up, swipe frames per second,
+Menu and app-launch latency from the screen's frame counter; `--env GLSTAT=1` prints per-second counters:
+GL requests and their time, thread switches, interrupts, exec calls by number). Findings and steps:
+- GL channel: ~1500 register requests and ~3000 memory callbacks a second while drawing, 100-150 us each (up to
+  23% of the time). Channel v3 (deferred writes, prefetch, write log): ~400 requests and ~250 callbacks.
+  The host server is then busy ~100 ms/s with GL work itself.
+- `BTraceOut`: ~500,000 calls a second from the font and bitmap client/server, each a full slow exec. Now
+  answered in the trampoline when the category is filtered out.
+- Display thread: 19% of a CPU composing unchanged frames; now copies changed rows directly, ~7%.
+- Thread switches: 10,000-20,000 a second while drawing (~17 us each under TCG). Private futexes and waking
+  only sleeping waiters made no measurable difference; spinning before sleeping caught 18% and was turned off.
+  The real cure is section 3 of future.md (all nanothreads on one host thread).
+- One CPU for the VM (`--smp 1`) is a loss: the busy-polling devices (GL requests) need a second CPU.
+
+## 808 Settings -> Phone hang (2026-11-13), and the device bundle
+
+- The hang (QEMU and hosted): Settings -> Phone starts NfcServer and waits for its rendezvous; nfcserver never
+  finished starting because the TSY's UICC power-control request 8C 21 {F7} (NFC secure element on the SIM)
+  was never answered. Reply found in the 701's nokiatsy (msg 22, sub-block 002A flag 0 = no SE):
+  platform/isi/replies-bb5.txt. QEMU: Settings -> Phone opens. Found with the IPC trace (gsapp's last message:
+  a process launch; nfcserver's ETel requests 36000/36003 never completed).
+- Hosted: with that reply, the state manager's command thread panics USER 11 right after (dcmostartupcustcmd.dll),
+  only on the hosted kernel; the reply is held back there for now (docs/hacks.md). Open.
+- Hosted, intermittent: ~3 boots in 15 stop at system state 104 with the home screen up but its widgets
+  missing (empty animated slots), the window server's compositor busy. Open.
+- Phone-mode diagnosis: Ctrl+P in the window (shared word 0x80) prints PHONEDIAG: servers with unanswered
+  messages, user threads and their waits.
+- `tools/hosted/device-bundle.py` + `docs/hosted-eka2/pixel-3a.md`: the phone for a real arm64 Linux device
+  (Pixel 3a under postmarketOS), and `phone.py --attach`. Both phones boot with the kernel's CP15 barrier
+  emulation off [V]; the N95's EUSER needs no SWP.

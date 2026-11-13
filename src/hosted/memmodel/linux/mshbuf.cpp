@@ -337,7 +337,7 @@ TInt DWin32ShPool::DoCreate(TShPoolCreateInfo& aInfo)
 	__KTRACE_OPT(KMMU,Kern::Printf("DWin32ShPool::DoCreate (maxSize = 0x%08x, iBufGap = 0x%08x)",
 		static_cast<TInt>(maxSize), iBufGap));
 
-	iHostMemoryBase = (TUint8*) VirtualAlloc(NULL, (SIZE_T)maxSize, MEM_RESERVE, PAGE_READWRITE);
+	iHostMemoryBase = (TUint8*) VirtualReserveUser((SIZE_T)maxSize, PAGE_READWRITE);	// user-visible: below 0x80000000
 	if (iHostMemoryBase == NULL)
 		{
 		return KErrNoMemory;

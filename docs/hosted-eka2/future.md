@@ -73,6 +73,10 @@ Symbian has an SMP nanokernel (`nkernsmp`, used from Symbian^3 on multi-core pho
   nanothreads); on SMP they need per-device locks without the global interrupt lock, as QEMU's
   device locks [inferred].
 - Interrupts routed per CPU (a GIC-like distributor in hboard), timers per CPU.
+- Reference: NeoSymbian's native AArch64 port builds the generic nkernsmp against one pure C++ backend
+  (`a64s_ncsched.cpp`, from Phorepoc's x86-64 port, Apache-2.0) found by a census of undefined symbols;
+  the same method fits a hosted backend. Their fork also fixes `NKern::JoinGroup`'s ready-list order
+  (docs/research/neosymbian-review.md, items 5 and 6).
 - Gain: the S60 5th/Symbian^3 phones were single core; SMP matters for Belle-era multi-core firmware
   and for using several host cores at once [inferred: little gain for the N95, which is single core].
 
@@ -119,7 +123,7 @@ part that makes it fast on a phone.
 - Correctness reference: the same ROM on the ARM QEMU board and on the AArch32-capable hosted kernel
   (exec traces call for call, as kn_efile was checked).
 
-**Order:** after the AArch32 hosted path is complete on the Pixel 3a (the current priority), first the
+**Order:** after the AArch32 hosted path is complete on the Pixel 3a (the owner's priority), first the
 JIT (it runs everything), then AOT for the ROM and the boot-time services, measured against the JIT.
 
 ## 7. Other hosts and devices

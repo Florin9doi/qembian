@@ -5,12 +5,16 @@ process**. The phone's **unmodified ROM code** (EUSER, the servers, the S60 UI, 
 natively as AArch32 user code; only exec calls, interrupts and devices are rerouted. There is no
 instruction emulation of Symbian code: the CPU runs it directly.
 
-Status (2026-11-12): the Nokia N95 8GB user side (S60 3rd FP1, Symbian 9.2) boots to its home screen in
-the test VM (QEMU aarch64 `virt`, TCG) in about 20-25 s, with a live screen and keypad in a window:
+Status (2026-11-13): the Nokia N95 8GB (S60 3rd FP1, Symbian 9.2) and the Nokia 808 PureView (Symbian Belle FP2)
+boot to their home screens in the test VM (QEMU aarch64 `virt`, TCG), with a live screen, keys and (808) touch in
+a window; the 808 composes on the host GPU through a GL server process:
 
     python3 tools/hosted/phone.py                       # boot the N95, show it, keys work; close = stop
                                                         # Ctrl+T: Linux `top` beside it (Symbian threads = Linux threads)
+    python3 tools/hosted/phone.py --rom nokia-808-rm807 --gl   # the 808: mouse = touch, buttons = its keys
     python3 tools/hosted/htest.py                       # all hosted tests (docs/hosted-eka2/tests.md)
+    python3 tools/hosted/uibench.py                     # the 808's UI timing (start-up, swipe, Menu, app launch)
+    python3 tools/hosted/device-bundle.py --rom ID      # the phone for a real arm64 Linux device (docs/hosted-eka2/pixel-3a.md)
     python3 tools/hosted/htest.py --rom nokia-n95-8gb-rm320 --env PROBE_MS=4e20 kn_efile   # headless boot, probe at 20 s
 
 Further reading: `docs/hosted-eka2/` (the evaluation and the original design: `architecture.md`; the
@@ -22,14 +26,14 @@ designs: `future.md`). Every shortcut, hardcoded value and guess: `docs/hacks.md
 ```
  host (PC: x86-64 or arm64 Linux)                         later: the phone itself (Pixel 3a, mainline Linux)
  ┌────────────────────────────────────────────────────────────────────────────────────────────────┐
- │ tools/hosted/phone.py (PyQt6 window)  ◄── mmap ──  build/hosted/htest/phone.shm (1 MB file)     │
+ │ tools/hosted/phone.py (PyQt6 window)  ◄── mmap ──  build/hosted/htest/phone.shm (4 MB file)     │
  │     draws frames, writes key events ──────────────►   header | key ring | XRGB pixels           │
  │ tools/hosted/htest.py: builds everything, runs QEMU                    ▲                        │
  └────────────────────────────────────────────────────────────────────────┼────────────────────────┘
                                                                           │ ivshmem BAR (PCI 00:05.0)
  QEMU aarch64 `virt` (TCG today; KVM on an arm64 host with AArch32 EL0)    │
  ┌────────────────────────────────────────────────────────────────────────┼────────────────────────┐
- │ Linux 6.18 arm64 (COMPAT: 32-bit processes), busybox-free init (src/hosted/init)                │
+ │ Linux 6.18 arm64, minimal explicit config (COMPAT: 32-bit processes), busybox-free init (src/hosted/init)                │
  │ ┌──────────────────────────────────────────────────────────────────────┼─────────────────────┐  │
  │ │ ONE 32-bit ARM Linux process = the whole Symbian machine            │                     │  │
  │ │                                                                      │                     │  │
@@ -62,11 +66,12 @@ designs: `future.md`). Every shortcut, hardcoded value and guess: `docs/hacks.md
 | `nkern/linux/` | the nanokernel's platform layer: scheduler hand-over, interrupt lock, suspend/resume by signal, tick thread, exec dispatch and stub patching (`vectors.cpp`), exceptions, ARM11 instruction emulation, profiler, dumps and watchdog | ported from Symbian's `nkern/win32` (EPL notices kept) + original |
 | `nkern/nksa/` | glue for Symbian's standalone nanokernel suite (`nk_sa`) | original |
 | `kernel/linux/` | the kernel's platform: boot (`HostedBootEpoc`), exception traps, safe copies, exec tables, personality shims, built-in kernel modules (`kmodules.cpp`) | ported from `kernel/win32` + original |
-| `memmodel/linux/` | the memory model: chunks over mmap, processes, EXE/DLL static data, RAM code segments, IPC copies, physical windows | ported from `memmodel/emul/win32` |
-| `variant/` | the hosted board: I/O bus, interrupts, NVMemory, framebuffer, keyboard, sound sink, fake modem host, display shared memory, the test variant | original (modem core shared with QEMU) |
+| `memmodel/linux/` | the memory model: chunks over mmap, processes, EXE/DLL static data, RAM code segments, IPC copies, physical windows and physical commits; `mlocal.cpp`: the per-process local window for heaps (docs/hosted-eka2/chunk-address-space.md) | ported from `memmodel/emul/win32` + original |
+| `variant/` | the hosted board: I/O bus, interrupts, NVMemory, framebuffer (with VSYNC and the panel's view), keyboard, touch (`hptr.cpp`), sound sink, fake modem host, display shared memory, the GL channel (`hgl.cpp`), the test variant | original (modem core shared with QEMU) |
+| `glserver/` | the host GL server: QEMU's `syborg_gl.c` unchanged against a small QEMU shim, on the host GPU; channel protocol in `include/board/syborg_glchan.h` (v3: deferred writes, prefetch, write log) | original (GPL, built with syborg_gl.c) |
 | `include/` | thin header overrides (`#include_next`): exec tables, `syborg.h` register access through the bus, `mmboot.h` | original |
 | `init/` | the test VM's PID 1: mounts the 9p shares, runs tests, prints `HTEST` lines | original |
-| `linux/hosted.config` | the test VM kernel's extra config on top of arm64 defconfig (COMPAT, SWP/CP15 emulation, seccomp, memfd, 9p; the ivshmem BAR comes through defconfig PCI sysfs) | original |
+| `linux/hosted.config` | the test VM kernel's whole config: `allnoconfig` + 52 explicit options, each with its reason (COMPAT and 32-bit time calls, SWP/CP15 emulation, seccomp, memfd, futex, PL031 RTC, PCI/virtio, 9p); checked at build | original |
 | `tests/` | `t_*` runtime, `nk_*` nanokernel, `kn_*` kernel/board/phone tests | original |
 
 Unchanged EPL sources compiled in: `nkern/*.cpp`, the 32 generic `kernel/*.cpp`, `klib`, `common`, EXSTART,
@@ -105,7 +110,7 @@ built-in modules (`htest.py` KMODULES, one partial link each).
 7. **Devices are register-level models of our QEMU syborg devices.** The phone's drivers and our
    stand-ins compile unchanged (`syborg.h` `ReadReg/WriteReg` go through the I/O bus when hosted); the
    fake modem is one core shared with the QEMU device (`syborg_modem_core.c`, dual licensed by the
-   project). The same driver code therefore runs on the ARM board and hosted.
+   owner). The same driver code therefore runs on the ARM board and hosted.
 8. **Kernel-side ROM binaries are replaced by hosted builds of the same sources** (picked by file name
    when the loader asks): the phone's own kernel DLLs are prelinked to its EKERN and cannot run here.
 9. **The display leaves the VM through shared memory** (ivshmem), as the QEMU guest's framebuffer did:

@@ -25,10 +25,18 @@ DWin32Chunk::~DWin32Chunk()
 
 	if (iBase)
 		{
-		VirtualFree(LPVOID(iBase), iMaxSize, MEM_DECOMMIT);
-		VirtualFree(LPVOID(iBase), 0, MEM_RELEASE);
+		// hosted: a process-local chunk gives its pages and addresses back to its process (mlocal.cpp)
+		TBool local = iLocalSpace != NULL;
+		if (local)
+			LocalChunkDestroy(this);
+		else
+			{
+			VirtualFree(LPVOID(iBase), iMaxSize, MEM_DECOMMIT);
+			VirtualFree(LPVOID(iBase), 0, MEM_RELEASE);
+			}
 		MM::Wait();
-		MM::FreeMemory += iSize;
+		if (!local && !(iAttributes & EMemoryNotOwned))
+			MM::FreeMemory += iSize;
 		if(iUnlockedPageBitMap)
 			{
 			TInt unlockedMemory = MM::RamPageSize*(iUnlockedPageBitMap->iSize-iUnlockedPageBitMap->iAvail);
@@ -67,11 +75,16 @@ TInt DWin32Chunk::DoCreate(SChunkCreateInfo& aInfo)
 	{
 	__ASSERT_COMPILE(!(EMMChunkAttributesMask & EChunkAttributesMask));
 
-	if(iAttributes&EMemoryNotOwned)
-		return KErrNotSupported;
+	// hosted: chunks that do not own their memory (drivers commit physical RAM to them) are supported: their
+	// pages are the board RAM's memory file mapped at the chunk's address (DoCommitPhysical). Bug 2026-11-12:
+	// refused (the emulator has no physical memory), so the 808's audio engine got no DSP window, panicked
+	// (MdaifApi 6) and the start-up animation waited for its tone for ever. Regression: kn_efile.
 	if (aInfo.iMaxSize<=0)
 		return KErrArgument;
 	iMaxSize=MM::RoundToChunkSize(aInfo.iMaxSize);
+	// hosted: process-local chunks keep their full maximum, in their process's local window (mlocal.cpp). Until
+	// 2026-11-12 every process's local chunks shared one window and were clamped to 16 MB; the 808's ~130 heaps
+	// filled it all the same (STDLIBS-INIT -4). Regression: kn_localwin.
 	TInt maxpages=iMaxSize>>MM::RamPageShift;
 	if (iAttributes & EDisconnected)
 		{
@@ -103,11 +116,34 @@ TInt DWin32Chunk::DoCreate(SChunkCreateInfo& aInfo)
 	case EKernelMessage:
 	case EUserSelfModCode:
 	case EUserData:
+		if (LocalChunkWanted(this))
+			{
+			TInt r = LocalChunkCreate(this);
+			if (r != KErrNone)
+				return r;
+			break;
+			}
+		// fall through: a global user chunk, in the shared window
 		{
 		DWORD protect = (iChunkType == EUserSelfModCode) ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE;
-		LPVOID base = VirtualAlloc(NULL, iMaxSize, MEM_RESERVE, protect);
+		// user-visible chunks below 0x80000000 (lxwin32.cpp VirtualReserveUser); the kernel's message chunk anywhere
+		TInt reserve = iMaxSize;
+		LPVOID base = iChunkType == EKernelMessage ? VirtualAlloc(NULL, iMaxSize, MEM_RESERVE, protect)
+		                                          : VirtualReserveUser(reserve, protect);
+		static TUint64 UserReserved;
+		if (base && iChunkType != EKernelMessage)
+			{
+			UserReserved += reserve;
+			if (reserve >= 0x2000000)
+				Kern::Printf("HOSTED: user chunk %O reserves %d MB at %08x (user window reserved %d MB)", this, reserve >> 20, base, (TUint32)(UserReserved >> 20));
+			}
 		if (!base)
+			{
+			Kern::Printf("HOSTED: chunk %O of max %x bytes (type %d): no room for it", this, iMaxSize, iChunkType);
+			extern void HostedUserWindowReport();
+			HostedUserWindowReport();
 			return KErrNoMemory;
+			}
 		iBase  = (TUint8*) base;
 		__KTRACE_OPT(KMMU,Kern::Printf("Reserved: Base=%08x, Size=%08x",iBase,iMaxSize));
 		}
@@ -234,6 +270,8 @@ TInt DWin32Chunk::Commit(TInt aOffset, TInt aSize, TCommitType aCommitType, TUin
 		return KErrGeneral;
 	if (aOffset<0 || aSize<0 || (aOffset+aSize)>iMaxSize)
 		return KErrArgument;
+	if (aSize==0)
+		return KErrNone;	// hosted: the empty initial commit of a new chunk (NewChunk), whatever memory it owns
 	if(LOGICAL_XOR((TInt)aCommitType&DChunk::ECommitPhysicalMask, iAttributes&DChunk::EMemoryNotOwned))
 		return KErrNotSupported;  // Commit type doesn't match 'memory owned' type
 
@@ -266,9 +304,10 @@ TInt DWin32Chunk::Commit(TInt aOffset, TInt aSize, TCommitType aCommitType, TUin
 			break;
 
 		case DChunk::ECommitDiscontiguousPhysical:
+			r=DoCommitPhysical(aOffset,aSize,0,aExtraArg);
+			break;
 		case DChunk::ECommitContiguousPhysical:
-			// The emulator doesn't do physical address allocation
-			r=KErrNotSupported;
+			r=DoCommitPhysical(aOffset,aSize,(TPhysAddr)aExtraArg,NULL);
 			break;
 
 		default:
@@ -513,17 +552,47 @@ TInt DWin32Chunk::PhysicalAddress(TInt aOffset, TInt aSize, TLinAddr& aKernelAdd
 	if(r!=KErrNone)
 		return r;
 
-	// return fake physical addresses which are the same as the linear address
-	aPhysicalAddress = 	aKernelAddress;
+	// hosted: the real physical address of memory committed physically and contiguously, else (as the emulator)
+	// fake physical addresses which are the same as the linear address
+	aPhysicalAddress = iPhysContig ? iPhysContig + aOffset : aKernelAddress;
 
 	TInt pageShift = MM::RamPageShift;
-	TUint32 page = aKernelAddress>>pageShift<<pageShift;
-	TUint32 lastPage = (aKernelAddress+aSize-1)>>pageShift<<pageShift;
+	TUint32 page = aPhysicalAddress>>pageShift<<pageShift;
+	TUint32 lastPage = (aPhysicalAddress+aSize-1)>>pageShift<<pageShift;
 	TUint32* pageList = aPhysicalPageList;
 	TUint32 pageSize = 1<<pageShift;
 	if(pageList)
 		for(; page<=lastPage; page += pageSize)
 			*pageList++ = page;
+	return KErrNone;
+	}
+
+// hosted: physical RAM (contiguous from aPhys, or the page list) mapped at the chunk's address from the board
+// RAM's memory file (hboard.cpp HostedPhysicalRamFd): the driver, the kernel and user code see the same pages
+TInt DWin32Chunk::DoCommitPhysical(TInt aOffset, TInt aSize, TPhysAddr aPhys, const TUint32* aPageList)
+	{
+	extern TInt HostedPhysicalRamFd(TPhysAddr aPhys, TUint32 aSize, TUint32& aOffset);
+	for (TInt done = 0; done < aSize; )
+		{
+		TPhysAddr phys = aPageList ? aPageList[done >> MM::RamPageShift] : aPhys + done;
+		TInt n = aPageList ? MM::RamPageSize : aSize;
+		TUint32 off;
+		TInt fd = HostedPhysicalRamFd(phys, n, off);
+		if (fd < 0)
+			{
+			Kern::Printf("HOSTED: chunk %O physical commit %08x+%x: not board RAM", this, phys, n);
+			return KErrNotSupported;
+			}
+		TAny* m = hmmap(iBase + aOffset + done, n, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd, off);
+		if ((TUint8*)m != iBase + aOffset + done)
+			return KErrNoMemory;
+		done += n;
+		}
+	if (!aPageList)
+		iPhysContig = aPhys - aOffset;
+	iSize += aSize;
+	if (iPermanentPageBitMap)
+		iPermanentPageBitMap->Alloc(aOffset >> MM::RamPageShift, aSize >> MM::RamPageShift);
 	return KErrNone;
 	}
 
@@ -538,7 +607,8 @@ TInt DWin32Chunk::DoCommit(TInt aOffset, TInt aSize)
 
 	TBool execute = (iChunkType == EUserSelfModCode) ? ETrue : EFalse;
 
-	TInt r = MM::Commit(reinterpret_cast<TLinAddr>(iBase + aOffset), aSize, iClearByte, execute);
+	TInt r = iLocalSpace ? LocalCommit(this, aOffset, aSize)
+	                     : MM::Commit(reinterpret_cast<TLinAddr>(iBase + aOffset), aSize, iClearByte, execute);
 
 	if (r == KErrNone)
 		{
@@ -553,7 +623,7 @@ TInt DWin32Chunk::DoCommit(TInt aOffset, TInt aSize)
 #endif
 		return KErrNone;
 		}
-
+	Kern::Printf("HOSTED: chunk %O commit %x+%x failed (max %x, attributes %x)", this, aOffset, aSize, iMaxSize, iAttributes);
 	return KErrNoMemory;
 	}
 
@@ -563,7 +633,15 @@ void DWin32Chunk::DoDecommit(TInt anOffset, TInt aSize)
 // The pages may or may not be committed: we need to find out which ones are so that the memory info is updated correctly
 //
 	{
-	TInt freed = MM::Decommit(reinterpret_cast<TLinAddr>(iBase+anOffset), aSize);
+	if (iAttributes & EMemoryNotOwned)
+		{
+		// hosted: physical pages: unmapped again, nothing returns to the free memory (the driver owns them)
+		hmmap(iBase + anOffset, aSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, -1, 0);
+		iSize -= Min(aSize, iSize);
+		return;
+		}
+	TInt freed = iLocalSpace ? LocalDecommit(this, anOffset, aSize)
+	                         : MM::Decommit(reinterpret_cast<TLinAddr>(iBase+anOffset), aSize);
 
 	iSize -= freed;
 	__KTRACE_OPT(KMEMTRACE, {Kern::Printf("MT:A %d %x %x %O",NTickCount(),this,iSize,this);});
@@ -589,7 +667,7 @@ void DWin32Chunk::BTracePrime(TInt aCategory)
 			__LOCK_HOST;
 			// output traces for all memory which has been committed to the chunk...
 			TInt offset=0;
-			while(offset<iMaxSize)
+			while(!iLocalSpace && offset<iMaxSize)
 				{
 				MEMORY_BASIC_INFORMATION info;
 				VirtualQuery(LPVOID(iBase + offset), &info, sizeof(info));

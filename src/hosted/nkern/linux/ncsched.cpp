@@ -185,7 +185,7 @@ static volatile TInt IdleSeq;
 void HostedPokeIdle()
 	{
 	__atomic_add_fetch(&IdleSeq, 1, __ATOMIC_SEQ_CST);
-	hfutex_wake(&IdleSeq, 1);
+	hpfutex_wake(&IdleSeq, 1);
 	}
 
 static void IdleUntilReady()
@@ -199,7 +199,7 @@ static void IdleUntilReady()
 		TBool ready = TheScheduler.First() != 0;
 		NKern::EnableAllInterrupts();
 		if (!ready)
-			hfutex_wait(&IdleSeq, seq);
+			hpfutex_wait(&IdleSeq, seq);
 		}
 	}
 

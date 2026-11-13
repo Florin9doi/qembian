@@ -154,6 +154,7 @@ static const TInt KMaxSkip = 7;
 
 static TInt TimerThread(TAny*)
 	{
+	hsys(SYS_prctl, 15 /* PR_SET_NAME */, "h-tick");	// its name in the Linux view (lxtop)
 	TInt skipped = 0;
 	TUint64 next = hnow_ns();
 	while (!TimerStop)
@@ -310,3 +311,9 @@ void HostedStartWatchdog(TInt aSeconds)
 	WatchdogSeconds = aSeconds;
 	CreateLinuxThread(EThreadEvent, &Watchdog, 0, ETrue);
 	}
+
+// Static objects with destructors in kernel code (the EPL surface manager driver) register them with
+// __cxa_atexit. Kernel modules are never unloaded and the hosted kernel never exits normally: the
+// registration is accepted and nothing is ever run (docs/hacks.md, built-in modules: no static destructors).
+extern "C" int __cxa_atexit(void (*)(void*), void*, void*) { return 0; }
+// (__dso_handle: defined above)

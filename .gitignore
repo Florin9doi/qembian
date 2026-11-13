@@ -4,9 +4,11 @@
 /build/
 /out/
 *.log
+!docs/evidence/*.log
 __pycache__/
+/linuxboot/linux-stable-nokia-tablets/
+/linuxboot/rapuyama-linux/
 /roms/
-/firmware/
 src/standins/_shared/isireplies.h
 # N-Gage (EKA1): firmware, extractions, generated analysis, Ghidra project, third-party sources
 # (eka1/README.md says how to regenerate each)
