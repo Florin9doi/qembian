@@ -1,0 +1,250 @@
+# Nokia E90 Communicator (RA-6): S60 3rd FP1 on Symbian 9.2, two displays (cover 240x320, inner 800x352 with
+# the QWERTY keyboard). Started 2026-11-17 from the N95 8GB profile: values not yet checked for the E90 are [I N95].
+# Schema: docs/devices.md. Evidence tags: [V] checked against code/firmware, [I] inferred.
+schema = 2
+family = "bb5-s60"                         # platform/families/bb5-s60.toml, merged under this file
+
+[device]
+id = "nokia-e90-ra6"
+vendor = "Nokia"
+model = "E90 Communicator"
+type_code = "RA-6"                         # Nokia type designation (RA-006; the firmware says RA-6)
+aliases = ["e90"]
+market = "global"
+notes = "Communicator: a lid; the cover display (240x320) when closed, the inner display (800x352) and QWERTY keyboard when open."
+
+[platform]
+os_version = "9.2"                         # Symbian OS 9.2 (docs/roadmap.md)
+ui = "s60-3.1"                             # S60 3rd Edition Feature Pack 1
+personality = "sym92l91"                   # 9.2 exec tables, 9.1 loader layout (personalities/sym92l91), as the N81/E71: with sym92 EStart's ProcessCreate fields were garbage (DProcess::Create -6, "Fserv fault 11") [V KDLL trace; CodeSegCreate copies 0x17c as the N81]
+soc = "omap2420"                           # TI OMAP2420, ARM1136 r0p2 (docs/hacks.md H-cpu-arm1136)
+
+# ---------------------------------------------------------------------------------------------
+# Firmware: what to obtain and how it is taken apart. No bytes from it are committed.
+[firmware]
+default = "300.34.84"                  # models/nokia-n95-8gb-rm320/firmware/<name>/: the firmware a bare id loads
+container = "fiasco-bb5"                   # tools/fiasco.py
+
+[firmware.rom]
+base = 0x80000000                          # TRomHeader romBase; same as our Syborg ROM [V]
+kernel_data = 0xC8000000                   # [V] docs/devices/nokia-n95-8gb-rm320/n95-firmware-inventory.md
+memory_model = "multiple"
+paged = true                               # flattened by tools/rom_unpage.py -> core-flat.img
+
+# ---------------------------------------------------------------------------------------------
+# Board: what the one QEMU binary is told at run time (tools/device.py qemu-args).
+[board]
+cpu = "arm1136-r2"                         # mc->default_cpu_type (src/qemu-syborg/hw/arm/syborg.c), patch qemu-baseport 0011
+ram_mb = 168                               # H-ram-168: 128 MB on the phone + unpaged core image (patch qemu-baseport 0010)
+ram_mb_real = 128                          # the phone's own RAM, for the record
+
+[board.display]
+width = 800                                # wsini.ini SCR_WIDTH1/HEIGHT1 = 800x352 at rotation 0: the inner display (lid open) [V]
+height = 352
+screen1 = "240x320"                        # the cover display: HAL screen 1 / DisplayDriver screen 1 (lcd_e90, patch 0028) [V e90-two-displays.md]
+native_orientation = "portrait"            # upright at rotation 0 (800 wide), no controller rotation [I]
+line_pitch = 3200                          # 800 px x 4 bytes [I]
+panel_rows = 352
+caps_words = 25                            # as the E71 (S60 3rd FP1): r_display copies 100 bytes after ctl 11; 26 words overflowed WSERV (KERN-EXEC 3) [V E90 boot]
+touch = false                              # S60 3rd: -global syborg-pointer.input=off
+
+[board.audio]
+dsp = "ehwa"                               # DSP bridge stand-in feeds it (H-dspbridge)
+
+[board.gl]
+device = "syborg-gl"                       # 0xc000f000, host EGL/GLES 2 backend (H-gles-host)
+backend = "host"                           # -global syborg-gl.backend=host|off; sydb --gl soft
+
+
+[board.flash]
+size_mb = 128                              # board.flash: the flash window medrofs serves the ROFS images from
+[[board.drives]]
+letter = "D"
+local_drive = 0
+kind = "iram"
+flags = "FS_FORMAT_ALWAYS,FS_SYNC_DRIVE"
+
+[[board.drives]]
+letter = "C"
+local_drive = 1
+kind = "nvmem"                             # syborg-nvmem at 0xc0010000, -drive if=mtd
+image = "nvmemory.img"
+size = "64M"                               # scripts/run-modern.sh NVMEM_SIZE
+flags = "FS_FORMAT_CORRUPT,FS_SCANDRIVE"
+
+[[board.drives]]
+letter = "E"
+local_drive = 2
+kind = "nvmem2"                            # mednvmem2.pdd, second NVMemory at 0xc000d000 (H-mednvmem2)
+image = "nvmemory2.img"
+size = "1G"
+removable = true
+flags = "FS_FORMAT_CORRUPT"
+
+[[board.drives]]
+letter = "Z"
+local_drive = 8
+kind = "composite"                         # ROFS1 + ROFx served by medrofs.pdd
+flags = "FS_COMPOSITE"
+
+# ---------------------------------------------------------------------------------------------
+# Hardware the phone has (presence drives the skin, the stand-in list and the "done" levels).
+[hardware]
+wlan = true
+bluetooth = true
+camera = { main_mp = 3.2, front = true }   # camera untested
+fm_radio = true
+gps = true
+accelerometer = false
+slides = ["lid"]                           # the communicator lid: cover display + phone keypad closed, inner display + QWERTY open
+qwerty = true
+leds = ["keypad-backlight", "display-backlight"]
+memory_card = true                         # microSD
+tv_out = true
+dsp = "ti-dsp-bridge"                      # TI DSP/BIOS bridge (ehwa/ehwaomap) [I as the N95: same OMAP2420]
+gpu = "powervr-mbx"                        # not used yet: gl.impl = "none"
+
+# ---------------------------------------------------------------------------------------------
+# Guest side: what is built per device.
+[kernel]
+baseport = "syborg"                        # patches/qemu-baseport (common) + the macros below
+place = "after-firmware"                   # the firmware's kernel-side and user-side files are interleaved (lowest user file 0x800a0ec0) [V]
+patchsets = ["platform", "sym92", "policy"]   # see docs/devices.md §4.2 for the split of patches/kernelhwsrv
+missing_drivers = ["keypad.dll", "services.ldd", "omaplcd.ldd"]   # firmware kernel-side files with no stand-in (documented gaps)
+
+[kernel.lcd]                               # the LCD HAL extension (src/standins/lcd/lcd_e90.mmp: two screens, patch qemu-baseport 0028)
+target = "lcd_e90"
+
+# Kernel-side stand-ins composed into the ROM below the user-side window (generated bld.inf,
+# scripts/build-standins.sh). Order matters: rombuild lays files out in obey order.
+[[standins]]
+name = "nokiaiscdriver"
+kind = "ldd"
+family = "nokia-bb5"
+role = "modem link (ISC channels 0..31), fake CMT peer iscpeer.inl"
+
+[[standins]]
+name = "xbus"
+kind = "ldd"
+family = "nokia-bb5"
+role = "load-only"
+
+[[standins]]
+name = "iscisimultiplexer"
+kind = "ldd"
+family = "nokia-bb5"
+role = "load-only"
+
+[[standins]]
+name = "nokiaiscdriverextension"
+kind = "ldd"
+family = "nokia-bb5"
+role = "modem link (ISC channels 32..63)"
+options = { ISC_CHANNEL_BASE = 32, ISC_LDD_NAME = "NokiaISCDriverExtension" }
+
+[[standins]]
+name = "custom"
+kind = "ldd"
+family = "nokia-bb5"
+role = "startup mode (controls 32/2/1 -> 0 = normal)"
+
+[[standins]]
+name = "sosadlserver"
+kind = "ldd"
+family = "nokia-bb5"
+role = "accepts everything (purpose unknown)"
+
+[[standins]]
+name = "d_display"
+kind = "ldd"
+family = "nokia-omap2"
+role = "DisplayDriver: caps, rotation, partial mode, DSB, vsync wait 0x7f01, sygl command stream 0x7f10/11"
+
+[[standins]]
+name = "secldd"
+kind = "ldd"
+family = "nokia-bb5"
+role = "SecEnv: identity transform + stub device certificate (H-secenv-cert)"
+
+[[standins]]
+name = "ehwa"
+kind = "ldd"
+family = "nokia-omap2"
+role = "TI DSP bridge LDD (H-dspbridge): playback nodes to syborg-audio"
+
+[[standins]]
+name = "ehwaomap"
+kind = "pdd"
+family = "nokia-omap2"
+role = "TI DSP bridge PDD"
+
+[[standins]]
+name = "medrofs"
+kind = "extension"
+family = "common"
+role = "ROFS1 + ROFx from the flash window on local drive 8"
+
+[[standins]]
+name = "mednvmem2"
+kind = "extension"
+family = "common"
+role = "second NVMemory (E:) on local drive 2 (patch qemu-baseport 0006)"
+
+
+# ---------------------------------------------------------------------------------------------
+# Fake modem (ISI over ISC). Simple replies are a table; stateful ones are code in the stand-in.
+[modem]
+# With a SIM ([sim] present), docs/research/n95-sim-present.md: NokiaDSY (channel 24) asks the SIM lock (09 C0 service
+# 01) after SEC start-up and accepts only 01/09/08/24 there (0x808c006c) [V]; 01 = no lock -> DOS state "SIM ready",
+# start-up continues. The TSY (channel 7) needs SIM_IND {0D 0B 08 00 00} (SIM ready for ETel) [V]. Without a SIM
+# the DSY never reaches the lock query.
+sim_service_status = { "0x01" = 0x01 }
+sim_home_plmn = true                       # SIM 2D {04} home PLMN read (nokiatsy 0x808ca216): GetHomeNetwork for provisioning
+sms_protocol = "pp-routing"                # S60 3rd PN_SMS: routing 06/07, incoming 08 (docs/research/n95-sms-receive.md)
+indications = [{ res = 0x09, msg = 0xEF, data = "0D 0B 08 00 00", channel = 7, after = "09 C0", sim = true }]
+
+# ---------------------------------------------------------------------------------------------
+# ROM composition (tools/romcompose.py; driven today by scripts/hybrid-boot.sh).
+[rom]
+code_patches = []
+files = [{ rom = "Sys/Data/ESTARTCOMP.TXT", local = "ESTARTCOMP.TXT" }]   # CR LF! [I the N95's drive map]
+
+[gl]
+impl = "sygl"                              # src/sygl: our GLES 1.1/EGL behind the phone's libgles_cm.dll (as the N95)
+target_dll = "libgles_cm.dll"
+ordinals = "gl/libgles_cm.ordinals"        # the SDK's libgles_cm.dso (names only), the same as the N95's
+imports = "gl/n95imports.txt"              # ROM exports the blob calls, resolved against this firmware's symindex
+blob_addr = 0x80090000                     # free gap below the firmware's user side (0x800a0ec0); the blob is ~66 KB
+entry_patches = "gl/gles-patches.txt"      # generated by src/sygl/build.sh
+surface_model = "wsegl-strict"
+present = "dsa"
+vsync_request = 0x7f01
+cmd_controls = [0x7f10, 0x7f11]
+[gl.identity]                              # this firmware's own driver strings (libgles_cm.dll, libimgegl.dll) [V]
+vendor = "Nokia"
+renderer = "1.2.17 HW PowerVR MBX with VGP"
+version = "OpenGL ES-CM 1.1"
+egl_vendor = "Imagination Technologies"
+egl_version = "1.1 build 3.3.33.561.1.1.5"
+
+# ---------------------------------------------------------------------------------------------
+# What the tools watch for (sydb daemon, tools/boot_milestones.py, syb_report).
+[milestones]
+idle = "sets 101f8766/41 = 203"            # tools/sydb/daemon.py IDLE_RE: SysAp self-test OK = Active Standby up
+
+
+# ---------------------------------------------------------------------------------------------
+# Phone window (tools/sydb/phone.py). Geometry only; key names refer to keymap.toml.
+# ---------------------------------------------------------------------------------------------
+# Phone window (tools/sydb/phone.py).
+[skin]
+turn = "none"                              # the lid, not Turn view, changes the display
+
+# Where this device stands (docs/adding-a-device.md "done" levels).
+[props]
+startup = { category = 0x101F8766, state = 0x41, ui_phase = 0x4 }
+
+[status]
+level = "L1"                               # idle on the inner display, lid -> cover display, QWERTY, GL (2026-11-17)
+updated = "2026-11-17"
+open = ["lid closed during boot: white screen; boot with the lid closed", "flip status P&S", "E90 keypad matrix", "firmware 210.34.75"]

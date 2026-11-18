@@ -1,0 +1,9 @@
+# Fake-modem canned replies of the N95 8GB (RM-320) on top of platform/isi/replies-bb5.txt
+# (the N95 has no own ones today); names: platform/isi/names.txt.
+# tools/isi.py gen-header turns both into build/roms/<id>/<fw>/gen/isireplies.h.
+# NET_MODEM_REG_STATUS (0A 00): answered in platform/isi/replies-bb5.txt (2026-11-17; was unanswered and
+# blocked the Connection Monitor server, so Messaging never opened).
+
+# NET_MODEM_REG_STATUS_GET on PN_NETWORK: moved here from platform/isi/replies-bb5.txt on 2026-11-18: it is not true
+# of every BB5 phone (the 9.1 TSYs of the N73 and E61 panic USER 21 in ISIMSG on it; they get no reply)
+reply 0A 00 01 00 02 00 04 06 02 09 18 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # NET_MODEM_REG_STATUS_GET (S60 3rd/5th, no SIM): OK, NET_REG_INFO_COMMON {NOSERV_NOSIM 6, automatic} + a zero 24-byte NET_GSM_REG_INFO 0x09 (a common-only reply panicked NOKIATSY 'IsiMessage OFFS -9'; the TSY reads 0x09 up to +0x16). Unanswered, the Connection Monitor server waited forever and every app connecting to it hung: Messaging, Music player, Games (2026-11-17). With [sim] present syborg_modem_core.c answers it first

@@ -1,0 +1,14 @@
+// eusbc.ldd: EPL's USB client LDD (RDevUsbcClient) on usbcc.dll's null controller (see usbcnull.cpp)
+#include "../../variant.mmh"
+#include <kernel/kern_ext.mmh>
+target			VariantTarget(eusbc,ldd)
+linkas			eusbc.ldd
+targettype		ldd
+userinclude		../../../../../../os/kernelhwsrv/kernel/eka/include/drivers
+sourcepath		../../../../../../os/kernelhwsrv/kernel/eka/drivers/usbc
+source			d_usbc.cpp usbdma.cpp
+library			VariantTarget(usbcc,lib)
+noexportlibrary
+uid				0 0x101F8928
+vendorid		0x70000001
+capability		all

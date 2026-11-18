@@ -235,6 +235,24 @@ class Eka1Test(unittest.TestCase):
         self.assertIsNone(semc.eka1_header(b'\xff' * 0x100))
 
 
+P1I_CORE = os.path.join(ROOT, 'roms', 'SE-P1i', 'R6E30', 'BbyoneSW_CXC162058')
+
+
+@unittest.skipUnless(os.path.exists(P1I_CORE), 'needs the P1i core in the ROM store')
+class QuickCoreTest(unittest.TestCase):
+    def test_root_list_beyond_the_first_kilobyte(self):
+        """bug 2026-11-17 (P990i import): quick_core read 0x400 bytes, the SE cores' root list is at +0x1A90, so
+        no SE core was recognised and store.py import stored nothing without a word"""
+        head = open(P1I_CORE, 'rb').read(0x10000)
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            f.write(head)
+            f.truncate(os.path.getsize(P1I_CORE))
+        try:
+            self.assertTrue(semc.quick_core(f.name))
+        finally:
+            os.unlink(f.name)
+
+
 class EmmaTest(unittest.TestCase):
     SCRIPT = ('begin;\nencryption on;\n'
               'w_free 0x0002 0x079E 0x0000 0x01 0x08 0x00 0x00 0x4A 0x01 0x03 0x43 0x58 0x43 0x0A 0x02 0x52 0x31 0x00 0x0D;\n'

@@ -149,3 +149,45 @@ no kernel change. Record/replay (3) is still open.
   boots tested an old stand-in), and the trace report's "likely blocked" list is empty when the stall is
   an asynchronous wait (APS's five BServer requests), so it needs a "pending since boot, never completed"
   view per client.
+
+- **`sydb strace` silently ends at `--max 200`; the N8's screen needs `frame.seq`, not `screenshot`.**
+  (2026-11-13, N8 `*#0000#` hang) Two hours went to tracing the wrong thing: `sydb strace MATCH --secs S`
+  defaults to `--max 200` events, and when the cap is hit it clears the kernel KIPC bit, so the trace
+  stops after a few seconds *exactly when the app under investigation starts*. The default should be
+  large (or none, with `--max` only for a bounded sample), and the end of a run should say why it
+  stopped ("hit --max 200"). Likewise `sydb screenshot` returns a black picture on a host-composed phone
+  (N8/701/808): the picture is only in `<session>/frame.seq` (magic `FSEQ`, seq at 4, w/h/on at 8, pixels
+  at 4096, geometry from `hmp xp /17wx 0xc0005000`). A `sydb screenshot` that decodes the frame sequence
+  when `syborg-gl` composes on the host (as `sydb phone` does) would have shown the spinner/black window
+  at once. Scratch decoder: `/tmp/n8shot.py` during the session — worth making it a tool.
+
+- **Who is blocked *without* an IPC request: `tools/sydb/kwalk.py` (added 2026-11-13).** The trace
+  report's "likely blocked" list only covers IPC, so a thread parked in `RSemaphore::Wait`, a mutex or
+  a message queue is invisible — which cost an hour on the N81 splash stall (FbServ's two threads
+  deadlocked on one of its own semaphores, no IPC pending at all). `kwalk.py` walks the kernel's
+  `DThread` objects (runtime vtable, anchored on `TheScheduler.iCurrentThread`) and prints, per
+  thread, the kernel call it is blocked in, read from `NThreadBase::iSavedSP`. Two gaps left:
+  `sydb catch --kind any --action dump` never fires for a *killed* process (`RProcess::Kill` does not
+  reach `DThread::Die`), so there is still no user-stack dump of a live blocked thread; and the
+  thread walk only covers the low 16 MB of kernel RAM (later processes' DThreads were not found by the
+  vtable scan — find the heap anchor, e.g. `DProcess::iThreadQ` of each process, instead of scanning).
+  Also: the kernel's `KSEMAPHORE` trace bit (`--trace 0x80000010`) logs every semaphore Wait/Signal
+  with its count and is the fastest way to see a lost signal — worth a line in docs/tools.md.
+
+- **An ABI checker that counted stubs as implementations.** (2026-11-13, N81 splash stall)
+  `tools/personality/check.py` compared the firmware EUSER's used SWIs against `personalities/*/exec.map`
+  and treated an `!invalid` slot as present, so `F0a`/`F0b` (the N81 calls them for
+  `User::LockedInc/LockedDec`, i.e. every `RCriticalSection`) looked implemented while our handlers were
+  no-op stubs returning 0. Lesson for the family: a checker must distinguish "mapped" from
+  "deliberately not implemented", and a review of skipped slots is worth more than the count it prints.
+  Fixed (`supported_execs()` skips `!invalid`); `tests/device_py_test.py::ExecMapTest` keeps it honest.
+- **`kwalk.py` on the moving memory model (2026-11-17).** On the SE P1i (syborgmv) `kwalk.py` finds 0 threads
+  (its DThread vtable anchor assumes the multiple model's layout). Needed: find threads through the kernel's
+  object container (K::Containers[EThread]) instead, so it works for every memory model.
+- **sydb fork/restore and gdb (2026-11-17, SE P1i).** (1) `fork`/`restore` take the device from `$SYBORG_DEVICE`, not
+  from the snapshot's session, so a P1i snapshot restored as an N95 (RAM size mismatch). (2) A fork resumed only by
+  gdb (`dbg continue`) keeps its block devices inactive; the first flash write asserts in QEMU
+  (`bdrv_co_write_req_prepare: !(bs->open_flags & BDRV_O_INACTIVE)`). Workaround: `qmp cont` first, with gdb
+  `set breakpoint always-inserted on`. (3) The daemon dropped the connection twice during `dbg wait` after a
+  breakpoint hit in a fork. (4) A `dbg attach` after a session restart can talk to a stale gdb: breakpoints set,
+  never hit. Wanted: fork/restore read the device from the snapshot, resume through QMP, re-attach gdb per QEMU pid.

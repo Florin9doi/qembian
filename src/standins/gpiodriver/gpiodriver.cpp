@@ -5,6 +5,6 @@
 // Hal.dll, AtCommands and the service menus [V names]; EStart and APS get KErrNotFound without it [V].
 // H-p1i-gpio (docs/hacks.md): controls return KErrNone (GPIO reads give 0), requests stay pending
 // (GPIO change notifications), every call is logged ("SYBSTUB:").
-#include "nokiastub.h"
+#include "tablestub.h"
 NO_CONTROLS
-NOKIA_STUB_LDD("GPIODRIVER", KCtl, 1)
+TABLE_STUB_LDD("GPIODRIVER", KCtl, 1)

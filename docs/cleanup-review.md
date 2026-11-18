@@ -176,7 +176,7 @@ this: the tone needs sound output, which is still "Towards real sound (not done)
 - `d_display` rotation caps are hard-coded (`d_display.cpp:69`) while the profile has
   `rotation_caps` (section 1.1): wire or delete.
 - Load-only stubs (xbus, iscisimultiplexer, sosadlserver, sisadriver, lightldd/pdd, usbaudiodriver,
-  dvfs_interface) are 4-19 lines on top of `nokiastub.h`: already common. Nothing to do.
+  dvfs_interface) are 4-19 lines on top of `tablestub.h`: already common. Nothing to do.
 
 ## 3. Other cleanup, ranked by value/effort (small and safe first)
 

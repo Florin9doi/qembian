@@ -16,7 +16,7 @@
 // stack (KERN-EXEC 3); refusing the channel made it report the error synchronously, and its observer
 // stopped an active scheduler that had not started (E32USER-CBase 45); completing every request at
 // once starved the scheduler (requests 0 and 1 re-armed and completed in a loop).
-#include "nokiastub.h"
+#include "tablestub.h"
 
 static TBool EndArmed;		// set by control 0: the next request 4 completes (one client: the player)
 
@@ -41,4 +41,4 @@ static const SStubCtl KCtl[] =
 	{
 	{ 8, EReturn, KErrUnderflow, 0, 0 },	// no input buffer: nothing is decoded
 	};
-NOKIA_STUB_LDD_HOOKS("MPEG4DECDRV", KCtl, EFalse, ReqHook, CtlHook)
+TABLE_STUB_LDD_HOOKS_CANCELNUM("MPEG4DECDRV", KCtl, EFalse, ReqHook, CtlHook)	// DoCancel(n) = request n [V player ee5d66c8..]

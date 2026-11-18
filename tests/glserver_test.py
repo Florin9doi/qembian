@@ -167,6 +167,35 @@ def main():
     for _ in range(5):
         run(plain)
     check(time.time() - t0 < 0.05, 'runs without a present are not held (%d ms for 5)' % ((time.time() - t0) * 1000))
+    # bug 2026-11-18 (Belle popup backdrop black): VG DARKEN was GL_MIN per channel, exact only over an opaque target.
+    # alf darkens its dimmed screen copy into a transparent buffer: min(c, 0) = 0, a black backdrop behind every
+    # popup menu. Multiply, darken and lighten blend in the shader against a copy of the target now.
+    def blend_px(dst, mode, src):
+        def fill(argb, m):
+            e = [0, 0, 8, 0, 8, 0, 8, 4, 8, 4, 0, 4, 0, 4, 0, 0]
+            w = [3, 1, m, 0, argb, 0, 0, 4] + list(struct.unpack('<16I', struct.pack('<16f', *e)))
+            return [11, 2 + len(w)] + w
+        cmds = [8, 3, 5, 1, 6, 3, 8, 4, 2] + fill(dst, 0x2000) + fill(src, mode) + [7, 7, 3, 0, 1, 1, 1]
+        b = struct.pack('<%dI' % len(cmds), *cmds)
+        RAM[0:len(b)] = b
+        RAM[out:out + 32] = b'\xaa' * 32
+        c.wr('BUF', PHYS); c.wr('LEN', len(b)); c.wr('OUT', PHYS + out); c.wr('OUTLEN', 32)
+        c.wr('PID', 5); c.wr('FLAGS', 1)
+        c.wr('EXEC', 1)
+        return struct.unpack_from('<I', RAM, out)[0]
+
+    def near(a, b):
+        return all(abs(((a >> s) & 255) - ((b >> s) & 255)) <= 2 for s in (0, 8, 16, 24))
+    for name, dst, mode, src, want in (
+            ('darken over transparent (the backdrop)', 0x00000000, 0x2007, 0xff404040, 0xff404040),
+            ('darken over opaque white', 0xffffffff, 0x2007, 0xff404040, 0xff404040),
+            ('lighten over opaque', 0xff808080, 0x2008, 0xff404040, 0xff808080),
+            ('lighten over transparent', 0x00000000, 0x2008, 0xff404040, 0xff404040),
+            ('multiply over transparent', 0x00000000, 0x2005, 0xff404040, 0xff404040),
+            ('multiply over opaque', 0xff808080, 0x2005, 0xff808080, 0xff404040),
+            ('translucent darken over transparent', 0x00000000, 0x2007, 0x80202020, 0x80202020)):
+        got = blend_px(dst, mode, src)
+        check(near(got, want), 'VG %s: %08x (want %08x)' % (name, got, want))
     c.put('MAGIC', 0)
     try:
         srv.wait(10)

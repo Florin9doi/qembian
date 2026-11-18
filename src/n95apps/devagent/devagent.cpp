@@ -22,10 +22,12 @@
 #include <apgtask.h>
 #include <apacmdln.h>
 #include <aknkeylock.h>
+#include <viewcli.h>
+#include <vwsdef.h>
 
 #define P(fmt, ...) RDebug::Printf("DEVAGENT: " fmt, ##__VA_ARGS__)
 
-static const char KVersion[] = "4";
+static const char KVersion[] = "6";
 static const TInt KUnit = 1;
 static const TInt KMaxWatch = 32;
 static const TInt KChunk = 4096;
@@ -245,6 +247,8 @@ private:
 	void CmdLaunch(const TDesC8& aTag, const TDesC8& aWhat);
 	void CmdWg(const TDesC8& aTag);
 	void CmdFg(const TDesC8& aTag, const TDesC8& aWg);
+	void CmdText(const TDesC8& aTag, const TDesC8& aHex);
+	void CmdView(const TDesC8& aTag, const TDesC8& aApp, const TDesC8& aView, const TDesC8& aMsgUid, const TDesC8& aMsg);
 	void CmdKeylock(const TDesC8& aTag, const TDesC8& aOp);
 	void CmdKeepAwake(const TDesC8& aTag, const TDesC8& aOp);
 	void CmdProp(const TDesC8& aTag, TBool aSet, const TDesC8& aCat, const TDesC8& aKey, const TDesC8& aVal);
@@ -463,14 +467,16 @@ static TInt Split(const TDesC8& aLine, TPtrC8* aParts, TInt aMax)
 
 void CAgent::HandleLine(TDes8& aLine)
 	{
-	TPtrC8 part[5];
+	TPtrC8 part[6];
 	TInt n = Split(aLine, part, 5);
 	if (n < 2)
 		return;
+	if (n == 5 && part[1] != _L8("run"))	// up to 4 arguments (view); run keeps its raw argument string
+		n = Split(aLine, part, 6);
 	TBuf8<32> tag;
 	tag.Copy(part[0].Left(32));
-	TBuf8<512> a[3];
-	for (TInt i = 0; i < 3; i++)
+	TBuf8<512> a[4];
+	for (TInt i = 0; i < 4; i++)
 		{
 		if (2 + i < n)
 			{
@@ -503,6 +509,8 @@ void CAgent::HandleLine(TDes8& aLine)
 	else if (cmd == _L8("launch")) CmdLaunch(tag, a[0]);
 	else if (cmd == _L8("wg")) CmdWg(tag);
 	else if (cmd == _L8("fg")) CmdFg(tag, a[0]);
+	else if (cmd == _L8("text")) CmdText(tag, a[0]);
+	else if (cmd == _L8("view")) CmdView(tag, a[0], a[1], a[2], a[3]);
 	else if (cmd == _L8("keylock")) CmdKeylock(tag, a[0]);
 	else if (cmd == _L8("keepawake")) CmdKeepAwake(tag, a[0]);
 	else if (cmd == _L8("pget")) CmdProp(tag, EFalse, a[0], a[1], KNullDesC8);
@@ -1154,6 +1162,86 @@ void CAgent::CmdFg(const TDesC8& aTag, const TDesC8& aWg)
 		}
 	else
 		Err(aTag, r, "fg failed");
+	}
+
+// text HEX: characters (UTF-16 units, 4 hex digits each) as key events with iCode = the character,
+// sent to the window group that has the focus: any symbol or language, no keypad multi-tap and no
+// keymap involved (an editor inserts the code; the FEP passes codes it has no key mapping for).
+// Exception [V N79 2026-11-17]: AknFep takes the codes of keypad keys ('0'-'9', '*', '#') as key
+// presses (multi-tap letters, symbol table, case switch), also with EModifierSpecial/PureKeycode; those
+// are typed with the phone's keys (sydb key / the window)
+void CAgent::CmdText(const TDesC8& aTag, const TDesC8& aHex)
+	{
+	TInt r = Ws();
+	if (r != KErrNone)
+		{
+		Err(aTag, r, "ws connect failed");
+		return;
+		}
+	if (aHex.Length() % 4)
+		{
+		Err(aTag, KErrArgument, "text: 4 hex digits per character");
+		return;
+		}
+	TInt n = 0;
+	for (TInt i = 0; i + 4 <= aHex.Length(); i += 4)
+		{
+		TInt c = 0;
+		for (TInt k = 0; k < 4; k++)
+			{
+			TInt v = HexVal(aHex[i + k]);
+			if (v < 0)
+				{
+				Err(aTag, KErrArgument, "text: bad hex");
+				return;
+				}
+			c = c * 16 + v;
+			}
+		TWsEvent ev;
+		ev.SetType(EEventKey);
+		ev.SetTimeNow();
+		TKeyEvent* k = ev.Key();
+		k->iCode = c;
+		k->iScanCode = 0;
+		k->iModifiers = 0;
+		k->iRepeats = 0;
+		r = iWs.SendEventToWindowGroup(iWs.GetFocusWindowGroup(), ev);
+		if (r != KErrNone)
+			break;
+		n++;
+		User::After(20000);
+		}
+	if (r != KErrNone)
+		{
+		Err(aTag, r, "text: send failed");
+		return;
+		}
+	TOut o;
+	o.Begin(aTag, "ok");
+	o.Int("sent", n);
+	End(o);
+	}
+
+// view APP VIEW [MSGUID MSG]: activate an app's view through the view server, as the Help app's
+// app://vsa@localhost/<app>/<view>[/<msgUid>/<msg>] links do (tools/helplinks.py,
+// docs/research/help-app-links.md). CreateActivateViewEvent: the view server starts the app if needed.
+void CAgent::CmdView(const TDesC8& aTag, const TDesC8& aApp, const TDesC8& aView, const TDesC8& aMsgUid, const TDesC8& aMsg)
+	{
+	TInt app = 0, view = 0, msgUid = 0;
+	if (!ParseInt(aApp, app) || !ParseInt(aView, view) || (aMsgUid.Length() && !ParseInt(aMsgUid, msgUid)))
+		{
+		Err(aTag, KErrArgument, "view APP VIEW [MSGUID MSG]");
+		return;
+		}
+	CVwsSessionWrapper* vws = CVwsSessionWrapper::NewL();	// leaves on OOM only (no TRAP in this toolchain)
+	TInt r = vws->CreateActivateViewEvent(TVwsViewId(TUid::Uid(app), TUid::Uid(view)), TUid::Uid(msgUid), aMsg);
+	delete vws;
+	if (r != KErrNone)
+		{
+		Err(aTag, r, "view activation failed");
+		return;
+		}
+	Ok(aTag);
 	}
 
 void CAgent::CmdKeylock(const TDesC8& aTag, const TDesC8& aOp)

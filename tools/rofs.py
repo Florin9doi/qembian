@@ -44,12 +44,15 @@ def walk(d, dir_off, path='', out=None, base=0, rolf=False):
     return out
 
 
-def entry(d, want, dir_off=None, path=''):
-    """offset of the directory entry (TRofsEntry) of file `want` in a ROFS1 image, or None"""
+def entry(d, want, dir_off=None, path='', base=0):
+    """offset (in the image) of the directory entry (TRofsEntry) of file `want`, or None. base: a ROFx
+    extension's address base (files()), whose directory addresses count from ROFS1's iMaxImageSize"""
     if dir_off is None:
         dir_off = struct.unpack_from('<I', d, 8)[0]
     want = want.lower().strip('/')
+    dir_off -= base
     size, pad, first, fblock, fsize = struct.unpack_from('<HBBII', d, dir_off)
+    fblock -= base
     p, end = dir_off + first, dir_off + size
     while p < end:
         es = struct.unpack_from('<H', d, p)[0]
@@ -57,7 +60,7 @@ def entry(d, want, dir_off=None, path=''):
             break
         noff, att, fs, fa, attx, nl = struct.unpack_from('<BBIIBB', d, p + 18)
         name = d[p + noff:p + noff + 2 * nl].decode('utf-16le')
-        hit = entry(d, want, fa, path + name + '/')
+        hit = entry(d, want, fa, path + name + '/', base)
         if hit is not None:
             return hit
         p += es

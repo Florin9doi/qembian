@@ -48,6 +48,7 @@ touch = false
 [board.audio]
 dsp = "rapido"                             # RAPIDO DSP model: aamdaifdriver + the ISC peer's F3 replies
 ring_units = 16                            # DSP ring per stream (docs/devices/nokia-n8-rm596/rapido-audio.md)
+streams = "48000/2/24/240,48000/1/24,16000/1/24"   # stream type -> PCM format: without it the ring stays unbound and the phone is silent (bug 2026-11-17); type 0 as the N8 and 5230 [I for this phone]
 
 
 [board.flash]

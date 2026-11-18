@@ -53,7 +53,7 @@ build() {   # name uid3[:sid] caps dsos...
     --libpath="$LIBS" --compressionmethod=none >/dev/null
   ls -la "$OUT/$name.exe"
 }
-build devagent 0xE0001DB7 "All-TCB" euser efsrv ws32 apgrfx apparc avkon scppnwdl drtaeabi dfpaeabi
+build devagent 0xE0001DB7 "All-TCB" euser efsrv ws32 apgrfx apparc avkon viewcli scppnwdl drtaeabi dfpaeabi
 build dafs 0xE0001DB8 "All" euser efsrv scppnwdl drtaeabi dfpaeabi
 build boothook 0xE0001DB9:0x10272C04 "All-TCB" euser scppnwdl drtaeabi dfpaeabi
 build oracle 0xE0001DBA "All-TCB" euser efsrv hal scppnwdl drtaeabi dfpaeabi

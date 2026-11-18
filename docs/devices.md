@@ -222,7 +222,17 @@ resolved against the firmware's symbol index), `patches` (generated: the rebind 
 
 **`[milestones]`** `idle`: the serial-log pattern sydb waits for (the firmware's own start-up line).
 No timing expectations: boot time depends on the host (the smoke test takes `--budget`). **`[props]`** P&S keys tools read.
-**`[skin]`** `layout`, `orientation_key`. **`[status]`** `level`, `updated`, `open`, `smoke_skip` (smoke-test checks not brought up on this phone, check -> reason: `switch-off`).
+**`[skin]`** `layout`, `orientation_key`; `turn` = what the window's *Turn view* does: `"ccw"` (default; the
+picture turns anticlockwise, the N8's games), `"cw"` (clockwise: 5800/5230, whose games draw landscape with the
+top to the right), `"none"` (no button: QWERTY sliders get landscape from the slide); `[skin.slides.<kind>]` =
+what opening a slide of `[hardware] slides` does (`label`, `landscape`, `group` = keymap group shown while open,
+`open`/`close` = host keys tapped), over the defaults in `tools/sydb/phone.py` `SLIDE_DEFAULTS` (`keypad`, `media`:
+the N95's F14/F13 layout switch; `qwerty`: landscape, keys from the profile; `lid`: a communicator lid, starts open,
+open = F13 / EKeyDeviceA = the inner display, closed = F14 / EKeyDeviceB = the cover display; the window switches QEMU's active panel
+(`/machine/fb active-panel`) and follows its size: the E90, whose cover is `[board.display] screen1 = "WxH"`;
+`flip`: a keypad flip over part of the screen, read by the phone as a switch: `switch` = the QEMU syborg-sensor
+`switches` bit set while closed (a stand-in publishes it), `closed_view = [x, y, w, h]` = the part of the panel the
+flip leaves visible, `closed_group` = the key group shown while closed (the flip's keys): the P990i). **`[status]`** `level`, `updated`, `open`, `smoke_skip` (smoke-test checks not brought up on this phone, check -> reason: `switch-off`).
 
 ### 2.2 `keymap.toml`
 

@@ -1,4 +1,4 @@
-// N95 ehwa.ldd stand-in (see nokiastub.h). "Hwa" = TI DSP/BIOS bridge driver used by the audio
+// N95 ehwa.ldd stand-in (see tablestub.h). "Hwa" = TI DSP/BIOS bridge driver used by the audio
 // stack (Bal.dll -> bridgeapi.dll) in MmfAudioServer's resource-manager thread. Hack H-dspbridge
 // (docs/hacks.md). There is no DSP: the stand-in answers just enough for MmRmServerThread's init
 // (docs/devices/nokia-n95-8gb-rm320/nokia-dspbridge.md), so MmfAudioServer starts (Phone.exe and EikSrvs' key-sound server need
@@ -27,7 +27,7 @@
 // = play complete. Raw-node commands (cmd 7 config,
 // 3 start, 4 pause, 1 stop, 2 record) get no reply; only the send status completes.
 //   others     return 0, write nothing (logged)
-#include "nokiastub.h"
+#include "tablestub.h"
 #include "boardconfig.h"
 
 // The bridge protocol variant this phone's bridgeapi.dll speaks, declared in the device profile:
@@ -806,4 +806,4 @@ static TInt HwaCtl(DThread* aClient, TInt aFn, TAny* a1, TAny* a2, const TUint32
 	}
 
 NO_CONTROLS
-NOKIA_STUB_LDD_CTLHOOK("Hwa", KCtl, ETrue, HwaCtl)
+TABLE_STUB_LDD_CTLHOOK("Hwa", KCtl, ETrue, HwaCtl)

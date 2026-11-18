@@ -126,9 +126,9 @@ def norm_version(v):
 
 
 def from_name(name):
-    tc = re.search(r'RM-?(\d{3})', name, re.I)
+    tc = re.search(r'R([MAHX])-?(\d{1,3})', name, re.I)
     ver = re.search(r'_(\d{2,3}\.\d{2,4}(?:\.\d+)*)', name)
-    return ('RM-%s' % tc.group(1) if tc else ''), (ver.group(1) if ver else '')
+    return ('R%s-%s' % (tc.group(1).upper(), tc.group(2)) if tc else ''), (ver.group(1) if ver else '')
 
 
 def identify(paths):

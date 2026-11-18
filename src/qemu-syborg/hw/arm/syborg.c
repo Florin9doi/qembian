@@ -208,7 +208,11 @@ static void syborg_init(MachineState *machine)
 
     sysbus_create_simple(TYPE_SYBORG_KEYBOARD, 0xc0003000, pic[2]);
     sysbus_create_simple(TYPE_SYBORG_POINTER, 0xc0004000, pic[3]);
-    sysbus_create_simple(TYPE_SYBORG_FB, 0xc0005000, pic[4]);
+    {
+        /* /machine/fb: the lid of a two-panel phone sets its active-panel at run time (sydb phone) */
+        DeviceState *fb = sysbus_create_simple(TYPE_SYBORG_FB, 0xc0005000, pic[4]);
+        object_property_add_const_link(OBJECT(machine), "fb", OBJECT(fb));
+    }
 
     dev = qdev_new(TYPE_SYBORG_AUDIO);
     if (machine->audiodev) {

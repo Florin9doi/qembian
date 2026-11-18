@@ -104,7 +104,7 @@ Optional, when the N73 reaches them (keyed by build, which needs the hook extens
 - `0x0c000001`/`0x0c000002` with a2 → TRequestStatus: complete with 0 (`Kern::RequestComplete`
   on the user status, as the N95 Bal node-start handler does).
 
-Hook extension (only if build keying is wanted). It covers both hook users (`nokiastub.h:112`):
+Hook extension (only if build keying is wanted). It covers both hook users (`tablestub.h:112`):
 ```cpp
 typedef TInt (*TStubControlHook)(DThread* aClient, TInt aFn, TAny* a1, TAny* a2,
 								 const TUint32* aWords, TInt aBuild);

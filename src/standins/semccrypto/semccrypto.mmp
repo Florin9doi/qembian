@@ -1,0 +1,13 @@
+// SE P1i crypto.ldd stand-in (see semccrypto.cpp)
+#include "../../variant.mmh"
+#include <kernel/kern_ext.mmh>
+target			VariantTarget(semccrypto,ldd)
+linkas			semccrypto.ldd
+targettype		ldd
+sourcepath		.
+source			semccrypto.cpp
+noexportlibrary
+vendorid		0x70000001
+capability		all
+userinclude		../_shared	// src/standins/_shared: tablestub.h
+epocallowdlldata

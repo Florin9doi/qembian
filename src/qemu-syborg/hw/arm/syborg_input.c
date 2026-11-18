@@ -52,6 +52,8 @@ struct SyborgKeyboardState {
     uint32_t held_x[8];       /* the same for translated keys */
     char *keymap;             /* device keymap file (qcode -> Symbian scan code), or NULL */
     uint16_t xlat[1024];      /* by linux keycode: 0x8000 | scan code */
+    char *boot_keys;          /* qcode names pressed once the guest enables the keyboard (a switch's position at power on) */
+    bool boot_keys_sent;
 };
 
 #define KBD_TRANSLATED 0x40000000u
@@ -173,12 +175,39 @@ static uint64_t kbd_read(void *opaque, hwaddr offset, unsigned size)
     }
 }
 
+/* boot-keys: the positions of switches at power on (the E90's lid closed = EKeyDeviceB), reported as a press and release
+   of their keys when the guest's keypad driver enables the keyboard, as a phone's keypad driver reports its switches
+   when it starts; keys of the device keymap only */
+static void kbd_send_boot_keys(SyborgKeyboardState *s)
+{
+    if (s->boot_keys_sent || !s->boot_keys || !s->boot_keys[0]) {
+        return;
+    }
+    s->boot_keys_sent = true;
+    g_auto(GStrv) names = g_strsplit(s->boot_keys, ",", 0);
+    for (int i = 0; names[i]; i++) {
+        int q = qapi_enum_parse(&QKeyCode_lookup, g_strstrip(names[i]), -1, NULL);
+        unsigned lin = q >= 0 && q < qemu_input_map_qcode_to_linux_len ? qemu_input_map_qcode_to_linux[q] : 0;
+        if (!lin || lin >= ARRAY_SIZE(s->xlat) || !(s->xlat[lin] & 0x8000)) {
+            warn_report("syborg-keyboard: boot-keys: %s is not in the device keymap", names[i]);
+            continue;
+        }
+        uint32_t v = s->xlat[lin] & 0xff;
+        kbd_push(s, v | KBD_TRANSLATED);
+        kbd_push(s, v | KBD_TRANSLATED | 0x80000000);
+        info_report("syborg-keyboard: boot key %s (scan code 0x%x)", names[i], v);
+    }
+}
+
 static void kbd_write(void *opaque, hwaddr offset, uint64_t value, unsigned size)
 {
     SyborgKeyboardState *s = opaque;
 
     if ((offset >> 2) == 3) {
         s->int_enabled = value & 1;
+        if (s->int_enabled) {
+            kbd_send_boot_keys(s);
+        }
         kbd_update(s);
     }
 }
@@ -229,6 +258,7 @@ static const VMStateDescription vmstate_kbd = {
 static const Property kbd_properties[] = {
     DEFINE_PROP_UINT32("fifo-size", SyborgKeyboardState, fifo_size, 16),
     DEFINE_PROP_STRING("keymap", SyborgKeyboardState, keymap),
+    DEFINE_PROP_STRING("boot-keys", SyborgKeyboardState, boot_keys),
 };
 
 /* a machine reset: no queued or held keys, no interrupt (the keymap stays) */
@@ -237,6 +267,7 @@ static void kbd_reset(DeviceState *dev)
     SyborgKeyboardState *s = SYBORG_KEYBOARD(dev);
     s->int_enabled = 0;
     s->count = s->head = 0;
+    s->boot_keys_sent = false;
     memset(s->held, 0, sizeof(s->held));
     memset(s->held_x, 0, sizeof(s->held_x));
     kbd_update(s);

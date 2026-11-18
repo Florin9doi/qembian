@@ -25,7 +25,7 @@ Which phone: --instance NAME (a device instance, tools/instance.py: build/instan
   sydb startup add|rm|check PATH [w0 w1 w2] | startup list   (Starter's dynamic startup list)
   sydb wg | fg WGID | unlock | lock | keepawake on|off|unlocked
   sydb prop get CAT KEY | prop set CAT KEY VALUE              (hex category/key)
-  sydb key KEY... [--delay S] | type TEXT | screenshot [OUT.png] [--scale F] [--changed]
+  sydb key KEY... [--delay S] | type TEXT | text TEXT (any characters, straight to the app) | view APP VIEW [MSGUID MSG] (an app's view, Help-app links: tools/helplinks.py) | screenshot [OUT.png] [--scale F] [--changed]
   sydb gl [get] | gl set NAME=V... [--save]   host GPU settings (msaa, filter, compose; thread at next start), stats
   sydb sms TPDU_HEX... | sms-provision [--apn APN]   incoming SMS on the virtual SIM ([sim] present); sms-provision
                                      = the operator's settings message (OMA CP): creates the Internet access point
@@ -375,8 +375,8 @@ def cmd_start(sdir, a):
         # the agent can go onto a factory C: before the first boot
         d = [x for x in devmodel.get(prof, 'board.drives', []) if x.get('kind') == kind]
         src = d and devmodel.uda_image(prof, d[0]['letter'])
-        if src and os.path.exists(src) and not os.path.exists(os.path.join(drives, name)) \
-                and os.environ.get('SYBORG_UDA', '1') != '0':
+        made = (src and os.path.exists(src) and os.environ.get('SYBORG_UDA', '1') != '0') or (d and d[0].get('format'))
+        if made and not os.path.exists(os.path.join(drives, name)):
             print(devmodel.drive_image(prof, kind, os.path.join(drives, name)))
     if a.seed or a.fresh or a.install:
         if os.path.exists(os.path.join(drives, 'nvmemory.img')):
@@ -799,6 +799,21 @@ def main():
         # a pause: a number with a dot, or 2+ digits (single digits are the phone's number keys)
         keys = [float(k) if k.replace('.', '', 1).isdigit() and ('.' in k or len(k) > 1) else k for k in x.keys]
         out(c.call({'op': 'key', 'keys': keys, 'delay': x.delay}))
+    elif cmd == 'view':
+        # view APP VIEW [MSGUID MSG]: open one view of an app (view server), e.g. the 5800's Bluetooth paired
+        # devices: view 0x10005951 0x1020745D (links: tools/helplinks.py DEVICE)
+        if len(rest) < 2:
+            die('usage: sydb view APP_UID VIEW_UID [MSG_UID MSG]')
+        req = {'op': 'view', 'app': rest[0], 'view': rest[1]}
+        if len(rest) >= 3:
+            req['msg_uid'] = rest[2]
+            req['msg'] = ' '.join(rest[3:])
+        out(c.call(req))
+    elif cmd == 'text':
+        # text STRING: the characters straight into the focused app (agent key events with that code):
+        # symbols and other scripts the phone's keys cannot type; `type` presses the phone's keys instead.
+        # Digits, '*' and '#' are keypad keys to the FEP (multi-tap): type those with `key`
+        out(c.call({'op': 'text', 'text': ' '.join(rest)}))
     elif cmd == 'type':
         out(c.call({'op': 'type', 'text': ' '.join(rest)}))
     elif cmd == 'screenshot':

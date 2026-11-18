@@ -278,24 +278,24 @@ col = 1   # matrix 105
 [[keys]]
 key = "prev"
 label = "|<<"
-scancode = "EStdKeyApplication4"
+scancode = "EStdKeyApplication5"
 host = ["audioprev"]
 set1 = 0x90
 group = "media"
 row = 0
 col = 0
-evidence = "I"   # matrix 110
+evidence = "I"   # matrix 104: EStdKeyApplication5 = rewind by Nokia's alias header (docs/research/qwerty-slide-5730-n97.md); was swapped
 
 [[keys]]
 key = "next"
 label = ">>|"
-scancode = "EStdKeyApplication5"
+scancode = "EStdKeyApplication4"
 host = ["audionext"]
 set1 = 0x99
 group = "media"
 row = 0
 col = 2
-evidence = "I"   # matrix 104
+evidence = "I"   # matrix 110: EStdKeyApplication4 = forward (docs/research/qwerty-slide-5730-n97.md)
 
 [[keys]]
 key = "app1b"

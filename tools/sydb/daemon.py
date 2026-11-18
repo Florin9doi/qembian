@@ -8,7 +8,7 @@ One process per session dir (default build/sydb). It starts QEMU through scripts
   gdbstub  -> tcp port SESSION/gdb.port (persistent gdb, sydb dbg ...)
 and listens on SESSION/ctl.sock for one JSON object per line: {"op": ..., ...} -> one JSON reply.
 """
-import shutil, base64, hashlib, io, json, os, re, signal, socket, socketserver, subprocess, sys, threading, time, zlib
+import struct, shutil, base64, hashlib, io, json, os, re, signal, socket, socketserver, subprocess, sys, threading, time, zlib
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CHUNK = 2048                                           # = KAckChunk in devagent.cpp
@@ -657,6 +657,25 @@ def handle(sess, req):
     if op == 'key':
         press(sess, req['keys'], req.get('delay', 0.3))
         return {'ok': True}
+    if op == 'view':
+        # activate an app's view through the view server (the Help app's app://vsa links, tools/helplinks.py)
+        args = ['0x%x' % int(str(req['app']), 0), '0x%x' % int(str(req['view']), 0)]
+        if req.get('msg_uid') is not None:
+            args += ['0x%x' % int(str(req['msg_uid']), 0), req.get('msg', '')]
+        # the view server starts an app only for clients with an app starter (the agent has none): start it
+        # first (the agent's launch brings a running one to the front), give it a moment to register its views
+        app = '0x%x' % int(str(req['app']), 0)
+        a.request('launch', [app], timeout=60)
+        time.sleep(req.get('settle', 2.0))
+        a.request('view', args)
+        return {'ok': True}
+    if op == 'text':
+        # any characters (symbols, other scripts) as key events with that code to the focused window group:
+        # the agent's text command (devagent CmdText), independent of the phone's keys and keymap
+        b = req['text'].encode('utf-16-le')
+        hexs = ''.join('%04x' % u for u in struct.unpack('<%dH' % (len(b) // 2), b))
+        _, f = a.request('text', [hexs], timeout=max(10, len(req['text']) * 0.1))
+        return {'sent': int(f.get('sent', 0))}
     if op == 'type':
         sys.path.insert(0, os.path.join(ROOT, 'tools'))
         import qmp as qmpmod

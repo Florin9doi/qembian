@@ -45,7 +45,7 @@ ram_mb_real = 128
 width = 240                                # 2.8" 240x320 [I spec sheets; wsini.ini to check]
 height = 320
 native_orientation = "portrait"
-line_pitch = 960
+line_pitch = 1024                          # SE ScDv writes 240-pixel lines into 1024-byte rows (256 px; measured on the frame buffer 2026-11-17: 960 smeared the UI)
 panel_rows = 320
 touch = true                               # resistive touch: exyin.dll on the phone, our exyin stand-in
 touch_rate_hz = 60                         # [I] as the 5800
@@ -71,6 +71,8 @@ kind = "nvmem2"
 image = "nvmemory2.img"
 size = "1G"
 removable = true
+format = "fat"                             # an empty card: SE's start-up does not format it (a blank image gave the
+                                           # "Memory corrupt D:" note on every boot)
 flags = "FS_FORMAT_CORRUPT,FS_SCANDRIVE"   # Memory Stick Micro (M2) slot
 
 [[board.drives]]
@@ -116,7 +118,7 @@ missing_drivers = []                       # filled from the first boots
 omit_baseport = ["epointer.dll"]            # Syborg mouse driver: the exyin stand-in owns the pointer device
 
 [kernel.lcd]
-target = "lcd_portrait"
+target = "lcd_semc_p1i"                       # 256-pixel rows (SYBORG_FB_LINE_PIXELS, patch 0027)
 
 [[standins]]
 name = "halke"
@@ -171,6 +173,44 @@ family = "semc"
 role = "EXT_SOUND_DRV.SUZI_PDD: empty PDD so ExtSoundPdd.pdd loads"
 
 [[standins]]
+name = "pvrservices"
+rom_name = "services"
+kind = "ldd"
+family = "powervr"
+role = "PowerVR services.ldd, no device: loads and opens, every bridge call refused (H-p1i-pvr-absent); the window server loads it"
+
+[[standins]]
+name = "semccrypto"
+rom_name = "crypto"
+kind = "ldd"
+family = "semc"
+role = "crypto.ldd: SE hardware crypto (dcl.dll); opens, refuses every control (H-p1i-crypto-absent)"
+
+[[standins]]
+name = "usbcc"
+kind = "kext"
+family = "common"
+role = "usbcc.dll: EPL's USB client layer on a no-hardware controller, no cable ever (H-usbc-null)"
+
+[[standins]]
+name = "eusbc"
+kind = "ldd"
+family = "common"
+role = "eusbc.ldd: EPL's USB client LDD on usbcc's null controller: usbman/usbmsman (SysStart) need a working one"
+
+# H-p1i-euart-alias: the port handler (c32, porthandlersvr.dll) loads the PDD "EUART"; our Syborg serial PDD is in the
+# ROM only as EUART1.PDD. Without it CEdbPort::ConstructL left and the still-active CCable panicked E32USER-CBase 40
+# (docs/research/p1i-porthandler.md)
+[[standins]]
+name = "euart"
+file = "eserial"
+rom_name = "euart"
+kind = "pdd"
+baseport = true
+family = "common"
+role = "euart.pdd: the Syborg serial PDD (eserial) a second time, under the name SE's port handler loads"
+
+[[standins]]
 name = "mpeg4dec"
 kind = "ldd"
 family = "semc"
@@ -195,7 +235,7 @@ family = "common"
 role = "touch: DDigitiser on the Syborg pointer"
 
 [rom]
-code_patches = []
+code_patches = ["code-patches.txt"]
 files = [{ rom = "sys/Data/ESTART.TXT", local = "ESTART.TXT" }]
 
 [gl]
@@ -207,3 +247,25 @@ impl = "none"                              # PowerVR MBX: later (libgles_cm.dll 
 level = "L0"
 updated = "2026-11-13"
 open = ["first boot"]
+
+# H-p1i-pvr2dif-stub: PVR2DIF.dll (SE ScDv's hardware-bitmap / accelerator interface, PowerVR underneath) replaced by
+# the generic screen driver's "no hardware" answers (src/semc/pvr2dif/build.sh): the window server panicked USER 47
+# at its first PowerVR bridge call; ScDv draws in software without it (docs/research/p1i-pvr2d.md)
+[[rom.rofs_replace]]
+image = 1
+path = "Sys/Bin/PVR2DIF.dll"
+built = "pvr2dif/PVR2DIF.dll"
+hack = "H-p1i-pvr2dif-stub"
+
+# H-p1i-no-drmclock: the DRM clock plug-in of the second APS process drives SE's crypto engine (crys.dll programs
+# its registers; our crypto.ldd stand-in gives RAM, docs/research/p1i-crypto-ldd.md) and panics on the junk results
+# (TDes8::SetLength, USER 23), taking SysStart down. An offline phone needs no DRM clock: its aps.ini line is blanked
+[[rom.rofs_patches]]
+image = 2
+path = "private/102030fe/aps.ini"
+# drop drmclockhandler, keep asrhandler: the APS loader stops at a blank line, so asrhandler goes first and the
+# spaces after it (a blank line before the line ending: earlier version blanked drmclockhandler in place, the
+# loader then never loaded asrhandler.aps, asrexe died -1 and the Phone app panicked TeleApp -1, 2026-11-17)
+old = "\"drmclockhandler.aps\"\r\n\"asrhandler.aps\""
+new = "\"asrhandler.aps\"                       "
+hack = "H-p1i-no-drmclock"

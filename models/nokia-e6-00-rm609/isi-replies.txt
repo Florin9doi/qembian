@@ -1,0 +1,15 @@
+# Fake-modem replies of the N8 (RM-596) that differ from the shared table: none. All replies live in
+# platform/isi/replies-bb5.txt (one table for every BB5 phone, docs/cleanup-review.md 2.1); a reply here
+# would override the shared one for the same (resource, request) on this phone only.
+
+# PN_PHONE_INFO 0x0B/0x0C: EInfoServer (channel 11) reads the phone's product name from the modem
+# (docs/devices/nokia-n95-8gb-rm320/n95-isc-isi-protocol-2.md 3.5). EInfoServer sends it synchronously,
+# with no timeout, so until this reply existed the "Device manager" app (NSmlDMSync.exe, the *#0000#
+# software-version dialog) hung on a black window forever: the app -> EInfoServer M:2 -> 1B 0B, no answer.
+# Reply = cause OK, subblock id 'N' (0x4E = product name; request data 00 02), length 6, the type code.
+# The 2026-11-13 run on the N8 Delight: EInfoServer got 1B 0C and the dialog opened.
+reply 1B 0B 0C 00 01 4E 0C 00 06 52 4D 2D 35 39 36 00 00   # "RM-596" (on: N8 Delight, *#0000# dialog 2026-11-13)
+
+# NET_MODEM_REG_STATUS_GET on PN_NETWORK: moved here from platform/isi/replies-bb5.txt on 2026-11-18: it is not true
+# of every BB5 phone (the 9.1 TSYs of the N73 and E61 panic USER 21 in ISIMSG on it; they get no reply)
+reply 0A 00 01 00 02 00 04 06 02 09 18 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # NET_MODEM_REG_STATUS_GET (S60 3rd/5th, no SIM): OK, NET_REG_INFO_COMMON {NOSERV_NOSIM 6, automatic} + a zero 24-byte NET_GSM_REG_INFO 0x09 (a common-only reply panicked NOKIATSY 'IsiMessage OFFS -9'; the TSY reads 0x09 up to +0x16). Unanswered, the Connection Monitor server waited forever and every app connecting to it hung: Messaging, Music player, Games (2026-11-17). With [sim] present syborg_modem_core.c answers it first

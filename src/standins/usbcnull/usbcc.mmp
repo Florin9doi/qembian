@@ -1,0 +1,16 @@
+// usbcc.dll: EPL's platform-independent USB client layer with a no-hardware controller (see usbcnull.cpp)
+#include "../../variant.mmh"
+#include <kernel/kern_ext.mmh>
+target			VariantTarget(usbcc,dll)
+linkas			usbcc.dll
+targettype		kext
+userinclude		../../../../../../os/kernelhwsrv/kernel/eka/include/drivers
+sourcepath		../../../../../../os/kernelhwsrv/kernel/eka/drivers/usbcc
+source			chapter9.cpp descriptors.cpp misc.cpp ps_usbc.cpp queue.cpp
+sourcepath		.
+source			usbcnull.cpp
+deffile			../../../../../../os/kernelhwsrv/kernel/eka/eabi/usbccu.def
+nostrictdef
+epocallowdlldata
+vendorid		0x70000001
+capability		all

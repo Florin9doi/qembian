@@ -48,6 +48,7 @@ touch_rate_hz = 60                         # [I] resistive panel report rate: mo
 [board.audio]
 dsp = "rapido"                             # RAPIDO DSP model: aamdaifdriver + the ISC peer's F3 replies
 ring_units = 16                            # DSP ring per stream (docs/devices/nokia-n8-rm596/rapido-audio.md)
+streams = "48000/2/24/240,48000/1/24,16000/1/24"   # stream type -> PCM format: without it the ring stays unbound and the phone is silent (bug 2026-11-17); type 0 as the N8 and 5230 [I for this phone]
 
 
 [board.flash]
@@ -101,7 +102,7 @@ camera = { main_mp = 5, front = true, key = "two-stage" }   # camldd/campdd/cams
 fm_radio = true
 gps = true                                 # [I spec]
 accelerometer = true                       # accelerometerldd/pdd [V]
-slides = []                                # touch-screen candybar
+slides = ["qwerty"]                        # tilting QWERTY slider: open = landscape UI with the hardware keyboard
 leds = ["keypad-backlight", "display-backlight"]
 memory_card = true
 mass_memory_gb = 0
@@ -222,6 +223,10 @@ impl = "none"
 
 [milestones]
 idle = "Startup::startup sets 101f8766/46 = 104"    # [V] UI phase all done: home screen (after the first-boot queries)
+
+# Phone window (tools/sydb/phone.py, docs/devices.md [skin]).
+[skin]
+turn = "ccw"                               # [I] the N97 is also turned by hand (accelerometer); landscape with the keyboard comes from the slide
 
 [props]
 startup = { category = 0x101F8766, state = 0x41, ui_phase = 0x46 }

@@ -15,7 +15,12 @@ typedef unsigned char u8;
 
 #include "n95imports.h"
 typedef int (*SyPrintf)(const char*, ...);
+#ifdef SYGL_HOST					/* host tests: stdout */
+#include <stdio.h>
+#define SYLOG(...) (printf("SYGL: " __VA_ARGS__), printf("\n"))
+#else
 #define SYLOG(...) ((SyPrintf)N95_RDebug_Printf)("SYGL: " __VA_ARGS__)
+#endif
 
 #define SY_MAGIC_SURFACE 0x53595346u	/* 'SYSF' */
 #define SY_MAGIC_CONTEXT 0x53594358u	/* 'SYCX' */

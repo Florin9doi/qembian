@@ -1,4 +1,4 @@
-// N95 xbus.ldd stand-in (see nokiastub.h). Loaded by IscApi; no channel used.
-#include "nokiastub.h"
+// N95 xbus.ldd stand-in (see tablestub.h). Loaded by IscApi; no channel used.
+#include "tablestub.h"
 NO_CONTROLS
-NOKIA_STUB_LDD("XBus", KCtl, 0)
+TABLE_STUB_LDD("XBus", KCtl, 0)

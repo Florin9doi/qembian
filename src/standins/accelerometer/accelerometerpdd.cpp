@@ -18,7 +18,7 @@ public:
 	virtual TInt Create(DBase*& aChannel, TInt, const TDesC8*, const TVersion&)
 		{ aChannel = new DAccPddObject; return aChannel ? KErrNone : KErrNoMemory; }
 	virtual TInt Validate(TInt aUnit, const TDesC8*, const TVersion& aVer)
-		{ return aUnit == 0 && aVer.iMajor == 2 ? KErrNone : KErrNotSupported; }
+		{ return (aUnit == 0 || aUnit == KNullUnit) && aVer.iMajor >= 1 && aVer.iMajor <= 2 ? KErrNone : KErrNotSupported; }	// unit 0: N8/Belle accssy; KNullUnit: the 5800's (docs/research/5800-accssy.md)
 	};
 
 DECLARE_STANDARD_PDD()

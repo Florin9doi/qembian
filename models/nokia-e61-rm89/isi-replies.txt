@@ -1,0 +1,10 @@
+# Fake-modem replies of the E61 (RM-89) that differ from the shared table (platform/isi/replies-bb5.txt).
+# res 0x54 msg 0x0D with status 00 [V 2026-11-17: start-up then continues to state 211]. With the shared reply (status 01, recorded on a real N8)
+# npaprivlistener.exe asked six times, closed its channel and exited; Starter treats it as a critical process and
+# went to global state 252 (critical start-up failure, KErrDied caught at Starter 0xf916820c) [V catch].
+reply 54 0D 0E 00 00
+# PN_PHONE_INFO msg 0x23 -> 0x24: the WLAN MAC address [V wlmplatforminit.dll 0xf82b8c8c: reply must be res 0x1B
+# msg 0x24, byte 10 status 0, bytes 11..16 the MAC in reverse order]. Asked synchronously by WlmServerExe at start-up
+# (the N73 has no WLAN); unanswered, the WLAN server never accepted connections, ConnMon waited on it and start-up stayed
+# at 211. MAC 02:00:00:E6:10:01 (locally administered, ours).
+reply 1B 23 24 00 01 10 E6 00 00 02 00

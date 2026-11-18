@@ -1,0 +1,12 @@
+// PowerVR services.ldd stand-in, no device (SE P1i; see pvrservices.cpp)
+#include "../../variant.mmh"
+#include <kernel/kern_ext.mmh>
+target			VariantTarget(pvrservices,ldd)
+linkas			pvrservices.ldd
+targettype		ldd
+sourcepath		.
+source			pvrservices.cpp
+noexportlibrary
+vendorid		0x70000001
+capability		all
+userinclude		../_shared	// src/standins/_shared: tablestub.h

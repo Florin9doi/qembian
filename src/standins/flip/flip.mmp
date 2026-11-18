@@ -1,0 +1,15 @@
+// FLIP.DLL stand-in: the P990i keypad flip on QEMU syborg-sensor switches (see flip.cpp)
+#include "../../variant.mmh"
+#include <kernel/kern_ext.mmh>
+target			VariantTarget(flip,dll)
+targettype		kext
+linkas			flip.dll
+OS_LAYER_SYSTEMINCLUDE_SYMBIAN
+userinclude		../../specific
+userinclude		../_shared		// boardconfig.h
+sourcepath		.
+source			flip.cpp
+noexportlibrary
+uid				0x1000008d 0x100039ea
+vendorid		0x70000001
+capability		all

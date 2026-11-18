@@ -1,4 +1,4 @@
-// usbaudiodriver.ldd stand-in for Symbian^3 phones (see usbaudiodriver.cpp, nokiastub.h)
+// usbaudiodriver.ldd stand-in for Symbian^3 phones (see usbaudiodriver.cpp, tablestub.h)
 #include "../../variant.mmh"
 #include <kernel/kern_ext.mmh>
 target			VariantTarget(usbaudiodriver,ldd)
@@ -9,4 +9,4 @@ source			usbaudiodriver.cpp
 noexportlibrary
 vendorid		0x70000001
 capability		all
-userinclude		../_shared	// src/standins/_shared: nokiastub.h, iscpeer.inl, isireplies.h, stubcert.h
+userinclude		../_shared	// src/standins/_shared: tablestub.h, iscpeer.inl, isireplies.h, stubcert.h

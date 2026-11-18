@@ -1,14 +1,47 @@
 #!/usr/bin/env python3
 """Unit tests for tools/device.py (plain unittest): tests/device_py_test.py"""
-import os, re, sys, unittest
+import json, os, re, sys, unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import device as D
 
 MAP = os.path.join(ROOT, 'build', 'epocroot', 'sf', 'adapt', 'qemu', 'baseport', 'syborg', 'keyboard', 'syborg_keyboard_map.h')
+BASEPORT_CFG = os.path.join(ROOT, 'build', 'epocroot', 'sf', 'adapt', 'qemu', 'baseport', 'syborg', 'config.inc')
 
 
 class DeviceTest(unittest.TestCase):
+    def test_p1i_memory_stick_starts_formatted(self):
+        """2026-11-17: the SE P1i showed "Memory corrupt D:" on every fresh boot: its D: (Memory Stick) image was a blank
+        file and SE's start-up does not format it. `format = "fat"` drives are made as an empty FAT volume."""
+        import shutil, tempfile
+        if not shutil.which('mformat'):
+            self.skipTest('mtools not installed')
+        prof = D.load('se-p1i')
+        with tempfile.TemporaryDirectory() as t:
+            out = os.path.join(t, 'nvmemory2.img')
+            msg = D.drive_image(prof, 'nvmem2', out, uda=False)
+            self.assertIn('empty FAT32', msg)
+            b = open(out, 'rb').read(512)
+            self.assertEqual(b[510:512], b'\x55\xaa')
+            self.assertEqual(b[82:87], b'FAT32')
+
+    def test_rofs_patch_hex_bytes(self):
+        """2026-11-17: ROFS code patches (SE P1i porthandlersvr.dll, H-p1i-no-bt-hci) give old/new as hex bytes"""
+        self.assertEqual(D.rofs_patch_bytes('00f0 e6ec', 'hex'), bytes([0, 0xf0, 0xe6, 0xec]))
+        self.assertEqual(D.rofs_patch_bytes('ab', 'utf-16le'), b'a\x00b\x00')
+
+    def test_store_takes_ra_type_codes(self):
+        """2026-11-17: the E90 Communicator's type code is RA-6; the ROM store and device.py took only RM-/SE-: the
+        imported firmware never reached the index and firmware-add said: not in the ROM store"""
+        import re
+        for tc in ('RM-596', 'RA-6', 'RH-17', 'SE-P1i'):
+            self.assertTrue(re.fullmatch(D.TYPE_CODE_RE, tc), tc)
+        self.assertFalse(re.fullmatch(D.TYPE_CODE_RE, 'firmware'))
+        sys.path.insert(0, os.path.join(ROOT, 'tools', 'fw'))
+        import identify
+        self.assertEqual(identify.from_name('RA-006 v.300.3 E-90.rar')[0], 'RA-006')   # file-name fallback only
+        self.assertEqual(identify.from_name('RM-596_025.007.zip'), ('RM-596', '025.007'))
+
     def test_profiles_check(self):
         for dev in D.device_ids():
             errs, _ = D.check(D.load(dev))
@@ -28,7 +61,8 @@ class DeviceTest(unittest.TestCase):
         driver (d_display.panel): the profiles must ask for it."""
         import subprocess
         for dev in ('nokia-5800-rm356', 'nokia-5230-rm588', 'nokia-n95-rm159', 'nokia-n95-8gb-rm320', 'nokia-e5-00-rm632',
-                    'nokia-n97-rm505', 'nokia-e52-rm469', 'nokia-5730-rm465', 'nokia-n79-rm348', 'nokia-e72-rm530'):
+                    'nokia-n97-rm505', 'nokia-e52-rm469', 'nokia-5730-rm465', 'nokia-n79-rm348', 'nokia-e72-rm530',
+                    'nokia-n86-rm484'):
             out = subprocess.run([sys.executable, os.path.join(ROOT, 'tools/device.py'), 'qemu-args'],
                                  env=dict(os.environ, SYBORG_DEVICE=dev), capture_output=True, text=True).stdout
             self.assertIn('d_display.panel=1', out, dev)
@@ -141,6 +175,19 @@ class DeviceTest(unittest.TestCase):
                  if D.get(D.load(d), 'board.input.translation') == 'qemu'}
         self.assertEqual(len(heads), 1)
 
+    @unittest.skipUnless(os.path.exists(BASEPORT_CFG), 'no baseport build tree yet (scripts/setup-epocroot.sh)')
+    def test_arm1136_kernel_does_not_check_alignment(self):
+        """2026-11-13: the 5800's menu died with KERN-EXEC 3 the moment Hitchcock's software renderer read a pair of
+        8-bit pixels out of a byte row with an unaligned `ldrh` (hitchcock.dll+45930): the EPL kernel's ARM1136 default
+        programmes SCTLR with MMUCR_A and without MMUCR_U, while Nokia's ROM code does unaligned accesses on purpose.
+        The syborg baseport must ask for no alignment check, like the syborgfx one."""
+        cfg = open(BASEPORT_CFG, errors='replace').read()
+        lines = [l for l in cfg.splitlines() if re.search(r'INIT_NUMERIC_CONSTANT\s+InitialMMUCR', l)]
+        self.assertTrue(lines, 'syborg/baseport config.inc sets no InitialMMUCR (patch qemu-baseport 0026)')
+        for l in lines:
+            self.assertNotIn('MMUCR_A', l.split(',', 1)[1], l)
+            self.assertIn('MMUCR_U', l.split(',', 1)[1], l)
+
     @unittest.skipUnless(os.path.exists(os.path.join(D.paths(D.load('nokia-n95-8gb-rm320'))['dir'], 'rofs1.img')), 'no extracted firmware')
     def test_identify(self):
         facts, matches = D.identify(D.paths(D.load('nokia-n95-8gb-rm320'))['dir'])
@@ -166,6 +213,103 @@ class DeviceTest(unittest.TestCase):
                 self.assertIn('user data layer', D.drive_image(p, 'nvmem', out, uda=True))
                 self.assertEqual(os.path.getsize(out), os.path.getsize(src))
                 self.assertEqual(open(out, 'rb').read(512), open(src, 'rb').read(512))
+
+
+class ExecMapTest(unittest.TestCase):
+    """Bug 2026-11-13 (N81 stall at the splash): the firmware's RCriticalSection keeps its counter with
+    User::LockedInc/LockedDec, which the N81's EUSER calls as *fast* execs 0x80000a/0x80000b. The sym92
+    map had both slots as `!invalid`, our handlers returned 0 without touching the counter, the counter
+    never moved and the critical section could be taken and never signalled - FbServ's two server
+    threads deadlocked and the phone never drew its logo. tools/personality/check.py also counted an
+    `!invalid` slot as implemented, which hid it."""
+
+    @staticmethod
+    def _map(personality):
+        import subprocess
+        out = subprocess.run([sys.executable, '-I', os.path.join(ROOT, 'tools', 'personality', 'check.py'),
+                              '--help'], capture_output=True, text=True)
+        rows = {}
+        path = os.path.join(ROOT, 'personalities', personality, 'exec.map')
+        if not os.path.exists(path):
+            return rows
+        for line in open(path):
+            m = re.match(r'^([FS])([0-9a-fA-F]+)\s+(\S+)', line)
+            if m:
+                rows[(m.group(1), int(m.group(2), 16))] = m.group(3)
+        return rows
+
+    def test_invalid_slots_are_not_implemented(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('pcheck', os.path.join(ROOT, 'tools/personality/check.py'))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        keys = mod.supported_execs(['F0a !invalid', 'F0b @LockedDec91', 'S10 @Foo'])
+        self.assertEqual(keys, {('F', 0x0b), ('S', 0x10)})
+
+    def test_locked_inc_dec_are_implemented(self):
+        rows = self._map('sym92')
+        for slot in (('F', 0x0a), ('F', 0x0b)):
+            self.assertIn(slot, rows, 'F%02x unmapped: RCriticalSection counters stop moving' % slot[1])
+            self.assertNotEqual(rows[slot], '!invalid', 'F%02x is a stub: RCriticalSection breaks' % slot[1])
+
+    @unittest.skipUnless(os.path.exists(os.path.join(ROOT, 'build/roms')), 'no build tree')
+    def test_every_swi_used_by_a_critical_section_export_is_mapped(self):
+        """the general form of the bug: no export the firmware needs may fall in an unmapped slot"""
+        for dev in D.device_ids():
+            prof = D.load(dev)
+            abi = os.path.join(D.paths(prof)['dir'], 'abi', 'n95-euser-swi.json')
+            if not os.path.exists(abi):
+                continue
+            pers = D.get(prof, 'platform.personality')
+            if not pers or not os.path.isdir(os.path.join(ROOT, 'personalities', pers)):
+                continue
+            rows = self._map(pers)
+            if not rows:
+                continue
+            byname = json.load(open(abi))['byname']
+            for name in ('_ZN16RCriticalSection4WaitEv', '_ZN16RCriticalSection6SignalEv',
+                         '_ZN4User9LockedIncERi', '_ZN4User9LockedDecERi'):
+                for swi in byname.get(name, []):
+                    key = ('F', swi & 0x7fffff) if swi & 0x800000 else ('S', swi)
+                    self.assertIn(key, rows, '%s uses %s, unmapped in personalities/%s' % (name, key, pers))
+                    self.assertNotEqual(rows[key], '!invalid', '%s uses %s, which is a stub' % (name, key))
+
+
+class RapidoSilentWithoutStreams(unittest.TestCase):
+    """Bug 2026-11-17: every S60 3.2 / 5th edition phone (5230, 5800, 5730, N79, N86, E52, E72, E5-00, N97, ...)
+    played nothing: aamdaifdriver binds a RAPIDO stream's ring to a syborg-snd slot only when the profile
+    declares the stream's PCM format ([board.audio] streams), and only the N8/701/808 declared it."""
+
+    def test_every_rapido_phone_declares_stream_formats(self):
+        for dev in D.device_ids():
+            prof = D.load(dev)
+            if D.get(prof, 'board.audio.dsp', '') != 'rapido':
+                continue
+            with self.subTest(dev=dev):
+                streams = D.get(prof, 'board.audio.streams', '')
+                self.assertTrue(streams, 'no [board.audio] streams: the phone is silent')
+                self.assertRegex(streams.split(',')[0], r'^\d+/[12]/(16|24|32)(/\d+)?$')
+                self.assertIn('audio.streams=', ' '.join(D.qemu_args(prof)) if hasattr(D, 'qemu_args') else 'audio.streams=')
+
+
+class Accelerometer5800(unittest.TestCase):
+    """Bug 2026-11-17: Raging Thunder GR died (KERN-EXEC 3) on the 5800: no accelerometer channel, because the
+    5800's accssy loads accelerometerldd.ldd / accelerometerpdd.pdd (absent) and speaks another protocol."""
+
+    def test_rom_names_and_protocol(self):
+        prof = D.load('nokia-5800-rm356')
+        oby = D.standins_oby(prof)
+        self.assertIn('device accelerometer ldd accelerometerldd', oby)
+        self.assertIn('device accelerometer pdd accelerometerpdd', oby)
+        acc = [s for s in prof['standins'] if s['name'] == 'accelerometer'][0]
+        self.assertEqual(acc.get('config', {}).get('protocol'), 'pns')
+        self.assertTrue(D.get(prof, 'board.accelerometer.info'))
+        self.assertNotIn('accelerometerldd.ldd', D.get(prof, 'firmware.missing_drivers', []) or [])
+
+    def test_n8_keeps_default_names(self):
+        oby = D.standins_oby(D.load('nokia-n8-rm596'))
+        self.assertIn('device accelerometer ldd', oby)
+
 
 class InstanceTest(unittest.TestCase):
     """tools/instance.py: instances in a throw-away QEMBIAN_HOME, [overrides] through tools/device.py"""

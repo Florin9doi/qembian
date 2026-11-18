@@ -108,7 +108,7 @@ msg F3 30 DSP_START_REQ?          inferred  # no data; resp 31 = 4 x u32 @12 + 4
 // AAMdaifDriver.ldd stand-in (5730, RAPIDO audio): AAMdaifApi.dll opens "MdaifDriver" (1.0.1) and
 // uses only DoControl. Audio is silent: no DSP memory, the mapping controls are accepted and dropped.
 // Protocol: docs/devices/nokia-5730-rm465/rapido-audio.md.
-#include "nokiastub.h"
+#include "tablestub.h"
 
 // ctl 2 table read by user code (AAMdaifApi ord 1/5): +4 u16 count = 0 -> every id looks up as 0.
 // Kept in ROM (XIP LDD) so any client can read it; a non-zero marker keeps it out of .bss.
@@ -140,7 +140,7 @@ static TInt MdaifCtl(DThread* aClient, TInt aFn, TAny* a1, TAny*, const TUint32*
 	}
 
 NO_CONTROLS
-NOKIA_STUB_LDD_CTLHOOK("MdaifDriver", KCtl, ETrue, MdaifCtl)
+TABLE_STUB_LDD_CTLHOOK("MdaifDriver", KCtl, ETrue, MdaifCtl)
 ```
 (The hook gets `w[]` = first 4 words at a1, already read by nokiastub; logging stays.)
 Note: ctl 2 with dir 1 (ord 11, playback writes) would also get the ROM pointer — fine while nothing

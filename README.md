@@ -70,7 +70,7 @@ with `tools/sydb/sydb.py phone NAME`. `docs/devices.md` describes the model, `do
 
 ## Status
 
-Tested device (the reference) and the phones that work today (2026-11-12; details per phone in
+Tested device (the reference) and the phones that work today (2026-11-18; details per phone in
 `docs/device-matrix.md` section 2.0):
 
 - **Nokia N95 8GB** (RM-320, Symbian 9.2, S60 3rd Edition FP1): start-up, home screen, menus,
@@ -85,7 +85,11 @@ Tested device (the reference) and the phones that work today (2026-11-12; detail
 - Nokia N73 (RM-132, 9.1), 5730 XpressMusic (RM-465, 9.3), N79 (RM-348, 9.3) and 5800 XpressMusic
   (RM-356, 9.4, touch): home screen and menu; first bring-up steps, mainly to exercise the kernel
   compatibility layer.
-- Profile drafts that reach the first-boot wizard or less: E52, E72, E5-00, 6720, N86, N97, N81 8GB,
+- Nokia E90 Communicator (RA-6, 9.2): home screen on the inner display (800x352); closing the lid switches to
+  the cover display (240x320, its own panel in QEMU). GLES on the host GPU.
+- Nokia 6720 classic (RM-424, 9.3), E61 (RM-89, 9.1) and E6-00 (RM-609, Belle Refresh, 640x480 touch + QWERTY):
+  home screen after the first-boot queries.
+- Profile drafts that reach the first-boot wizard or less: E52, E72, E5-00, N86, N97, N81 8GB,
   E71 (`models/registry.toml`).
 - **N-Gage QD** (Symbian 6.1, EKA1 kernel) runs on a separate QEMU board (`docs/eka1-ngage.md`):
   start-up, home screen, menu, a memory card image as E: (`eka1/tools/ngage_card.py`). Games start
@@ -126,9 +130,18 @@ screen widgets load (GL requests wait like a GPU, swaps are paced to vsync, phon
 N79) now show only what the window server posts, as their real display driver: no half-drawn redraws
 (regions blinking black). OpenVG `vgGetMatrix` is answered in the guest (bit-exact with the host).
 
-**Sony Ericsson P1i (UIQ 3.0, first non-Nokia phone, in progress).** Boots through its platform start-up on a
-host-side fake CCPU (the communications processor link), with stand-ins for its LCD controller, DSP, sound and
-video drivers; no window server yet, so the screen stays black (`docs/devices/se-p1i/bring-up.md`).
+**Sony Ericsson P1i (UIQ 3.0, first non-Nokia phone, in progress).** Boots to its home screen (Today view, launcher)
+in Flight mode on a host-side fake CCPU (the communications processor link: OPA calls, CCPU->app callbacks, a
+minimal SIM without network), with stand-ins for its LCD controller, DSP, sound and video drivers. One command:
+`python3 tools/sydb/sydb.py phone p1i --fresh` (`docs/devices/se-p1i/bring-up.md`).
+
+**Sony Ericsson P990i (UIQ 3.0, in progress).** The P1i's platform: boots to its home screen in Flight mode. Its
+keypad flip is modelled as the phone reads it (a switch: pen UI on 240x320 when open, softkey UI on the top
+240x256 when closed). `python3 tools/sydb/sydb.py phone p990i --fresh` (`docs/devices/se-p990i/bring-up.md`).
+
+**Research registry (2026-11-17).** `tools/registry.py` (and an MCP server, `tools/registry_mcp.py`) keeps what
+is known about each firmware: modules, imports, ECom plugins, components and claims with evidence
+(`docs/registry/`).
 
 **Host platform.** Linux on x86-64 (amd64) is the only tested host. Other systems and
 architectures may work, but they are not tested or supported.

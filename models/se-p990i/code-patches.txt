@@ -1,0 +1,9 @@
+# SE P990i R6E28 code patches (the P1i's, same BServer.dll size; original bytes checked at compose) (romcompose --patches format: module+offset  original  new, bytes in memory order)
+
+# H-p1i-bserver-callback-reply: BServer's reply to a CCPU->app call (CACPU_RemoteInvokeSession reply builder f81a5e76)
+# takes Des() of its 16-byte reply buffer, ReAllocs the buffer for 16 + the call's argument length, then writes through
+# the stale TPtr: heap corruption, c32's BServer died in RHeap::Free and sent us 16 zero bytes (2026-11-17). Both loads
+# of that length (ldr r0,[r5]) -> movs r0,#0: no ReAlloc, the reply is {9, status, req, 0} (its outputs were never data:
+# it appended its own buffer's bytes)
+BServer.dll+0x3114  2868  0020   # BServer.dll+0x3114 reply output length 0  [H-p1i-bserver-callback-reply]
+BServer.dll+0x311c  2868  0020   # BServer.dll+0x311c (the same, second load)  [H-p1i-bserver-callback-reply]

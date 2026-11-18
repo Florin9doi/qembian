@@ -1,0 +1,12 @@
+// Sony Ericsson P990i YUV2RGB.LDD stand-in (see tablestub.h)
+#include "../../variant.mmh"
+#include <kernel/kern_ext.mmh>
+target			VariantTarget(yuv2rgbldd,ldd)
+linkas			yuv2rgbldd.ldd
+targettype		ldd
+sourcepath		.
+source			yuv2rgbldd.cpp
+noexportlibrary
+vendorid		0x70000001
+capability		all
+userinclude		../_shared	// src/standins/_shared: tablestub.h

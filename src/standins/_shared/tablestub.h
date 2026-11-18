@@ -1,6 +1,8 @@
 // Copyright (c) 2026 qembian contributors. Licensed under the Eclipse Public License v1.0.
 //
-// Table-driven stand-ins for Nokia N95 logical devices (kernel side). Each LDD declares
+// Table-driven stand-ins for phone logical devices, any vendor (kernel side; first written for the N95's Nokia
+// drivers, now also the SE P1i's; vendor-neutral name since 2026-11-17). Vendor-specific behaviour is declared by
+// each driver's own file (its table, hooks, iCancelByNumber), never here. Each LDD declares
 //   - the factory name its user-side clients open (RBusLogicalChannel::DoCreate)
 //   - a table of DoControl() numbers with an action:
 //       EWriteInt   *(TInt*)a1 = value (a1 points at a TInt or a TPckgBuf<TInt> payload)
@@ -17,6 +19,7 @@ enum TStubAction { EWriteInt, EComplete, EReturn, EWriteBlock, EPendRequest };
 // the device completes requests by default (e.g. 'wait for next job' notifications);
 // { KStubRequest|n, EComplete, value } completes DoRequest(n) with that value
 const TInt KStubRequest = 0x10000;
+const TInt KStubMaxPending = 32;		// requests 0..31 are kept while pending (for DoCancel)
 // EWriteBlock: copy iSize bytes from iData to a1 (e.g. a capabilities structure)
 struct SStubCtl { TInt iFn; TStubAction iAction; TInt iValue; const TAny* iData; TInt iSize; };
 // optional per-device request hook: return KErrNone..KErrXxx to complete the request with it, or
@@ -29,13 +32,13 @@ typedef TInt (*TStubRequestHook)(DThread* aClient, TInt aReq, const TUint32* aAr
 // readable); return a value to return it from DoControl, or KStubNotHandled to fall through.
 typedef TInt (*TStubControlHook)(DThread* aClient, TInt aFn, TAny* a1, TAny* a2, const TUint32* aWords);
 
-class DNokiaStubFactory : public DLogicalDevice
+class DTableStubFactory : public DLogicalDevice
 	{
 public:
-	DNokiaStubFactory(const TDesC& aName, const SStubCtl* aCtl, TInt aCount, TBool aChannels, TBool aCompleteRequests,
+	DTableStubFactory(const TDesC& aName, const SStubCtl* aCtl, TInt aCount, TBool aChannels, TBool aCompleteRequests,
 					  TStubRequestHook aHook = NULL, TStubControlHook aCtlHook = NULL)
 		: iName(aName), iCtl(aCtl), iCount(aCount), iChannels(aChannels), iCompleteRequests(aCompleteRequests), iHook(aHook),
-		  iCtlHook(aCtlHook)
+		  iCtlHook(aCtlHook), iCancelByNumber(EFalse)
 		{
 		iVersion = TVersion(255, 255, 0xffff);	// accept any client version
 		iParseMask = KDeviceAllowUnit | KDeviceAllowInfo;
@@ -56,12 +59,17 @@ public:
 	TBool iCompleteRequests;	// DoRequest(): complete at once with KErrNone, else leave pending
 	TStubRequestHook iHook;
 	TStubControlHook iCtlHook;
+	// DoCancel(a): pending requests are kept and completed with KErrCancel. How a names them is the client's
+	// driver protocol, declared per device: a bit mask (1 << n, the default) or the request number itself
+	// (SE P1i MPEG4DECDRV: the start-up animation player calls DoCancel(0..4); bug 2026-11-17: nothing was
+	// completed, its CActive::Cancel waited forever and APS's start-up waited for the player's exit)
+	TBool iCancelByNumber;
 	};
 
-class DNokiaStubChannel : public DLogicalChannelBase
+class DTableStubChannel : public DLogicalChannelBase
 	{
 public:
-	DNokiaStubChannel(DNokiaStubFactory* aF) : iF(aF) {}
+	DTableStubChannel(DTableStubFactory* aF) : iF(aF) {}
 	virtual TInt DoCreate(TInt aUnit, const TDesC8*, const TVersion& aVer)
 		{
 		iUnit = aUnit;
@@ -96,11 +104,26 @@ public:
 						 args[0], args[1], pend ? "pending" : "completed", result, &Kern::CurrentThread());
 			if (!pend && s)
 				Kern::RequestComplete(s, result);
+			else if (pend && s && ~aFn >= 0 && ~aFn < KStubMaxPending)
+				{
+				if (iPending[~aFn])			// re-issued while pending: the old one is lost, as before
+					Kern::Printf("SYBSTUB: %S u%d request 0x%x issued again while pending", &iF->iName, iUnit, ~aFn);
+				iPending[~aFn] = s;
+				}
 			return KErrNone;
 			}
 		if (aFn == (TInt)KMaxTInt)
 			{
-			Kern::Printf("SYBSTUB: %S u%d cancel mask %08x", &iF->iName, iUnit, a1);
+			TUint v = (TUint)a1;
+			TInt n = 0;
+			for (TInt i = 0; i < KStubMaxPending; ++i)
+				if (iPending[i] && (iF->iCancelByNumber ? (TUint)i == v : (v >> i) & 1))
+					{
+					Kern::RequestComplete(iPending[i], KErrCancel);	// nulls iPending[i]
+					++n;
+					}
+			Kern::Printf("SYBSTUB: %S u%d cancel %s %08x: %d completed", &iF->iName, iUnit,
+						 iF->iCancelByNumber ? "request" : "mask", v, n);
 			return KErrNone;
 			}
 		TUint32 w[4] = {0, 0, 0, 0};
@@ -152,40 +175,48 @@ public:
 		return r;
 		}
 private:
-	DNokiaStubFactory* iF;
+	DTableStubFactory* iF;
 	TInt iUnit;
 	TInt iMajor;
+	TRequestStatus* iPending[KStubMaxPending];	// pending requests by number (client thread = the caller)
 	};
 
-inline TInt DNokiaStubFactory::Create(DLogicalChannelBase*& aChannel)
+inline TInt DTableStubFactory::Create(DLogicalChannelBase*& aChannel)
 	{
 	if (!iChannels)
 		{
 		aChannel = NULL;
 		return KErrNotSupported;
 		}
-	aChannel = new DNokiaStubChannel(this);
+	aChannel = new DTableStubChannel(this);
 	return aChannel ? KErrNone : KErrNoMemory;
 	}
 
-#define NOKIA_STUB_LDD2(name, table, channels, completeRequests) \
+#define TABLE_STUB_LDD2(name, table, channels, completeRequests) \
 	_LIT(KStubName, name); \
 	DECLARE_STANDARD_LDD() \
-		{ return new DNokiaStubFactory(KStubName, table, sizeof(table)/sizeof(table[0]), channels, completeRequests); }
-#define NOKIA_STUB_LDD(name, table, channels) NOKIA_STUB_LDD2(name, table, channels, EFalse)
-#define NOKIA_STUB_LDD_HOOK(name, table, hook) \
+		{ return new DTableStubFactory(KStubName, table, sizeof(table)/sizeof(table[0]), channels, completeRequests); }
+#define TABLE_STUB_LDD(name, table, channels) TABLE_STUB_LDD2(name, table, channels, EFalse)
+#define TABLE_STUB_LDD_HOOK(name, table, hook) \
 	_LIT(KStubName, name); \
 	DECLARE_STANDARD_LDD() \
-		{ return new DNokiaStubFactory(KStubName, table, sizeof(table)/sizeof(table[0]), ETrue, ETrue, hook); }
+		{ return new DTableStubFactory(KStubName, table, sizeof(table)/sizeof(table[0]), ETrue, ETrue, hook); }
 
-#define NOKIA_STUB_LDD_CTLHOOK(name, table, completeRequests, ctlhook) \
+#define TABLE_STUB_LDD_CTLHOOK(name, table, completeRequests, ctlhook) \
 	_LIT(KStubName, name); \
 	DECLARE_STANDARD_LDD() \
-		{ return new DNokiaStubFactory(KStubName, table, sizeof(table)/sizeof(table[0]), ETrue, completeRequests, NULL, ctlhook); }
+		{ return new DTableStubFactory(KStubName, table, sizeof(table)/sizeof(table[0]), ETrue, completeRequests, NULL, ctlhook); }
 
-#define NOKIA_STUB_LDD_HOOKS(name, table, completeRequests, reqhook, ctlhook) \
+#define TABLE_STUB_LDD_HOOKS(name, table, completeRequests, reqhook, ctlhook) \
 	_LIT(KStubName, name); \
 	DECLARE_STANDARD_LDD() \
-		{ return new DNokiaStubFactory(KStubName, table, sizeof(table)/sizeof(table[0]), ETrue, completeRequests, reqhook, ctlhook); }
+		{ return new DTableStubFactory(KStubName, table, sizeof(table)/sizeof(table[0]), ETrue, completeRequests, reqhook, ctlhook); }
+
+#define TABLE_STUB_LDD_HOOKS_CANCELNUM(name, table, completeRequests, reqhook, ctlhook) \
+	_LIT(KStubName, name); \
+	DECLARE_STANDARD_LDD() \
+		{ DTableStubFactory* f = new DTableStubFactory(KStubName, table, sizeof(table)/sizeof(table[0]), ETrue, \
+													   completeRequests, reqhook, ctlhook); \
+		  if (f) f->iCancelByNumber = ETrue; return f; }
 
 #define NO_CONTROLS static const SStubCtl KCtl[] = { { -1, EReturn, 0, 0, 0 } };

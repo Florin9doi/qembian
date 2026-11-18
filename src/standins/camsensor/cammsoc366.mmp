@@ -1,0 +1,12 @@
+// Sony Ericsson P990i DMsoc366.pdd stand-in: camera sensor PDD "camdrv.ldd.Msoc366", load only (see camsensor.cpp)
+#include "../../variant.mmh"
+#include <kernel/kern_ext.mmh>
+target			VariantTarget(cammsoc366,pdd)
+linkas			cammsoc366.pdd
+targettype		pdd
+sourcepath		.
+source			camsensor.cpp
+macro			CAM_SENSOR=Msoc366
+noexportlibrary
+vendorid		0x70000001
+capability		all

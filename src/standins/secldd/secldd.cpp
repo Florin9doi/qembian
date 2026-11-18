@@ -1,10 +1,10 @@
-// N95 secldd.ldd stand-in (see nokiastub.h): channel "SecEnv" used by SecEnv.dll (Nokia secure
+// N95 secldd.ldd stand-in (see tablestub.h): channel "SecEnv" used by SecEnv.dll (Nokia secure
 // environment, e.g. DRM key storage in RightsServer). SecEnv.dll does LoadLogicalDevice("secldd"),
 // DoCreate("SecEnv", TVersion(1,0,x), unit -1), DoControl(0, ...) and synchronous
 // DoRequest(3/4/5/6/7/16, status, args) + WaitForRequest. Those complete with KErrNotSupported. SecEnvInit.exe (an active-object file service for the secure environment)
 // keeps request 2 outstanding as "wait for the next job"; completing it made SecEnvInit spin
 // (1.7 M requests in one boot), so it stays pending. Every call is logged.
-#include "nokiastub.h"
+#include "tablestub.h"
 static const SStubCtl KCtl[] =
 	{
 	{ KStubRequest | 2, EPendRequest, 0, 0, 0 },
@@ -61,4 +61,4 @@ static TInt SecEnvHook(DThread* aClient, TInt aReq, const TUint32* aArgs, TInt)
 	Kern::Printf("SYBSTUB: SecEnv process-data mode %d: %d bytes passed through (identity)", st[5] & 0xff, n);
 	return KErrNone;
 	}
-NOKIA_STUB_LDD_HOOK("SecEnv", KCtl, SecEnvHook)
+TABLE_STUB_LDD_HOOK("SecEnv", KCtl, SecEnvHook)

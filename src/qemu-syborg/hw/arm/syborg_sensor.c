@@ -15,6 +15,12 @@
  * Host side: the QOM property "accel" = "x,y,z" (qom-set /machine/sensor accel "1000,0,0"), atomic.
  * The vector survives a machine reset (it is the phone's position, not device state).
  *
+ * Switches (2026-11-17, the P990i's keypad flip): 6 SWITCHES (bit n set = mechanical switch n closed; bit 0
+ * = the flip / cover / slide of a phone that has one), 7 SWITCH_SEQ (incremented on every change). The guest
+ * stand-in (src/standins/flip) polls SWITCH_SEQ and publishes the state as the phone's own driver did.
+ * Host side: the QOM property "switches" (qom-set /machine/sensor switches 1; -global syborg-sensor.switches=1
+ * for a phone booted with its flip closed). Like the vector, it survives a reset.
+ *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 #include "qemu/osdep.h"
@@ -27,7 +33,7 @@
 #include "qom/object.h"
 #include "syborg.h"
 
-enum { R_ID = 0, R_X = 1, R_Y = 2, R_Z = 3, R_SEQ = 4, R_INFO_LEN = 5 };
+enum { R_ID = 0, R_X = 1, R_Y = 2, R_Z = 3, R_SEQ = 4, R_INFO_LEN = 5, R_SWITCHES = 6, R_SWITCH_SEQ = 7 };
 #define INFO_BASE 0x100
 #define INFO_LEN  248
 
@@ -38,6 +44,7 @@ struct SyborgSensorState {
     MemoryRegion iomem;
     int32_t v[3];
     uint32_t seq;
+    uint32_t switches, switch_seq;
     uint8_t info[INFO_LEN];
     char *info_spec;
 };
@@ -56,6 +63,8 @@ static uint64_t syborg_sensor_read(void *opaque, hwaddr offset, unsigned size)
     case R_Z:   return (uint32_t)s->v[2];
     case R_SEQ: return s->seq;
     case R_INFO_LEN: return INFO_LEN;
+    case R_SWITCHES: return s->switches;
+    case R_SWITCH_SEQ: return s->switch_seq;
     default:
         qemu_log_mask(LOG_GUEST_ERROR, "syborg-sensor: read of register 0x%x\n", (int)offset);
         return 0;
@@ -95,6 +104,26 @@ static void syborg_sensor_set_accel(Object *obj, const char *value, Error **errp
         s->v[1] = y;
         s->v[2] = z;
         s->seq++;
+    }
+}
+
+static void syborg_sensor_get_switches(Object *obj, Visitor *v, const char *name, void *opaque, Error **errp)
+{
+    SyborgSensorState *s = SYBORG_SENSOR(obj);
+    uint32_t value = s->switches;
+    visit_type_uint32(v, name, &value, errp);
+}
+
+static void syborg_sensor_set_switches(Object *obj, Visitor *v, const char *name, void *opaque, Error **errp)
+{
+    SyborgSensorState *s = SYBORG_SENSOR(obj);
+    uint32_t value;
+    if (!visit_type_uint32(v, name, &value, errp)) {
+        return;
+    }
+    if (value != s->switches) {
+        s->switches = value;
+        s->switch_seq++;
     }
 }
 
@@ -148,11 +177,13 @@ static void syborg_sensor_init(Object *obj)
 
 static const VMStateDescription vmstate_syborg_sensor = {
     .name = "syborg-sensor",
-    .version_id = 1,
+    .version_id = 2,
     .minimum_version_id = 1,
     .fields = (const VMStateField[]) {
         VMSTATE_INT32_ARRAY(v, SyborgSensorState, 3),
         VMSTATE_UINT32(seq, SyborgSensorState),
+        VMSTATE_UINT32_V(switches, SyborgSensorState, 2),
+        VMSTATE_UINT32_V(switch_seq, SyborgSensorState, 2),
         VMSTATE_END_OF_LIST()
     }
 };
@@ -165,6 +196,9 @@ static void syborg_sensor_class_init(ObjectClass *oc, const void *data)
     object_class_property_set_description(oc, "accel", "gravity reaction \"x,y,z\" in milli-g (device axes)");
     object_class_property_add_str(oc, "info", syborg_sensor_get_info, syborg_sensor_set_info);
     object_class_property_set_description(oc, "info", "driver information block: \"OFFSET=HEXBYTES,...\" (device profile)");
+    object_class_property_add(oc, "switches", "uint32", syborg_sensor_get_switches, syborg_sensor_set_switches,
+                              NULL, NULL);
+    object_class_property_set_description(oc, "switches", "mechanical switches, bit n = switch n closed (bit 0: the flip)");
 }
 
 static const TypeInfo syborg_sensor_info = {

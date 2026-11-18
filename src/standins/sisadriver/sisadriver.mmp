@@ -1,4 +1,4 @@
-// sisadriver.ldd stand-in (5730, RAPIDO: IscApi loads it where the N95 loads xbus.ldd; load only) (see nokiastub.h)
+// sisadriver.ldd stand-in (5730, RAPIDO: IscApi loads it where the N95 loads xbus.ldd; load only) (see tablestub.h)
 #include "../../variant.mmh"
 #include <kernel/kern_ext.mmh>
 target			VariantTarget(sisadriver,ldd)
@@ -9,4 +9,4 @@ source			sisadriver.cpp
 noexportlibrary
 vendorid		0x70000001
 capability		all
-userinclude		../_shared	// src/standins/_shared: nokiastub.h, iscpeer.inl, isireplies.h, stubcert.h
+userinclude		../_shared	// src/standins/_shared: tablestub.h, iscpeer.inl, isireplies.h, stubcert.h

@@ -20,6 +20,18 @@
 
 #include <kernel/kern_priv.h>
 #include "syborg.h"
+#include "boardconfig.h"
+
+// Protocol variant, declared by the profile ([[standins]] config = { protocol = "..." } -> accelerometer.protocol),
+// never guessed from what the client sends:
+//   (default) the N8 / Belle accssy above;
+//   "pns": the 5800's S60 5.0 accssy (docs/research/5800-accssy.md): DoCreate unit KNullUnit; control 5 = the
+//   driver information block (channels present: words +0x10 XYZ, +0x2c wake-up, +0x78 double tap); control 6
+//   {TInt channel} -> TPckgBuf {category, key, 0} of a P&S byte-array property the driver publishes samples on
+//   (signed 8-bit x, y, z, about 56 counts per g); controls 0/2/4 stop a channel; requests 0/2/4 (start, with a
+//   config blob), 7 (config), 9 (unconfigure) all complete at once; request 0 starts the samples.
+const TUint KPnsCategory = 0x1020507E;		// our choice: the property category handed out by control 6
+const TInt KPnsCountsPerG = 56;				// LIS302DL nominal [I]
 
 enum { KRegId = 0, KRegX = 1, KRegY = 2, KRegZ = 3, KRegSeq = 4, KRegInfoLen = 5, KRegInfo = 0x40 };
 const TUint32 KSensorId = 0xc51d0030;
@@ -105,6 +117,11 @@ private:
 	TBool iHw;
 	TAny* iZen;					// request 7's output words
 	TAny* iAzi;
+	TBool iPns;					// accelerometer.protocol = "pns" (the 5800)
+	TBool iPnsRunning;
+	RPropertyRef iPnsProp[3];	// channels 0, 2, 4
+	TBool iPnsDefined[3];
+	TInt PnsControl(TInt aFn, TAny* a1, TAny* a2);
 	};
 
 DAccDevice::DAccDevice()
@@ -146,14 +163,23 @@ DAccChannel::~DAccChannel()
 	iSampleDfc.Cancel();
 	for (TInt i = 0; i < KMaxReq; ++i)
 		Complete(i, KErrCancel);
+	for (TInt i = 0; i < 3; ++i)
+		if (iPnsDefined[i])
+			{
+			iPnsProp[i].Delete();
+			iPnsProp[i].Close();
+			}
 	Kern::SafeClose((DObject*&)iClient, NULL);
 	}
 
 TInt DAccChannel::DoCreate(TInt aUnit, const TDesC8*, const TVersion& aVer)
 	{
 	iHw = Reg(KRegId) == KSensorId;
-	Kern::Printf("SYBSTUB: accelerometer open unit %d ver %d.%d.%d by %O%s", aUnit, aVer.iMajor, aVer.iMinor,
-				 aVer.iBuild, iClient, iHw ? "" : " (no sensor device: portrait)");
+	char proto[16];
+	TInt n = BoardConfig("accelerometer.protocol", proto, sizeof(proto));
+	iPns = n == 3 && proto[0] == 'p' && proto[1] == 'n' && proto[2] == 's';
+	Kern::Printf("SYBSTUB: accelerometer open unit %d ver %d.%d.%d by %O%s%s", aUnit, aVer.iMajor, aVer.iMinor,
+				 aVer.iBuild, iClient, iHw ? "" : " (no sensor device: portrait)", iPns ? " (protocol pns)" : "");
 	SetDfcQ(Kern::DfcQue0());
 	iSampleDfc.SetDfcQ(iDfcQ);
 	iMsgQ.Receive();
@@ -218,9 +244,58 @@ TInt DAccChannel::WriteInfo(TAny* aDes)
 	return Kern::ThreadDesWrite(iClient, aDes, p, 0, KChunkShiftBy0, iClient);
 	}
 
+TInt DAccChannel::PnsControl(TInt aFn, TAny* a1, TAny* a2)
+	{
+	switch (aFn)
+		{
+	case 5:
+		return WriteInfo(a1);
+	case 6:
+		{
+		TInt ch = -1;
+		if (!a1 || Kern::ThreadRawRead(iClient, a1, &ch, 4) != KErrNone || (ch != 0 && ch != 2 && ch != 4))
+			return KErrArgument;
+		TInt i = ch / 2;
+		if (!iPnsDefined[i])
+			{
+			TInt r = iPnsProp[i].Attach(TUid::Uid(KPnsCategory), ch);
+			if (r == KErrNone)
+				{
+				_LIT_SECURITY_POLICY_PASS(KPass);
+				r = iPnsProp[i].Define(RProperty::EByteArray, KPass, KPass, 20);
+				if (r == KErrAlreadyExists)
+					r = KErrNone;
+				if (r != KErrNone)
+					iPnsProp[i].Close();
+				}
+			if (r != KErrNone)
+				return r;
+			iPnsDefined[i] = ETrue;
+			}
+		TUint32 w[3] = { KPnsCategory, (TUint32)ch, 0 };
+		return Kern::ThreadDesWrite(iClient, a2, TPtrC8((const TUint8*)w, sizeof(w)), 0, KChunkShiftBy0, iClient);
+		}
+	case 0:
+		iPnsRunning = EFalse;
+		iTimer.Cancel();
+		return KErrNone;
+	case 2:
+	case 4:
+		return KErrNone;
+	default:
+		return KErrNotSupported;
+		}
+	}
+
 TInt DAccChannel::DoControl(TInt aFn, TAny* a1, TAny* a2)
 	{
 	TInt r;
+	if (iPns)
+		{
+		r = PnsControl(aFn, a1, a2);
+		Kern::Printf("SYBSTUB: accelerometer (pns) ctl %d a1=%08x a2=%08x -> %d", aFn, a1, a2, r);
+		return r;
+		}
 	switch (aFn)
 		{
 	case 0: r = WriteInfo(a1); break;				// driver information block (the host's)
@@ -238,6 +313,20 @@ TInt DAccChannel::DoControl(TInt aFn, TAny* a1, TAny* a2)
 
 TInt DAccChannel::DoRequest(TInt aReq, TRequestStatus* aStatus, TAny* a1, TAny* a2)
 	{
+	if (iPns)
+		{
+		Kern::Printf("SYBSTUB: accelerometer (pns) request %d args %08x %08x", aReq, a1, a2);
+		if (aReq != 0 && aReq != 2 && aReq != 4 && aReq != 7 && aReq != 9)
+			return KErrNotSupported;
+		if (aReq == 0)
+			{
+			iPnsRunning = ETrue;
+			if (!iTimer.IsPending())
+				iTimer.OneShot(NKern::TimerTicks(KSampleMs));
+			}
+		Kern::RequestComplete(iClient, aStatus, KErrNone);
+		return KErrNone;
+		}
 	if (aReq != 3 && aReq != 7)	// requests 3 and 7 are the 25 Hz sample streams: not logged
 		Kern::Printf("SYBSTUB: accelerometer request %d args %08x %08x", aReq, a1, a2);
 	if (aReq < 1 || aReq >= KMaxReq)
@@ -296,7 +385,7 @@ void DAccChannel::SampleDfcFn(TAny* aPtr)
 
 void DAccChannel::Sample()
 	{
-	if (!iStatus[3] && !iStatus[7])
+	if (!iPnsRunning && !iStatus[3] && !iStatus[7])
 		return;
 	TInt32 v[3] = { 0, 1000, 0 };
 	if (iHw)
@@ -309,6 +398,19 @@ void DAccChannel::Sample()
 			if (Reg(KRegSeq) == seq)
 				break;
 			}
+	if (iPnsRunning)
+		{
+		TInt8 b[3];
+		for (TInt i = 0; i < 3; ++i)
+			{
+			TInt c = v[i] * KPnsCountsPerG / 1000;
+			b[i] = (TInt8)(c > 127 ? 127 : c < -128 ? -128 : c);
+			}
+		if (iPnsDefined[0])
+			iPnsProp[0].Set(TPtrC8((const TUint8*)b, 3));
+		iTimer.OneShot(NKern::TimerTicks(KSampleMs));
+		return;
+		}
 	if (iStatus[7])
 		{
 		TInt64 hz = (TInt64)v[0] * v[0] + (TInt64)v[1] * v[1];

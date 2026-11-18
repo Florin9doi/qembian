@@ -1,0 +1,33 @@
+No alignment check, unaligned data access enabled (SCTLR.A=0, SCTLR.U=1)
+
+The phones' own kernels do not check alignment: Nokia's ROM code does unaligned halfword loads on
+purpose. Hitchcock's software rendering reads pairs of 8-bit pixels out of a byte row with an
+unaligned `ldrh` (hitchcock.dll+45930, 5800 V31.0.101, reached from the ALF redraw timer through
+BitGdi's blit) and its canvas command-buffer reader casts `Ptr()+offset` to a `TUint16*`
+(HuiCanvasCmdBufferReader.cpp).
+
+The EPL kernel's ARM1136 default programs MMUCR_A *without* MMUCR_U, so the first odd-offset load is
+an alignment data abort that the kernel turns into KERN-EXEC 3: the 5800 menu (menu3.exe/ALF) died
+there on 2026-11-13, the same code path is behind the S60 5th menu. Use the ARM1136 list without A
+and with U - the same "no alignment check" the flexible-model variant (syborgfx, the A8/A9 phones)
+already has, plus ARMv6's unaligned-support bit so the guest sees what the phone would.
+
+QEMU enforces alignment of normal memory only while SCTLR.A is set (target/arm/tcg/hflags.c
+aprofile_require_alignment -> ALIGN_MEM -> finalize_memop), and ignores SCTLR.U, which matches U=1.
+Not applied to the syborgmv variant (ARM926J, the N73): it still sets MMUCR_A; check there whether its
+ROM code does unaligned accesses before changing it.
+
+--- a/baseport/syborg/config.inc
++++ b/baseport/syborg/config.inc
+@@ -24,6 +24,11 @@
+ ;	GBLL    CFG_CPU_CORTEX_A8N
+ ;	GBLL	CFG_CPU_ARM1136_ERRATUM_399234_FIXED
+ ;	GBLL    CFG_CPU_ARM1136_ERRATUM_411920_FIXED
++; syborg-pg: run the CPU as the phones' own kernels do - no alignment check (MMUCR_A) and unaligned data
++; accesses enabled (MMUCR_U, ARMv6). Nokia's ROM code does unaligned halfword loads on purpose (Hitchcock's
++; bitmap/command-buffer readers read pairs of 8-bit pixels at odd offsets); the kernel default below
++; (MMUCR_A, no MMUCR_U) turns the first such load into a data abort -> KERN-EXEC 3 (5800 menu, 2026-11-13).
++	INIT_NUMERIC_CONSTANT	InitialMMUCR,	MMUCR_W+MMUCR_SBO+MMUCR_I+MMUCR_IT+MMUCR_DT+MMUCR_U
+ ; Include the following lines if this is a bootloader bootstrap
+ ;	GBLL	CFG_BootLoader
+ 

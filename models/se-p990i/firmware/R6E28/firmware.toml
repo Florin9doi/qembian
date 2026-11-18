@@ -1,0 +1,37 @@
+# Firmware R6E28 (CDA162007/1 R6E28, Generic World1) of se-p990i: merged over models/se-p990i/model.toml.
+
+[firmware]
+store = "SE-P990i/R6E28"                  # the ROM store entry (no type designator inside SE images)
+version = "R6E28"                          # version.txt "PDA: CXC162036 R6E28" [V]
+obtain = """
+The P990i flash files of one software version (SEtool/EMMA package P990i_DPY_Generic_World1_CDA162007-1-R6E28):
+BbyoneSW (core), ACPU_SW_*_ROFS (ROFS1), BASELINE_*_ROF (ROFx), ACPU_CDA*_ROFS (customer), EPOC_* (C: FAT).
+tools/fw/store.py import the archive.
+"""
+[[firmware.files]]
+role = "core"
+glob = "BbyoneSW_*"
+
+[[firmware.files]]
+role = "rofs1"
+glob = "ACPU_SW_*_ROFS"
+
+[[firmware.files]]
+role = "rofx"
+glob = "BASELINE_*_ROF"
+
+[[firmware.files]]
+role = "rofs3"
+glob = "ACPU_CDA*_ROFS"
+
+[[firmware.files]]
+role = "uda"
+glob = "EPOC_*"
+drive = "C"
+
+[firmware.identity]
+sw = { version = "R6E28", pda = "CXC162036" }   # private/102030EE/version.txt "PDA: CXC162036 R6E28" [V]
+[firmware.identity.sha256]                 # the images inventory.py writes (build/roms/<id>/<fw>/)
+"core-flat.img" = "5f8d5f89ee0f51913c0a2d7b64a22f9683632d81bf6734d1a546f65d2ae7677e"
+"rofs1.img" = "970ab56fbee4de439c33c537058efdf49f7e4b6d859b60219300b8599b49ac0c"
+"rofs2.img" = "4a552c540c058237462bacaf7d27bb51e2dbdc7c150704e2ee9e017f20ebbc68"

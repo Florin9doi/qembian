@@ -3,6 +3,6 @@
 // with -5 when either load fails (SAServer then panics "SystemAdaptation -5" and the phone resets), then
 // opens channel "ALS" (TVersion 1.0.0x642, unit -1, no PDD named). Hack H-als (docs/hacks.md): controls
 // return 0, requests (light readings) stay pending: no light sensor, the backlight stays as set.
-#include "nokiastub.h"
+#include "tablestub.h"
 NO_CONTROLS
-NOKIA_STUB_LDD2("ALS", KCtl, 1, EFalse)
+TABLE_STUB_LDD2("ALS", KCtl, 1, EFalse)

@@ -1,0 +1,16 @@
+EXPORTS
+	pvr2dif_create @ 1 NONAME
+	pvr2dif_destroy @ 2 NONAME
+	pvr2dif_getinfo @ 3 NONAME
+	pvr2dif_set_as_screen_reference @ 4 NONAME
+	pvr2dif_unused5 @ 5 NONAME
+	pvr2dif_unused6 @ 6 NONAME
+	pvr2dif_unused7 @ 7 NONAME
+	pvr2dif_unused8 @ 8 NONAME
+	pvr2dif_unused9 @ 9 NONAME
+	pvr2dif_generic_capabilities @ 10 NONAME
+	pvr2dif_accelerator_newl @ 11 NONAME
+	pvr2dif_unused12 @ 12 NONAME
+	pvr2dif_unused13 @ 13 NONAME
+	pvr2dif_unused14 @ 14 NONAME
+	pvr2dif_unused15 @ 15 NONAME

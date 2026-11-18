@@ -125,6 +125,8 @@ def cmd_lint():
     bad = 0
     for dev in devmodel.device_ids():
         prof = devmodel.load(dev)
+        if devmodel.get(prof, 'modem.kind') != 'isi-fake-peer':
+            continue		# no ISI modem (Sony Ericsson: the CCPU link), no reply table (bug 2026-11-18: lint crashed on them)
         rs = devmodel.get(prof, 'modem.replies', 'isi-replies.txt')
         files = [os.path.join(ROOT, r) if '/' in r else devmodel.device_file(prof, r) for r in (rs if isinstance(rs, list) else [rs])]
         seen = {}

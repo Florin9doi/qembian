@@ -9,6 +9,14 @@ schema = 1
 default = "nokia-n95-8gb-rm320"         # the device a bare tools/device.py, sydb or script uses when no SYBORG_DEVICE / instance names one
 
 [[types]]
+code = "RM-89"
+name = "E61"
+platform = "s60-3.0"
+soc = "omap1710"                             # [I spec]
+model = "nokia-e61-rm89"
+status = "profile-draft"                     # 3.0633.09.04 held (2026-11-17)
+
+[[types]]
 code = "RM-132"
 name = "N73"
 platform = "s60-3.0"
@@ -197,10 +205,10 @@ status = "known"
 [[types]]
 code = "RM-609"
 name = "E6"
-platform = "anna"
+platform = "belle-refresh"                   # launched with Anna; 111.140.0058 held (Belle Refresh)
 soc = "rapido-bcm2727 [I]"
-model = ""
-status = "known"
+model = "nokia-e6-00-rm609"
+status = "profile-draft"                     # 111.140.0058 held (2026-11-17)
 
 [[types]]
 code = "RM-243"
@@ -245,9 +253,25 @@ model = "se-p1i"
 status = "profile-draft"                     # R6E30 held (se_roms/P1)
 
 [[types]]
+code = "SE-P990i"
+name = "P990i"
+platform = "uiq-3.0"                         # Symbian 9.1, EKA2, moving memory model (romBase 0xF8000000), as the P1i
+soc = "pnx4008"                              # the P1i's platform [I: from specs; same EMachineUid family "Hermione"]
+model = "se-p990i"
+status = "bring-up"                          # R6E28 Generic World1 held (se_roms/P990): home screen 2026-11-17
+
+[[types]]
 code = "SE-P910i"
 name = "P910i"
 platform = "uiq-2.1"                         # Symbian 7.0, EKA1 (rom_base 0x50000000)
 soc = "pnx4000"                              # Philips Nexperia, ARM9 156 MHz [I: from specs]
 model = ""
 status = "known"                             # R5B01 held (se_roms/P910)
+
+[[types]]
+code = "RA-6"
+name = "E90 Communicator"
+platform = "s60-3.1"
+soc = "omap2420"
+model = "nokia-e90-ra6"
+status = "bring-up"

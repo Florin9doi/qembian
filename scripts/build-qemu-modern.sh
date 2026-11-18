@@ -34,7 +34,7 @@ for p in patches/qemu-modern/*.patch; do
   echo ">> patch $(basename "$p")"; patch -d "$SRC" -p1 --forward < "$p"
   basename "$p" >> "$SRC/.syborg-patches"
 done
-cp src/qemu-syborg/hw/arm/syborg*.{c,h} "$SRC/hw/arm/"
+cp src/qemu-syborg/hw/arm/syborg*.{c,h,inc} "$SRC/hw/arm/"
 # the host EGL/OpenVG (the Khronos RI built for the host, C++): a static library linked into the device
 scripts/build-syvg.sh > build/logs/syvg-build.log 2>&1 || { tail -20 build/logs/syvg-build.log; exit 1; }
 cp src/syvg/syvg.h src/syvg/vg2_fn.h "$SRC/hw/arm/"

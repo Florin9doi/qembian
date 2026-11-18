@@ -1,0 +1,6 @@
+# Nokia 6720 classic code patches (romcompose --patches format: module+offset  original  new, bytes in memory order)
+
+# H-6720-one-screen: the 6720's Hal.dll declares 2 screens (HAL EDisplayNumberOfScreens, attribute 0x5b; the E52's
+# says 1): the window server built a second screen (TV-out) whose display has 0 modes and died KERN-EXEC 3 picking
+# a mode in it (EwSrv.exe+0x1b230, 2026-11-17). Our display stand-in has one panel, no TV-out: 1 screen
+Hal.dll+0xdec  02000000  01000000   # Hal.dll+0xdec number of screens 2 -> 1  [H-6720-one-screen]

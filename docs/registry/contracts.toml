@@ -1,0 +1,479 @@
+# SEED ONLY - imported by `tools/registry.py seed`; the database is canonical afterwards.
+#
+# A contract is what a *participant outside a component* may rely on. status: known | partial | unknown.
+# Claims cite contracts by key; tasks say which objective (capability) they unblock.
+
+[[objective]]
+key = "hosted-compositor"
+title = "Validate the hosted compositor against the phone's own render stage"
+notes = """
+We can run Belle's WSERV render stage (gcerenderstage.dll) against our composition backend (src/gcebe) only
+when the completions it depends on are answered correctly. The blocking question is the surface-update
+completion/cancellation contract, not the whole compositor.
+"""
+
+[[objective]]
+key = "telephony-lifecycle"
+title = "A documented, repeatable 808 telephony lifecycle (success, absence, cancellation)"
+notes = """
+One user-visible operation end to end (open phone, read SIM/registration, subscribe, cancel, close, reopen)
+with every outstanding request explained. The modem model is the deliverable; the phone's own TSY is the oracle.
+"""
+
+[[objective]]
+key = "wserv-replaceability"
+title = "Decide whether available WSERV source can replace this firmware's server"
+notes = """
+Establish export sets, plugin interfaces and behavioural differences between the EPL source and Belle FP2's
+EwSrv/Ws32 before committing to anything. Outcome is a decision, not a rewrite.
+"""
+
+[[objective]]
+key = "boot-parity"
+title = "Every device boots to its home screen with no unexplained stand-in silence"
+notes = "The baseline objective: what works on each target, and which contract blocks the next capability."
+
+[[contract]]
+key = "ws-render-stage"
+component = "wserv"
+title = "CWsRenderStage (Begin/End/Next/SetNext/ResolveObjectInterface)"
+kind = "abi"
+status = "partial"
+participants = "EwSrv.exe (caller), the render-stage plugin (implementation; gcerenderstage.dll on the 808)"
+args = "Begin(const TRegion* aDirtyRegion); End(TRequestStatus* aFinished)"
+completion = """
+End() completes synchronously with KErrNone when nothing changed the scene since Begin(); otherwise the
+caller's TRequestStatus is handed to the compositor (Gce::CGce vtable[0x18/4]) and completed by it.
+"""
+cancellation = "not supported by the interface; a pending status is completed by the compositor or not at all"
+errors = "Begin/End return void; failures surface as the completion value or as a dropped frame"
+source = "docs/research/gcerenderstage-808.md; WsRenderStage.h (EPL); wsgraphicdrawer.dll ords 83/84/87/88/90"
+
+[[contract]]
+key = "surface-update-server-provider"
+component = "surface-update"
+title = "surfaceupdateserver ord1 (StartSurfaceUpdateServer) and the MCompositionSurfaceUpdate hand-off"
+kind = "abi"
+status = "partial"
+participants = "compositionbackend.dll (only importer on the 808), our src/gcebe (replacement), surfaceupdateclient.dll users"
+args = "TInt StartSurfaceUpdateServer(MSurfaceUpdateServerProvider*& aProvider)   [signature verified]"
+completion = """
+VERIFIED: the compositor is asked for MCompositionSurfaceUpdate with CBase::Extension_(0x10286498, &out, NULL)
+and is then called on vtable slot 2 (offset 8) with the batch argument list - that is the content hand-off.
+NOT ESTABLISHED: what completes a client's pending update notification, and in what order relative to that
+slot-2 call.
+"""
+cancellation = "NOT ESTABLISHED. The client has two entries that return KErrNotSupported (-5) and one that sends opcode 7 then reports KErrCancel (-3); their meaning is unverified."
+errors = "KErrAlreadyExists (-11) from Start when a server named !SURFACE_UPDATE_SERVER already exists; -6 (KErrArgument) on bad server-side arguments; -5 (KErrNotSupported) from two client entries"
+source = "decompilation: build/roms/nokia-808-rm807/.../ghidra/SurfaceUpdateServer.dll.c (+ .elf), module-relative ord1 0x4de, thread entry 0x41e"
+
+[[contract]]
+key = "surface-update-client-session"
+component = "surface-update"
+title = "surfaceupdateclient session to !SURFACE_UPDATE_SERVER"
+kind = "ipc"
+status = "partial"
+participants = "63 importer modules (camctrlgeneral, ngapostprochwdevice, alf...), the server inside the compositor process"
+args = "RSessionBase::CreateSession(name=!SURFACE_UPDATE_SERVER, version, count); message setters pack fields at +1..+5; ord5 sends opcode 7"
+completion = "NOT ESTABLISHED - opcode 7 is observed, its completion path is not"
+cancellation = "NOT ESTABLISHED"
+errors = "connect returns -11 when already connected; two entries return -5"
+source = "decompilation: ghidra/SurfaceUpdateClient.dll.c (ord1..ord11, ord7 = CreateSession)"
+
+[[contract]]
+key = "content-ready-for-composition"
+component = "gce-render-stage"
+title = "MContentReadyForComposition / MWsContentReadyForComposition"
+kind = "abi"
+status = "partial"
+participants = "render stage (user), compositor (provider); WS type id 37 / KUidContentReadyForComposition 0x2002E6D5"
+args = "NotifyContentReady(const TSurfaceId&, TUint64 aContentUpdate, TRequestStatus&); NotifyContentReadyCancel(const TSurfaceId&)"
+completion = """
+Completed when the requested content update has been delivered to the compositor; aContentUpdate is 1-based
+and counts updates per surface per screen.
+"""
+cancellation = "NotifyContentReadyCancel completes a pending request with KErrCancel (-3)"
+errors = "KErrArgument for an unregistered surface; the notification can also be completed by surface destruction"
+source = "graphicscomposition/surfaceupdate/inc/contentreadyforcomposition.h; wscontentreadyforcomposition.h"
+
+[[contract]]
+key = "gce-factory"
+component = "gce"
+title = "Gce::CGce factory and extension lookup"
+kind = "abi"
+status = "partial"
+participants = "gce.dll (provider), compositionbackend.dll (backend), gcerenderstage.dll (the only importer of gce ord1 on the 808; the N8 also has 10286378.dll)"
+args = "gce.dll ord1 = CGce::NewL(TInt aScreen); then Extension(KUidWsDisplayControl 0x10286497), Extension(KUidContentReadyForComposition 0x2002E6D5)"
+completion = "normal C++ return; ACK via the same calls"
+cancellation = "n/a"
+errors = "leaves on allocation/composition failure"
+source = "docs/devices/nokia-n8-rm596/composition.md; tools/import_index.py (importer set per firmware)"
+
+[[contract]]
+key = "rsurfacemanager-subset"
+component = "gce-render-stage"
+title = "RSurfaceManager calls used by the render stage"
+kind = "abi"
+status = "known"
+participants = "surfacemanager.dll (provider), gcerenderstage.dll CSurfaceInfoCache (user)"
+args = "Open()/Close(), OpenSurface(TSurfaceId), SurfaceInfo(TSurfaceId, TPckgBuf<TSurfaceInfoV01>&), CloseSurface(TSurfaceId)"
+completion = "synchronous; TInt error codes"
+cancellation = "n/a"
+errors = "KErrArgument (-6) for ids the cache refuses, KErrNotSupported (-5) elsewhere; -2 KErrGeneral for a null id"
+source = "tools/import_index.py ordinals 2,3,4,12,13,14 + Nokia_Symbian3_SDK surfacemanager.dso"
+
+[[contract]]
+key = "modem-isi-service"
+component = "modem-protocol"
+title = "ISI service request/response used by the phone's telephony servers"
+kind = "protocol"
+status = "partial"
+participants = "phone servers (etelserver/phoneserver/satserver + nokiatsy), our fake baseband (syborg_modem_core.c)"
+args = "ISI message on a channel: service id, message id, payload; some services are stateful and ordered"
+completion = "response message with the request's transaction id; some requests are answered by an indication"
+cancellation = "client-side request cancellation exists in ISI; the model must not then answer late"
+errors = "error responses with a Symbian error code; unanswered requests are a hang, not an error"
+source = "docs/isi.md; src/qemu-syborg/hw/arm/syborg_modem_core.c"
+
+[[objective]]
+key = "sensor-contract"
+title = "One original sensor LDD running over a replacement PDD"
+notes = "Bounded hardware experiment: keep the LDD, replace the PDD, prove the channel and lifecycle."
+
+[[task]]
+key = "wserv-surface-update-contract"
+components = ["surface-update", "gce-render-stage", "gce"]
+contracts = ["content-ready-for-composition", "ws-render-stage", "surface-update-server-provider", "surface-update-client-session"]
+title = "Establish the 808 surface-update completion and cancellation contract"
+question = """
+For a surface registered with the render stage, what exactly completes a client's update notification, in what
+order, and what happens on cancellation or surface destruction? Sufficient to validate the hosted compositor.
+"""
+acceptance = """
+A written contract (participants, ordering, completion, cancellation, error codes) plus a probe that passes on
+the phone and against our backend; every outstanding request in the probe explained.
+"""
+effort_limit = "1 day"
+objective = "hosted-compositor"
+dependencies = []
+
+[[task]]
+key = "wserv-source-delta-assessment"
+components = ["wserv"]
+contracts = ["ws-render-stage"]
+title = "Assess whether the available WSERV source can replace this firmware's server"
+question = """
+Compare the EPL/NGA source tree against Belle FP2 EwSrv.exe/Ws32.dll: export sets, plugin interfaces
+(KMWsRenderStageFactory 14, KMWsScene 36, ...), and behavioural differences. What would have to change?
+"""
+acceptance = """
+A short assessment: per interface, what the source provides vs what the binary provides, with the export
+lists and the gaps named; a recommendation (retain / adapt / replace) with the cost driver.
+"""
+effort_limit = "2 days"
+objective = "wserv-replaceability"
+dependencies = []
+
+[[task]]
+key = "ecom-namespace-map"
+components = ["wserv", "gce-render-stage"]
+contracts = []
+title = "Map the ECom namespace: which implementation UID belongs to which module and interface"
+question = """
+Parse Private/10009d8f/ecom-0-0.spi for the 808 (and one other device) into edges: module -> implementation
+UID -> interface UID. Enough to answer "who can EwSrv ask for a render stage" without guessing.
+"""
+acceptance = """
+registry.py ingest produces ecom-plugin edges for every SPI entry, with the display names; spot-checked
+against three known entries (gcerenderstage 0x20031CBA, umauirenderstage 0x20031CB3/0x20031CB5,
+clonerenderstage 0x20031CB7/0x20031CB8; 0x20031CB6 is its DLL UID).
+"""
+effort_limit = "half a day"
+objective = "wserv-replaceability"
+dependencies = []
+
+[[task]]
+key = "modem-lifecycle-probe"
+components = ["modem-protocol"]
+contracts = ["modem-isi-service"]
+title = "A modem probe for one lifecycle with success, absence and cancellation"
+question = """
+For one ISI service (SIM status), does our fake baseband answer in every state: normal, no SIM, late reply and
+cancelled request? Which outstanding request does the client see and when?
+"""
+acceptance = """
+A probe binary plus three transcripts (normal, absent, cancelled) against our baseband, with every request
+either answered or explicitly recorded as unanswered-on-purpose.
+"""
+effort_limit = "1 day"
+objective = "telephony-lifecycle"
+dependencies = []
+
+[[task]]
+key = "tsy-request-oracle"
+components = ["tsy-nokia", "modem-protocol"]
+contracts = ["modem-isi-service"]
+title = "Use the phone's own TSY as the oracle for one telephony lifecycle"
+question = """
+Pick one user-visible operation (read the SIM's own number, or registration), trace every ETel -> ISI request
+and response, then re-run it against our fake baseband and diff the sequences (not the timing).
+"""
+acceptance = """
+A transcript pair (phone vs ours) for the same operation, the differences listed, and the model changed where
+the difference is a real omission; every unfinished request explained.
+"""
+effort_limit = "1-2 days"
+objective = "telephony-lifecycle"
+dependencies = ["modem-lifecycle-probe"]
+
+[[task]]
+key = "haptics-packetizer-encoding"
+components = ["haptics"]
+contracts = ["haptics-isi-vibra"]
+title = "Recover the HWRM haptics packet encoding (superseded by haptics-isi-packet)"
+question = """
+What is the exact packet layout the HWRM haptics packetizer plugin sends, and which replies count as success?
+"""
+acceptance = "A packet table (field, offset, meaning) validated against one captured exchange, or a decision to keep it retained."
+effort_limit = "half a day"
+objective = "boot-parity"
+dependencies = []
+state = "dropped"
+
+[[task]]
+key = "sensor-ldd-replacement-pdd"
+components = ["sensors-hw"]
+contracts = []
+title = "Run one original sensor LDD over a replacement PDD"
+question = """
+Does the original accelerometer LDD work over a PDD we write, given the kernel ABI check? What does the PDD
+have to provide (channel open, config, buffers, power)?
+"""
+acceptance = """
+The LDD loads and a client receives samples in the emulator; the PDD contract is written down; the ABI check
+criteria are recorded.
+"""
+effort_limit = "3 days"
+objective = "sensor-contract"
+dependencies = []
+
+[[task]]
+key = "surface-update-opcodes"
+components = ["surface-update"]
+contracts = ["surface-update-client-session", "surface-update-server-provider"]
+title = "Map the surface-update client opcodes, and what completes or cancels an update"
+question = """
+surfaceupdateclient ord5 sends IPC opcode 7 to !SURFACE_UPDATE_SERVER; ord2/ord3/ord4 pack six words at +0..+5.
+Which server handler is opcode 7, what does it answer, what is the payload layout, and which client call can
+cancel a pending notification? This is the remaining half of wserv-surface-update-contract.
+"""
+acceptance = """
+An opcode table (opcode -> server handler address -> argument/reply layout) for the opcodes the client uses,
+plus the completion and cancellation path written as a contract; cross-checked by one run of a client on the
+phone (sydb) so the ordering is observed, not guessed.
+"""
+effort_limit = "half a day"
+objective = "hosted-compositor"
+dependencies = []
+
+[[task]]
+key = "gcebe-provider-first-caller"
+components = ["surface-update", "gce"]
+title = "Make gcebe assert it is the first surface-update provider"
+question = """
+StartSurfaceUpdateServer returns the FIRST installed provider to every later caller and KErrAlreadyExists when a
+server already exists. Does our gcebe verify that the provider it gets back is its own, and what happens today if
+it is not?
+"""
+acceptance = """
+gcebe checks the returned provider against its own and reports (or refuses) instead of silently running with
+another compositor's callback table; one test or run log shows the check firing.
+"""
+effort_limit = "2 hours"
+objective = "hosted-compositor"
+dependencies = ["surface-update-opcodes"]
+
+[[objective]]
+key = "vibra-device"
+title = "A real vibra device in QEMU, driven by the phone's own haptics stack - no driver stand-in"
+notes = """
+The 808 reaches the vibration motor over ISI (1C 9E), not through a kernel driver, so the goal is reachable
+without any LDD/PDD replacement: understand the packet, answer it correctly, and drive a syborg device from the
+same handler the modem model already owns.
+"""
+
+[[contract]]
+key = "haptics-isi-vibra"
+component = "haptics"
+title = "HWRM haptics over ISI: request 1C 9E, response 1C 9F"
+kind = "protocol"
+status = "known"
+participants = "hapticsadaptation.dll (sender, for EwSrv's FeedbackPlayerThread), hwrmhapticsvibepacketizerplugin.dll (packet), our fake modem/PMU"
+args = """
+REQUEST (hapticsadaptation.dll +0x6C0, FUN_80f195a8; argument is a TDesC8, so *(u32)arg is its length):
+  ISI words: 3=0x1C, 8=channel (obj+0xC), 9=0x9E, 0x0A=0, 0x0B=1, 0x0C=100, 0x10=0, 0x12=0
+  0x0E = (aligned total message size) - 12, where total = ((L & 0xffff) + 0x16) rounded up to 4
+  0x14 = L & 0xffff            <- packet LENGTH
+  0x16 = packet contents       <- L bytes, zero-filled to the aligned size
+RESPONSE (hapticsadaptation.dll +0x5B8, FUN_80f194a0), read by raw offset:
+  word@0x0A must be 0; word@0x0B must be NON-ZERO; word@0x11 must be 0;
+  u16@0x14 = payload length; descriptor@0x16 = the packet handed up as (error, packet) via
+  hwrmhapticspluginservice ord3. Any mismatch yields error -2 (KErrGeneral).
+  NOTE: several parser branches read BYTE +2 as a status, while the request places command arguments there, so
+  request and response layouts differ even for the same opcode. Identical numbers do not imply identical layout.
+PACKET: opcode-specific layouts, 16-bit opcode at offset 0. Cases handled by
+hwrmhapticsvibepacketizerplugin.dll include 4, 5, 7, 8, 9, 0x10, 0x11, 0x12, 0x13, 0x16-0x20; 0x11/0x12/0x13/0x1B
+also update stored state (e.g. a cached value at obj+0x28, appends to a CDesC8Array). Any other opcode leaves with -2.
+Field table per opcode is what haptics-isi-packet still owes; there is no established common TLV format.
+"""
+completion = """
+A failure reply (non-zero status) is accepted and the caller continues - that is what we do today. A success
+reply needs a parseable packet at 0x16; an empty one makes the plugin wait for effect data that never arrives
+(observed UI freeze on the N8). Whether completion means "accepted by the PMU" or "effect finished", what sets
+intensity/duration, and how Stop works are all UNKNOWN.
+"""
+cancellation = "not established (no cancel path observed in the adaptation)"
+errors = "response word@0x0A != 0 or word@0x11 != 0 or word@0x0B == 0 -> error -2 (KErrGeneral) for the effect"
+source = "platform/isi/replies-bb5.txt (1C 9E entry); docs/research/gcerenderstage-808.md (workflow)"
+
+[[task]]
+key = "haptics-isi-packet"
+components = ["haptics"]
+contracts = ["haptics-isi-vibra"]
+title = "Decode the 1C 9E vibra packet and what the plugin does with the reply"
+question = """
+What exactly does hwrmhapticsvibepacketizerplugin.dll build for 1C 9E (field layout), what does
+hapticsadaptation.dll send on each event, and which parts of the 1C 9F response does the plugin read before it
+advances its state machine? An empty OK is known to hang it.
+"""
+acceptance = """
+A packet table (offset, width, meaning) for request and response, plus the state the plugin needs from the reply
+to consider the effect done. (The QEMU check is vibra-qemu-device's acceptance, not this one.)
+"""
+effort_limit = "1 day"
+objective = "vibra-device"
+dependencies = []
+state = "ready"
+
+[[task]]
+key = "vibra-qemu-device"
+components = ["haptics"]
+contracts = ["haptics-isi-vibra"]
+title = "Add a syborg vibra device driven by the haptics ISI handler"
+question = """
+Which hardware surface should the QEMU device expose (enable/duration/buzz pattern register file, or a simple
+event), and how should the modem model call it? No stand-in driver may be needed for the phone's own stack.
+"""
+acceptance = """
+A device model (documented in models/ + docs/devices.md terms) that records enable/duration from the ISI
+handler and is visible in the trace; a run where a real vibration request reaches it; no new [[standins]] entry
+for vibra.
+"""
+effort_limit = "1-2 days"
+objective = "vibra-device"
+dependencies = ["haptics-isi-packet"]
+state = "ready"
+
+[[objective]]
+key = "bt-hci-transport"
+title = "A working HCI controller path, so the FM/BT byte patches and H-bt-ondemand can go"
+notes = """
+N8/701/808 carry fmradioaudiocontrol.dll byte patches (H-fmradio-none) because the radio HAL cannot establish
+Bluetooth HCI direct access, and they use H-bt-ondemand to start the ESock BT worker on demand. Give the original
+stack a transport it can open and an emulated controller it can initialise, and those workarounds become
+unnecessary - without touching the higher-level binaries.
+"""
+
+[[contract]]
+key = "hctl-bc02-transport"
+component = "bt-hctl"
+title = "H4+ HCTL over BC02: channel, framing, ownership, completion"
+kind = "ipc"
+status = "partial"
+participants = "h4plushciv2_hctl.dll (client) -> BC02.LDD (LDD) -> bc02_uart1.PDD (hardware); hciaccess.dll and the BT stack above"
+args = """
+RECOVERED (module offsets from 0x8086DE98; docs/research/hctl-bc02-808.md sections 3, 4, A; re-synced 2026-11-17
+from the document's corrected sections - the first seed carried readings the document later corrected):
+open (+0x14A8): the user-side DLL loads PDD "BC02_UART1" and LDD "BC02" (User::LoadPhysicalDevice /
+          LoadLogicalDevice at 0x8086E6F2/0x8086E6F6), then DoCreate(name="BC02", TVersion(1,0,0x21D), unit 4)
+controls (d32comm.h numbering): 0 EControlConfig = read TCommConfigV01 (52 bytes); 1 EControlSetConfig = apply,
+          iRate = EBpsSpecial (0x80000000 at +0) with iSpecialRate (+0x1C) = 120000 / 921600 / 4000000,
+          iDataBits 3 (+4), 0 at +8/+0xC, 0x1204 later in the block; 3 EControlSignals, bit 0 = KSignalCTS polled
+          1000 x 1 ms; 4 EControlSetSignals(set, clear): RTS (0x10) set after CTS, cleared in the type-6 handler;
+          9 teardown/flush; 0xB abort receive (no caller here)
+requests: 0 receive into obj+0x20; 1 transmit a descriptor, len = *des & 0x0FFFFFFF; 2 synchronous, meaning unknown
+cancels:  DoCancel takes a bit MASK: 1 = request 0 (receive, completes KErrCancel), 2 = request 1 (transmit),
+          4 = request 2 (BC02.LDD DoCancel +0x3BE8)
+FRAMING: byte 0 = H4 type. TX: whole descriptor to request 1; upper layer told kind 2 for 0x01 (HCI command).
+          RX demux (+0xEFA): 2 = ACL, length LITTLE-endian u16 at +3, total len+4; 3 = SCO; 4 = event (code +1,
+          plen +2), forwarded first, then code 0x10 (Hardware Error) adds a -44 report; 6 = BC02 transport
+          baud handshake (stores original bytes +12/+13, re-applies the config at 4 Mbaud); 7, 8 = transport.
+          Types 6/7/8 are UART/transport level, not HCI.
+BC02.LDD is the standard DChannelComm (ECOMM) LDD: a stand-in PDD registering as "BC02.<x>" behind a QEMU UART
+with an HCI controller model is enough; the vendor init (h4plushciv2_initialisor.dll) is not read yet.
+UNKNOWN: request 2's meaning; LDD-side buffer ownership; behaviour of a pending receive at Close.
+"""
+completion = """
+Three distinct things must not be conflated: transport write completion (request 1's TRequestStatus), the
+baud handshake (a type-6 packet within 4 s of the post-init transmit, else the CTimer at obj+0x18 fires), and
+controller events (type 4: forwarded as data; code 0x10 Hardware Error additionally reported as -44).
+"""
+cancellation = "DoCancel(mask): 1 cancels the receive (request 0, KErrCancel), 2 the transmit (request 1); the HCTL cancels the receive with mask 1 (H4pHctl_CancelReceive 0x8086EEF6)"
+errors = "KErrTimedOut (-33) if CTS (control 3 bit 0) never appears within ~1 s; KErrInUse (-14) transmitting on a closed transport; -44 after a Hardware Error event (0x10); KErrNotSupported (-5) from the baud selector for any other value"
+source = "docs/research/hctl-bc02-808.md; decompilation ghidra/h4plushciv2_hctl.dll.c; Ghidra program h4plushciv2_hctl.dll.elf"
+
+[[task]]
+key = "h4plushciv2-hctl-contract"
+components = ["bt-hctl", "bt-controller-link"]
+contracts = ["hctl-bc02-transport"]
+title = "Recover the HCTL-to-BC02 contract"
+question = """
+Channel opening, control/request numbers, buffer ownership, asynchronous completion, cancellation, power/wake
+handshake and packet framing, as used by h4plushciv2_hctl.dll. Cite addresses and imported ordinals. Follow only
+the BC02.LDD handlers the transport actually calls. Identify explicitly what remains unknown before an emulated
+controller could initialise.
+"""
+acceptance = """
+A contract record with, per control/request number: the argument layout, what must come back (values and handle
+kinds), ownership and completion/cancellation semantics, each cited by module+offset or import ordinal; plus a
+list of the unknown parts that block bt-controller-minimal, and one captured exchange if a run is possible.
+"""
+effort_limit = "1 day"
+objective = "bt-hci-transport"
+dependencies = []
+
+[[task]]
+key = "bt-controller-minimal"
+components = ["bt-controller-link", "bt-hci-access"]
+contracts = ["hctl-bc02-transport"]
+title = "Emulated controller behind the transport: enough for the stack to open a session"
+question = """
+Can an emulated controller (a) survive h4plushciv2_initialisor.dll's vendor initialisation and (b) answer
+hciaccess.dll's direct-access session, using the contract recovered above and no change to the user-side binaries?
+"""
+acceptance = """
+The radio HAL's HCI session returns KErrNone on the 808 in QEMU, with the emulated controller visible in the
+trace; the remaining vendor commands listed as unsupported rather than ignored.
+"""
+effort_limit = "2-3 days"
+objective = "bt-hci-transport"
+dependencies = ["h4plushciv2-hctl-contract"]
+state = "blocked"
+
+[[task]]
+key = "bt-fm-patch-removal"
+components = ["bt-hci-access"]
+contracts = ["hctl-bc02-transport"]
+title = "Drop the FM audio byte patches and H-bt-ondemand on one model"
+question = """
+With a working controller, can the 808 ROM be built without the fmradioaudiocontrol.dll patches and without
+H-bt-ondemand, with the radio HAL and the audio server behaving as they do on the phone?
+"""
+acceptance = """
+A ROM build with the patches removed on one model, a boot to the home screen, and the radio HAL's own result
+recorded; if it still fails, the exact response that is missing.
+"""
+effort_limit = "1 day"
+objective = "bt-hci-transport"
+dependencies = ["bt-controller-minimal"]
+state = "blocked"

@@ -1,0 +1,38 @@
+# Firmware 112.020.0311 of nokia-808-rm807 (device model v2: merged over models/nokia-808-rm807/model.toml).
+# The 808's Belle FP1 build (the shipping line, before Belle FP2 113.010.1508): kept because the two
+# firmwares disagree about ALF's rendering architecture (docs/devices/nokia-808-rm807/frame-uploads.md):
+# this one's huirenderpluginvg.dll still has CHuiVg10PBufferSurface and CHuiFxVg10TransformFilter,
+# 113.010.1508 does not.
+
+[firmware]
+version = "112.020.0311"
+personality = "sym101"                     # Belle FP1: Symbian^3 exec numbering + ten Belle calls, as Belle Refresh
+obtain = """
+Flash files of RM-807 112.020.0311 (Nokia Belle FP1): prd.core.fpsx (SOS+CORE and SOS+ROFS1), the Euro 3
+language pack 03.01, the generic customer variant C00.01 and the U01.01 user data. Put them in
+roms/RM-807/112.020.0311/ (git-ignored). Internet Archive item "rm-807-112.020.0311" (2021 upload,
+236 MB zip) holds the whole set; tools/fw/store.py import takes the unpacked directory.
+"""
+[[firmware.files]]
+role = "core"                              # SOS+CORE + SOS+ROFS1 [V partition names, tools/fw/layout.py]
+glob = "RM-807_112.020.0311_79u_prd.core.fpsx"
+
+[[firmware.files]]
+role = "rofs2"                             # language pack
+glob = "RM-807_112.020.0311_03.01_*_prd.rofs2.fpsx"
+
+[[firmware.files]]
+role = "rofs3"                             # customer variant
+glob = "RM-807_*_C00.01_*_prd.rofs3.fpsx"
+
+[firmware.identity]                         # filled from the inventory
+sw = { version = "112.020.0311", date = "2012-06-26", type_code = "RM-807" }   # Resource/versions/sw.txt [V]
+
+# user_window_start is derived from this firmware's core.json at build time (docs/device-model-v2.md);
+# the 113.010.1508 profile's literal (0x804B2B80) is that build's figure, not this one's.
+[firmware.rom]
+[[firmware.files]]
+role = "uda"
+glob = "RM-807_*_U01.01_*.uda.fpsx"
+drive = "C"
+optional = true

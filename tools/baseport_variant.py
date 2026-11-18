@@ -14,6 +14,8 @@ Known variants (kernels/*.toml would be the next step if there are more):
              keeps per-thread data in the user thread-ID register TPIDRURW (the kernel then switches it)
   syborg6k   multiple memory model, ARM1176 (ARMv6K), VFP: Symbian 9.3 RAPIDO phones whose EUSER also keeps
              per-thread data in TPIDRURW (E52, E72, E5-00, 6720 classic: KERN-EXEC 3 at 1.5 s on ARM1136 r0)
+             and, like syborgfx, --unaligned: the 9.3 ROM code does unaligned loads (E52 Calendar's Alfred
+             thread died KERN-EXEC 3 on an alignment fault, FSR 1, 2026-11-17)
 Re-run after every change to baseport/syborg (scripts/setup-epocroot.sh does it after the patches).
 """
 import argparse, os, re, shutil, sys

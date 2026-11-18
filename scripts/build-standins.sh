@@ -55,9 +55,9 @@ VARID=$(grep -m1 -o 'device\[0x[0-9a-f]*\]' "$OBY" | grep -o '0x[0-9a-f]*')
 LCD=$(cat "$GEN/lcd.txt")
 # rombuild lays files out in obey order: insert the stand-ins right after the first device[] line
 # so they stay inside the kernel-side window below the user side (romcompose.py checks this)
-while read -r kind f ext; do
+while read -r kind f ext rn; do
   [ -n "$kind" ] || continue
-  printf '%s[%s]=\t%s/_%s_%s.%s\t\\sys\\bin\\%s.%s\n' "$kind" "$VARID" "$REL" "$BP" "$f" "$ext" "$f" "$ext"
+  printf '%s[%s]=\t%s/_%s_%s.%s\t\\sys\\bin\\%s.%s\n' "$kind" "$VARID" "$REL" "$BP" "$f" "$ext" "${rn:-$f}" "$ext"
 done < "$GEN/standins.oby.txt" > extra.oby
 PAD=""; [ -f "$GEN/pad.bin" ] && PAD="$GEN/pad.bin"
 OMIT=$(cat "$GEN/omit.txt" 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr '\n' ' ')   # kernel.omit_baseport

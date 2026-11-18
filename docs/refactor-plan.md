@@ -150,7 +150,7 @@ nokia-n95-8gb-rm320` and plain `sydb start` boot; `run-gui.sh` boots; smoke; `sy
 ## Step 3 [M] — stand-ins as a library, the ROM composed from the profile
 
 Files: `src/n95compat/stubs/*` → `src/standins/<driver>/` (one directory per mmp; `iscpeer.inl`,
-`nokiastub.h`, `isireplies.h`, `stubcert.h` go under `src/standins/_shared/` or next to the driver
+`tablestub.h`, `isireplies.h`, `stubcert.h` go under `src/standins/_shared/` or next to the driver
 that owns them; `medrofs`, `mednvmem2`, `lcd` likewise), each with a 5-line `README.md` (family,
 role, evidence doc). `scripts/build-n95compat.sh` → `scripts/build-standins.sh ID`: `bld.inf`
 and the oby fragment are **generated** from `[[standins]]` (order preserved; `options` → `MACRO`

@@ -49,6 +49,7 @@ touch_rate_hz = 60                         # [I] resistive panel report rate: mo
 [board.audio]
 dsp = "rapido"                             # RAPIDO DSP model: aamdaifdriver + the ISC peer's F3 replies
 ring_units = 16                            # DSP ring per stream (docs/devices/nokia-n8-rm596/rapido-audio.md)
+streams = "48000/2/24/240,48000/1/24,16000/1/24"   # stream type -> PCM format: without it the ring stays unbound and the phone is silent (bug 2026-11-17); type 0 as the N8 and 5230 [I for this phone]
 
 
 [board.flash]
@@ -95,6 +96,9 @@ kind = "composite"
 flags = "FS_COMPOSITE"
 
 # ---------------------------------------------------------------------------------------------
+[board.accelerometer]                      # QEMU syborg-sensor; control 5 block (168 bytes)
+info = "10=01000000,2c=01000000,78=01000000"   # XYZ, wake-up, double-tap channels present [V accssy 0x807a6d98]
+
 [hardware]
 wlan = true                                # wlanldd/wlanpdd in the core [V]
 bluetooth = true
@@ -116,8 +120,8 @@ baseport = "syborg"
 place = "after-firmware"                   # our kernel side (to 0x8031xxxx) does not fit below the user side (0x80274B50)
 patchsets = ["platform", "sym92", "policy"]
 omit_baseport = ["epointer.dll"]            # Syborg mouse driver: the exyin stand-in owns the pointer device
-missing_drivers = ["karap.dll", "keypad_exp.dll", "minkda.ldd", "esound.ldd", "accelerometerldd.ldd",
-                   "accelerometerpdd.pdd", "proximityldd.ldd", "proximitypdd.pdd", "camldd.ldd", "campdd.pdd",
+missing_drivers = ["karap.dll", "keypad_exp.dll", "minkda.ldd", "esound.ldd",
+                   "proximityldd.ldd", "proximitypdd.pdd", "camldd.ldd", "campdd.pdd",
                    "camsecondarypdd.pdd", "wlanldd.ldd", "wlanpdd.pdd", "pltwlanpdd.pdd", "bc02.ldd", "bc02_uart1.pdd",
                    "medsd.pdd", "mobilecrashdriver.ldd", "tcldd.ldd", "tracecoreostldd.ldd", "rebootdriver.ldd"]
 
@@ -180,6 +184,22 @@ family = "nokia-bb5"
 role = "backlight PDD: load-only"
 
 [[standins]]
+name = "accelerometer"
+rom_name = "accelerometerldd"
+kind = "ldd"
+family = "common"
+config = { protocol = "pns" }              # the 5800's S60 5.0 accssy: control 5/6, samples on P&S (docs/research/5800-accssy.md)
+role = "accelerometerldd.ldd for the 5800's accssy.dll: the host's syborg-sensor vector (Turn view, sydb accel). Without a channel Raging Thunder GR crashed (docs/research/5800-ctl44-rtgr.md)"
+
+[[standins]]
+name = "accelerometerpdd"
+file = "accelerometer"
+rom_name = "accelerometerpdd"
+kind = "pdd"
+family = "common"
+role = "accelerometerpdd.pdd: empty physical device the channel names"
+
+[[standins]]
 name = "aamdaifdriver"
 kind = "ldd"
 family = "nokia-rapido"
@@ -223,6 +243,10 @@ impl = "none"
 
 [milestones]
 idle = "Startup::startup sets 101f8766/46 = 104"    # [V] UI phase all done: home screen (after the first-boot queries)
+
+# Phone window (tools/sydb/phone.py, docs/devices.md [skin]).
+[skin]
+turn = "cw"                                # Turn view: clockwise (owner 2026-11-17: Bounce turned upside down with the N8's anticlockwise turn)
 
 [props]
 startup = { category = 0x101F8766, state = 0x41, ui_phase = 0x46 }

@@ -74,8 +74,15 @@ use, and the RI on the host would rasterise on the CPU (and cast pointers to 32-
   fills of each kind (colour, fill rule, edge box, target size and surface, image key);
   `KHR_VGTRACE=N` logs the first N VG/VGU calls by name. Used to show that the N8 boot splash draws
   exactly what its NVG frames contain.
-- Fill limits: multiply/stencil image modes and the multiply/screen/darken/lighten blends are
-  approximations exact for opaque destinations; masks are not applied.
+- Fill limits: the multiply/stencil image modes are approximations exact for opaque destinations;
+  masks are not applied. The multiply, darken and lighten blends are exact (2026-11-18): `vg_fill` copies
+  the target into a texture and blends in the shader with OpenVG's premultiplied formulas. As GL_MIN/MAX
+  per channel, DARKEN into a transparent buffer gave min(c, 0) = 0. alf builds the backdrop behind every
+  Belle popup menu that way: it dims a copy of the screen with vgColorMatrix (0.4 c - 0.15), then darkens
+  it into an empty render buffer. So the backdrop was black (test: `tests/glserver_test.py`, "VG darken
+  over transparent"). SCREEN, ADDITIVE and the Porter-Duff modes stay on GL blending (exact).
+- `SYBORG_VG_TRACE=1` also logs each upload and read-back of a large image with its centre pixel, and
+  each vgColorMatrix's matrix (how the backdrop was traced).
 - Not saved in snapshots: a restored N8 session shows a black screen (docs/sydb.md "Catch,
   snapshots and forks"; fix in docs/gpu-host-review.md 1.1).
 - Host objects are kept per process (the owner id) in hash tables; the display driver frees a

@@ -311,17 +311,27 @@ extern "C" int syvg_vg_call(uint32_t owner, const uint32_t *a, size_t n, uint32_
 			memcpy(out + 1, str, len);
 		r = 0;
 	} else {
-		static int trace = -1;          /* SYBORG_VG_TRACE=1: draws and clears with their target surface */
+		static int trace = -1;          /* SYBORG_VG_TRACE=1: draws and clears with their target surface; 2: every call */
 		if (trace < 0)
-			trace = getenv("SYBORG_VG_TRACE") && *getenv("SYBORG_VG_TRACE") == '1';
-		if (trace && (fn == VG2_FN_vgClear || fn == VG2_FN_vgDrawImage || fn == VG2_FN_vgDrawPath ||
-		              (fn == VG2_FN_vgSetfv && n >= 3 && a[2] == VG_CLEAR_COLOR))) {
+			trace = getenv("SYBORG_VG_TRACE") ? atoi(getenv("SYBORG_VG_TRACE")) : 0;
+		if (trace == 2 || (trace == 1 && (fn == VG2_FN_vgClear || fn == VG2_FN_vgDrawImage || fn == VG2_FN_vgDrawPath ||
+		              (fn == VG2_FN_vgSetfv && n >= 3 && a[2] == VG_CLEAR_COLOR)))) {
 			char b[96];
 			fprintf(stderr, "syvg: VG owner %u thread %u fn %d args %x %x %x %x %x %x %x -> %s\n", owner, a[1], fn,
 			        n > 2 ? a[2] : 0, n > 3 ? a[3] : 0, n > 4 ? a[4] : 0, n > 5 ? a[5] : 0, n > 6 ? a[6] : 0,
 			        n > 7 ? a[7] : 0, n > 8 ? a[8] : 0, syvg_vg_target(owner, a[1], b, sizeof(b)));
 		}
 		r = dispatch(fn, a + 2, n - 2);
+		if (trace && fn == VG2_FN_vgColorMatrix && n >= 5) {
+			GuestBuf mb(a[4], 80, true);
+			if (mb.ok()) {
+				const float *m = (const float *)mb.host();
+				fprintf(stderr, "syvg: colour matrix");
+				for (int i = 0; i < 20; i++)
+					fprintf(stderr, " %g", m[i]);
+				fprintf(stderr, "\n");
+			}
+		}
 	}
 	/* the RI's drawing of this call goes with the batch's next command that is not OpenVG, or at its end
 	   (syvg_vg_flush, phase 3): one host flush for a run of calls instead of one per call */

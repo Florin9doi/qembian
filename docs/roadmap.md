@@ -28,6 +28,21 @@ Z8/Z10; Symbian 9.1-9.3, EKA2) fit the existing kernel, personalities and tools;
 modem front end, stand-ins and a firmware container reader. UIQ 2 (P800/P900/P910, EKA1) is out of
 scope. [docs/uiq.md](uiq.md).
 
+**SE P1i: Bluetooth controller (open work, 2026-11-17).** The P1i boots to its home screen, but c32's port handler
+panics `!PortHandler 4` at first boot ("Application closed" note; the phone runs on). Cause: no Bluetooth stack.
+bt.prt loads erihci.dll (`z:\private\101F7989\Esock\bt.bt.esk`: `hcidllfilename= erihci.dll, port= 6`), erihci opens
+the LDD BTDRV (`btdrv.ldd`), which our hybrid lacks and whose phone binary needs SE's UART layer (ecust.dll,
+GPIODRIVER.LDD). The port handler's set-up (porthandlersvr.dll 0x831c -> 0xa8c8 -> 0xa79c) then fails on
+`RHCIDirectAccess::Open` and `RSdp::Connect` (-1) and leaves. To do: a `btdrv.ldd` stand-in (factory BtDrvDRV;
+requests 0 read, 1 write one frame <= 2048 bytes, 2 signal notify, 3, 4; controls 0..10) forwarding H4-like HCI frames
+to a host-side responder: Command Complete status 0 with fixed parameters for the init set (Reset 0x0C03, Read Local
+Version 0x1001, Features 0x1003, BD_ADDR 0x1009, Buffer Size 0x1005, Class of Device, Local Name, Scan Enable,
+timeouts, event mask/filter, host buffer size), plus erihci's vendor commands for the Philips BGB203/204 patch
+download (0xFC0F, 0xFC22, 0xFC2B; handlers at 0xf83079bc / 0xf8307fb6) and its hardware-type query to the CCPU
+(ccpustorage.dll / OpaClient). Estimate 1-2 days with tests. Not working (tried): NOPing the port handler's leaves
+(it then uses the unopened HID session, KERN-EXEC 0); `BtBearer.ph` = 0. Details: docs/research/p1i-bluetooth.md,
+docs/devices/se-p1i/bring-up.md item 27.
+
 ## Option 1 work plan
 
 | Step | Content | Exit criterion |
@@ -207,8 +222,9 @@ real N95-family driver; scanning out the video RAM directly showed every redraw 
 the 5800/5230, owner-confirmed "drastically better"). Enabled (`config = { panel = 1 }` on `d_display`) where logs
 show steady ctl 9 traffic: N95, N95 8GB, E5-00, N97, E52, 5730, N79, E72 (+ 5800, 5230).
 
-Not enabled, to check when they run well enough: E71 (rm346), N81 8GB (rm179), N73 (rm132), N86 (rm484), 6720
-(rm424). Their logs had 0-3 ctl 9 calls (short or missing runs). Check: `grep -c "ctl 9 " <session>/serial.log`
+2026-11-17: N86 enabled (748 ctl 9 in 160 s; verified on a clone). N73 ME posts whole-screen ctl 8 steadily (1010 in
+6 min) - a candidate, not enabled (its boot is slow, not verified). Not enabled, to check when they run well enough:
+E71 (rm346), N81 8GB (rm179), N73 (rm132), 6720 (rm424). Their logs had 0-3 ctl 9 calls (short or missing runs). Check: `grep -c "ctl 9 " <session>/serial.log`
 after a minute of UI use; steady calls -> add `config = { panel = 1 }` to the profile's d_display entry and the
 device to tests/device_py_test.py. Caution: with the panel on, a phone whose WSERV does not post with ctl 9 would
 keep showing its first frame. GPU phones (N8, 701, 808) compose on the host and stay off.

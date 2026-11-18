@@ -5,6 +5,7 @@ target			VariantTarget(accelerometer,ldd)
 linkas			accelerometer.ldd
 targettype		ldd
 userinclude		../../specific		// syborg.h: KHwBaseSensor, ReadReg
+userinclude		../_shared			// boardconfig.h: accelerometer.protocol
 sourcepath		.
 source			accelerometer.cpp
 noexportlibrary

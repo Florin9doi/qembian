@@ -20,7 +20,7 @@ if [ -z "${SYBORG_IN_CONTAINER:-}" ]; then
   # from the patched syborg baseport every time so they never drift from it (host python3)
   python3 -I "$ROOT/tools/baseport_variant.py" syborgmv --memmodel moving --cpu arm926
   python3 -I "$ROOT/tools/baseport_variant.py" syborgfx --memmodel flexible --cpu arm1176 --unaligned
-  python3 -I "$ROOT/tools/baseport_variant.py" syborg6k --memmodel multiple --cpu arm1176
+  python3 -I "$ROOT/tools/baseport_variant.py" syborg6k --memmodel multiple --cpu arm1176 --unaligned
   exit 0
 fi
 cd /work

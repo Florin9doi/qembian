@@ -461,6 +461,16 @@ static bool UploadFast(const Image *img, int y0, int rows, unsigned int *out)
 	return true;
 }
 
+/* SYBORG_VG_TRACE (any level): each upload and read-back of a large image with its centre pixel (found the
+   popup backdrop's darken into a transparent buffer, 2026-11-18) */
+static bool PixelTrace()
+{
+	static int on = -1;
+	if (on < 0)
+		on = getenv("SYBORG_VG_TRACE") != NULL;
+	return on;
+}
+
 /* an image as a host texture: uploaded (in bands) when its pixels changed since the last upload;
    GL_RGBA bytes = VG's sABGR_8888_PRE in little-endian words */
 unsigned int khrHostImage(Image *img)
@@ -489,6 +499,9 @@ unsigned int khrHostImage(Image *img)
 		out.removeReference();
 	}
 	img->m_hostGen = gen;
+	if (PixelTrace() && w >= 64 && h >= 64 && img->getDescriptor().bitsPerPixel == 32)
+		fprintf(stderr, "syvg: upload %x %dx%d fmt %x centre %08x\n", vgKey(img), w, h, img->getDescriptor().format,
+		        *(const unsigned int *)(img->getData() + (h / 2) * img->getStride() + (w / 2) * 4));
 	return vgKey(img);
 }
 
@@ -533,6 +546,9 @@ void khrHostSync(const Image *ci)
 		tmp.removeReference();
 	}
 	img->m_hostGen = img->generation();     /* the host texture holds these pixels */
+	if (PixelTrace() && w >= 64 && h >= 64 && img->getDescriptor().bitsPerPixel == 32)
+		fprintf(stderr, "syvg: readback %x %dx%d fmt %x centre %08x\n", vgKey(img), w, h, img->getDescriptor().format,
+		        *(const unsigned int *)(img->getData() + (h / 2) * img->getStride() + (w / 2) * 4));
 	if (img->m_hostLive)
 		img->m_hostAhead = true;            /* still being rendered into */
 }

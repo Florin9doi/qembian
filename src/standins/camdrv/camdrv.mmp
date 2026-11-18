@@ -1,0 +1,12 @@
+// Sony Ericsson P990i camdrv.ldd stand-in (see tablestub.h)
+#include "../../variant.mmh"
+#include <kernel/kern_ext.mmh>
+target			VariantTarget(camdrv,ldd)
+linkas			camdrv.ldd
+targettype		ldd
+sourcepath		.
+source			camdrv.cpp
+noexportlibrary
+vendorid		0x70000001
+capability		all
+userinclude		../_shared	// src/standins/_shared: tablestub.h

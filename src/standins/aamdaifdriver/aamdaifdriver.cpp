@@ -2,7 +2,7 @@
 // uses only DoControl. Sound: each stream type's ring in the DSP window is played by syborg-snd (slot =
 // stream type), paced by the fake modem's F3 0x35 replies on the host's playback clock.
 // Protocol: docs/devices/nokia-5730-rm465/rapido-audio.md.
-#include "nokiastub.h"
+#include "tablestub.h"
 #include <platform.h>
 #include <kernel/kern_priv.h>
 #include <memmodel/epoc/platform.h>
@@ -251,4 +251,4 @@ static TInt MdaifCtl(DThread* aClient, TInt aFn, TAny* a1, TAny*, const TUint32*
 	}
 
 NO_CONTROLS
-NOKIA_STUB_LDD_CTLHOOK("MdaifDriver", KCtl, ETrue, MdaifCtl)
+TABLE_STUB_LDD_CTLHOOK("MdaifDriver", KCtl, ETrue, MdaifCtl)

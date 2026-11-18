@@ -773,7 +773,11 @@ EGLBoolean sy_eglSwapInterval(EGLDisplay d, EGLint aInterval)
 
 static void blit(SyThread* t, SySurface* s, int wx, int wy, int x0, int y0, int x1, int y1)
 	{
-	int sw = (sy_display_rotation(t) & 1) ? 240 : 320, sh = sw == 240 ? 320 : 240;
+	/* the screen at WSERV's rotation: portrait at odd indexes (the N95's 3), landscape at even ones; its sides come
+	   from the profile (SYGL_SCREEN_LONG/SHORT, src/sygl/build.sh): a fixed 320x240 drew only that corner of the E90's
+	   800x352 screen (2026-11-17) */
+	int sw = (sy_display_rotation(t) & 1) ? SYGL_SCREEN_SHORT : SYGL_SCREEN_LONG;
+	int sh = sw == SYGL_SCREEN_SHORT ? SYGL_SCREEN_LONG : SYGL_SCREEN_SHORT;
 	if (x0 < wx) x0 = wx;
 	if (y0 < wy) y0 = wy;
 	if (x1 > wx + s->w) x1 = wx + s->w;
@@ -784,6 +788,14 @@ static void blit(SyThread* t, SySurface* s, int wx, int wy, int x0, int y0, int 
 	if (y1 > sh) y1 = sh;
 	for (int yy = y0; yy < y1; ++yy)
 		memcpy((u8*)t->fb + yy * t->fbPitch + x0 * 4, s->color + (yy - wy) * s->w + (x0 - wx), (unsigned)(x1 - x0) * 4);
+	if (x1 > x0 && y1 > y0)
+		{
+		/* post the rect to the panel, as WSERV posts its updates (DisplayDriver ctl 9): with d_display.panel = 1
+		   the panel shows only posted rects, so a frame written into the video RAM alone stayed invisible
+		   (bug 2026-11-17: the N95's Carousel drew its first frame and the screen kept the home screen) */
+		u32 r[2] = { (u32)x0 | (u32)(x1 - x0) << 16, (u32)y0 | (u32)(y1 - y0) << 16 };
+		sy_display_ctl(t, 9, r);
+		}
 	}
 
 /* present: copy the surface into the frame buffer, inside the window's visible region from direct

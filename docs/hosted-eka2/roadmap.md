@@ -390,3 +390,22 @@ Leads: answer `vgGetMatrix` (and other pure state queries) in the guest without 
   the gate. huirenderpluginvg's only extension name, EGL_NOK_window_type_eglwindowbase, picks the window surface's
   native type (eglwindow.dll vs RWindow), not offscreen rendering. Open: what makes it render Avkon windows in
   software (a config/central-repository setting, a capability query, or the ROM's normal path).
+- 2026-11-13, later: the 808 asks eglGetProcAddress for 16 functions at start-up (endpoints, syncs, profiling,
+  eglDestroyImageKHR, vgCreateEGLImageTargetKHR, glEGLImageTargetTexture2DOES) and gets every one; it never asks
+  for eglCreateImageKHR. With the extension experiment above: no missing EGL function or extension makes it
+  upload; its compositor chooses that path (firmware configuration). The N8 Delight on the same host EGL renders
+  its drawer into offscreen pbuffers (eglCreatePbufferFromClientBuffer x40, 0 uploads, 33 frames a pull).
+  Next: compare the compositor's settings (central repository) between N8 Belle Refresh and the 808.
+- Compositor settings compared statically (808 vs stock N8 Belle Refresh): the UI accelerator toolkit repository
+  (private/10202be9/10283344.txt, owner 0x10282845) is identical. GOOM's config differs: the 808 runs GOOM inside
+  EwSrv (Private/10003b20/goomconfig.xml) with the ALF OOGM plugin (2003DEB3, sw_rend="supported"), the N8 runs it in
+  akncapserver without it. Tried forcing it off (an equal-length ROFS patch to sw_rend="not_supported"): the drawer
+  still uploads a full image per frame and creates no pbuffers. Not the switch; reverted. Untried: the stock N8
+  Belle Refresh (111.040) under the same measurement (is the offscreen path the Delight CFW's or the N8 line's?).
+- Factory-fresh boots (QEMU, SYBORG_GL_STATS, first ~2.5 min to the first-boot wizard): stock N8 Belle Refresh
+  111.040: eglCreatePbufferFromClientBuffer x68, vgImageSubData x80 (3.3 Mpixels), vgDrawImage x1848 (offscreen VG
+  images, as the Delight). 808: eglCreatePbufferFromClientBuffer x0, vgImageSubData x737 (160 Mpixels). So the
+  offscreen path is the N8 firmware line's, not the Delight CFW's, and the 808's uploads do not come from its stored
+  state. Lead (renderer comparison by another session): the 808's huirenderpluginvg imports eglwindow.dll
+  (REglWindowBase, 7 ordinals) and ws32, the N8's does not; our guest EGL answers that interface (src/khr/eglos.cpp).
+  Next: name those ordinals and log what our glue answers.

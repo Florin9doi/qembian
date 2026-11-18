@@ -1,0 +1,27 @@
+# Firmware 300.34.84 of nokia-e90-ra6, written by tools/device.py firmware-add from the ROM store entry RA-6/300.34.84.
+# Merged over models/nokia-e90-ra6/model.toml. Not booted yet unless [status] says so.
+
+[firmware]
+version = "300.34.84"
+
+[[firmware.files]]
+role = "core"
+glob = "ra6_300.34.84_prd.c00"
+
+[[firmware.files]]
+role = "rofs2"
+glob = "ra6_300.34.84_prd.v16"
+
+[[firmware.files]]
+role = "uda"
+glob = "ra6_300.34.84.01U"
+drive = "C"
+optional = true
+
+[firmware.identity]
+sw = { version = "300.34.84", date = "27-08-2008", type_code = "RA-6" }
+
+[status]
+level = "L0-untested"
+updated = "2026-11-17"
+open = ["not booted on this firmware yet"]

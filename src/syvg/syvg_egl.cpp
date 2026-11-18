@@ -1,3 +1,4 @@
+#include "syvg_profiling.h"
 #include <array>
 /*
  * syvg: the phone's EGL, on the host (docs/devices/nokia-n8-rm596/gles-host.md, egl-vg-host-v2.md; protocol
@@ -604,11 +605,8 @@ extern "C" int syvg_egl_call(uint32_t owner, const uint32_t *w, size_t n, uint32
 			return -1;
 	}
 	Thread &t = T();
-	{
-		extern uint64_t syvg_egl_fn_count[64];      /* SYBORG_GL_STATS: every EGL call by function (syborg_gl.c) */
-		if (w[0] < 64)
-			syvg_egl_fn_count[w[0]]++;
-	}
+	if (w[0] < 64)
+		syvg_egl_fn_count[w[0]]++;			/* SYBORG_GL_STATS: every EGL call by function (syborg_gl.c) */
 	if (w[0] != EGL2_FN_GetError)
 		t.err = EGL_SUCCESS;
 	switch (w[0]) {                     /* S6: a budget of EGL objects per process */
@@ -1191,6 +1189,8 @@ extern "C" int syvg_egl_call(uint32_t owner, const uint32_t *w, size_t n, uint32
 			egl = egl || !strcmp(e, name);
 		if (egl) {
 			r = 3;
+			if (getenv("SYBORG_GL_STATS"))
+				fprintf(stderr, "syvg: eglGetProcAddress(%s) -> 3 (EGL extension)\n", name);
 			break;
 		}
 		/* which API's stub: the current OpenGL ES context's when it has the function, else the one that has it */
@@ -1199,6 +1199,8 @@ extern "C" int syvg_egl_call(uint32_t owner, const uint32_t *w, size_t n, uint32
 		if (t.ctx[0] && c != p.ctxs.end())
 			cur = c->second.version;
 		r = (has & 2) && cur == 2 ? 2 : (has & 1) ? 1 : (has & 2) ? 2 : 0;
+		if (getenv("SYBORG_GL_STATS"))      /* which extension functions the guest asks for, and our answer */
+			fprintf(stderr, "syvg: eglGetProcAddress(%s) -> %u\n", name, r);
 		break;
 	}
 	case EGL2_FN_QueryProfilingDataNOK: {   /* dpy, query_bits, data*, data_size, data_count* */
@@ -1209,23 +1211,19 @@ extern "C" int syvg_egl_call(uint32_t owner, const uint32_t *w, size_t n, uint32
 			r = fail(EGL_BAD_PARAMETER);
 			break;
 		}
-		/* the layout the guest's memory monitor (GOOM) parses: TOTAL, USED (global bit); per process
-		   PROCESS_ID (64 bits as two words, low first), PRIVATE and SHARED bytes (memory-usage bit) */
-		std::vector<EGLint> v;
+		/* EGL_NOK_resource_profiling, in the layout the graph ics-memory monitor (GOOM) parses:
+		   token,value pairs. CMemoryMonitor::GetFreeMemory (goommonitor/src/goommemorymonitor.cpp)
+		   looks for TOTAL and USED on *every* query, whatever bits the caller asked for, so they are
+		   always sent: a reply without them reads as "0 bytes free" and GOOM then puts ALF into its
+		   lowest-memory mode (software rendering, a full-screen upload per dirty rect).
+		   Per process (CGOomWindowGroupList::RefreshL): PROCESS_ID (1 word on a 32-bit build),
+		   PRIVATE and SHARED, each as its own token,value pair - no padding words. */
 		uint32_t owners[256];
 		uint64_t bytes[256], used = 0;
 		int np = syborg_gl_mem_usage(owners, bytes, 256, &used);
-		if (a[1] & 0x0001) {
-			v.push_back(0x3070); v.push_back((EGLint)syborg_gl_mem_total());
-			v.push_back(0x3071); v.push_back((EGLint)used);
-		}
-		if (a[1] & 0x0002)
-			for (int k = 0; k < np && k < 256; k++) {
-				v.push_back(0x3072); v.push_back((EGLint)owners[k]); v.push_back(0);
-				v.push_back(0x3073); v.push_back((EGLint)bytes[k]);
-				v.push_back(0x3074); v.push_back(0);
-			}
-		EGLint n = (EGLint)v.size();
+		EGLint v[4 + 256 * SYVG_PROF_WORDS_PER_PROCESS];
+		EGLint n = (EGLint)syvg_profiling_fill((uint32_t)a[1], (uint32_t)syborg_gl_mem_total(),
+			(uint32_t)used, owners, bytes, np, v, (int)(sizeof(v) / sizeof(v[0])));
 		if (a[2]) {
 			n = (EGLint)a[3] < n ? (EGLint)a[3] : n;
 			if (n < 0)
@@ -1236,6 +1234,15 @@ extern "C" int syvg_egl_call(uint32_t owner, const uint32_t *w, size_t n, uint32
 		}
 		if (!putInt(a[4], n))
 			return -1;
+		if (getenv("SYBORG_GL_STATS")) {	/* the stream GOOM parses, and the count we report */
+			char buf[256];
+			size_t o = 0;
+			buf[0] = 0;
+			for (EGLint k = 0; k < n && o < sizeof(buf) - 16; k++)
+				o += snprintf(buf + o, sizeof(buf) - o, " %d", (int)v[k]);
+			fprintf(stderr, "syvg: QueryProfilingDataNOK bits=%d size=%d -> n=%d:%s\n",
+				(int)a[1], (int)a[3], (int)n, buf);
+		}
 		r = 1;
 		break;
 	}

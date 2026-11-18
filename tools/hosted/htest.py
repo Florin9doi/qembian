@@ -129,6 +129,8 @@ def device_standins():
     import device as devmodel
     out = []
     for st in json.loads(raw):
+        if st.get('baseport'):          # a baseport binary under another ROM name: no stand-in source
+            continue
         name = st['name']
         mod = 'S' + ''.join(p.capitalize() for p in re.split(r'[^A-Za-z0-9]+', name) if p)
         rom = '%s.%s' % (st.get('file', name), STANDIN_EXT[st['kind']])
@@ -380,7 +382,7 @@ def build():
                             '-I', os.path.join(SRC, 'include/board'), '-c', core, '-o', o])
             kern.append(o)
         # each module is a separate DLL on the phone: one partial link per module with only its entry
-        # points left global, so modules built from shared sources (iscpeer.inl, nokiastub.h, the NVMemory
+        # points left global, so modules built from shared sources (iscpeer.inl, tablestub.h, the NVMemory
         # driver) keep their own classes and data. Weak (inline/template) definitions stay shared.
         # A module's "exports" are the symbols other modules or the kernel use (media drivers import
         # ELOCD's LocDrv/DMediaDriver, as their DLLs do on the phone).

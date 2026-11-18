@@ -4,6 +4,6 @@
 // (startuphandler.aps) before it starts the start-up animation [V R6E30 boot: KErrNotFound without it].
 // H-p1i-dsp-absent (docs/hacks.md): there is no DSP to boot; controls return KErrNone, requests
 // complete at once with KErrNone, every call is logged ("SYBSTUB:").
-#include "nokiastub.h"
+#include "tablestub.h"
 NO_CONTROLS
-NOKIA_STUB_LDD2("DSP_BOOT_DRV", KCtl, 1, ETrue)
+TABLE_STUB_LDD2("DSP_BOOT_DRV", KCtl, 1, ETrue)

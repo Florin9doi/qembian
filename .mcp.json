@@ -2,7 +2,16 @@
   "mcpServers": {
     "sydb": {
       "command": "python3",
-      "args": ["tools/sydb/sydb.py", "mcp"]
+      "args": [
+        "tools/sydb/sydb.py",
+        "mcp"
+      ]
+    },
+    "registry": {
+      "command": "python3",
+      "args": [
+        "tools/registry_mcp.py"
+      ]
     }
   }
 }

@@ -142,7 +142,8 @@ Surfaces are `GL_RGBA8` holding premultiplied sRGB, the paint colour is converte
 (`syborg_gl.c:744-751`), the colour transform unpremultiplies, applies, repremultiplies (`:234-238`).
 SRC_OVER = `ONE, ONE_MINUS_SRC_ALPHA`, DST_OVER, SRC_IN, DST_IN, SCREEN, ADDITIVE are exact for
 premultiplied colours; MULTIPLY misses the `src * (1 - dst.a)` term and DARKEN/LIGHTEN assume
-both alphas 1, as vg-host.md states. [verified in source] Blending happens in sRGB (non-linear)
+both alphas 1, as vg-host.md states (fixed 2026-11-18: these three blend in the shader against a copy
+of the target; the gap made every Belle popup backdrop black). [verified in source] Blending happens in sRGB (non-linear)
 space, which is what the RI does for an sRGB surface, so results match the reference. One real
 gap: VG_BLEND_SRC disables blending (`:662`) but the cover quad is drawn where the stencil is set,
 so the pixels outside the shape are untouched (correct), while inside the shape MSAA coverage is

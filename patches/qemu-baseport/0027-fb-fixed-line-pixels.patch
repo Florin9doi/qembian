@@ -1,0 +1,43 @@
+LCD HAL: a fixed line length longer than the width (SYBORG_FB_LINE_PIXELS)
+
+The SE P1i's screen driver (ScDv) writes 240-pixel lines into 256-pixel (1024-byte) rows, a hardware pitch,
+whatever HAL reports; with 960-byte lines the UI was smeared (measured on the frame buffer 2026-11-17). An LCD
+HAL build with -DSYBORG_FB_LINE_PIXELS=N reports N*4 as the offset between lines, allocates N*4*height and
+programs the fb ROW_PITCH (as the N95 build does). Used by src/standins/lcd/lcd_semc_p1i.mmp.
+
+--- a/baseport/syborg/fb/syborg_fb.cpp
++++ b/baseport/syborg/fb/syborg_fb.cpp
+@@ -169,8 +169,9 @@
+   WriteReg(iPortAddr, FB_BYTE_ORDER, 0);
+   WriteReg(iPortAddr, FB_PIXEL_ORDER, 0);
+   WriteReg(iPortAddr, FB_INT_MASK, 0);
+-#ifdef SYBORG_FB_N95
+-  // N95: lines are always 320 pixels apart (see AllocateFrameBuffer)
++#if defined(SYBORG_FB_N95) || defined(SYBORG_FB_LINE_PIXELS)
++  // N95: lines are always 320 pixels apart; SYBORG_FB_LINE_PIXELS: the screen driver's fixed line length
++  // (see AllocateFrameBuffer)
+   WriteReg(iPortAddr, FB_ROW_PITCH, iVideoInfo.iOffsetBetweenLines);
+ #endif
+   WriteReg(iPortAddr, FB_ENABLED, 1);
+@@ -285,6 +286,11 @@
+ 	TInt height = ReadReg(iPortAddr, FB_HEIGHT);
+ 	
+ 	TInt vSize = 4*width*height; //*4 as 32bits per pixel
++#ifdef SYBORG_FB_LINE_PIXELS
++	// syborg-pg: a screen driver with a fixed hardware line length longer than the width (SE P1i ScDv: 240-pixel
++	// lines in 256-pixel rows); HAL reports it as the offset between lines and the fb scans out with it
++	vSize = 4*SYBORG_FB_LINE_PIXELS*height;
++#endif
+ #ifdef SYBORG_FB_N95
+ 	// N95 (docs/hacks.md H-lcd-native-landscape): the display driver's scan line is 320 pixels at
+ 	// every rotation (portrait 240x320 uses 240 of them, the landscape picture of the native
+@@ -351,6 +357,9 @@
+ 
+ 	//offset between lines depends on width of screen
+ 	iVideoInfo.iOffsetBetweenLines = width*4;
++#ifdef SYBORG_FB_LINE_PIXELS
++	iVideoInfo.iOffsetBetweenLines = SYBORG_FB_LINE_PIXELS*4;
++#endif
+ #ifdef SYBORG_FB_N95
+ 	iVideoInfo.iOffsetBetweenLines = n95Line*4;
+ #endif

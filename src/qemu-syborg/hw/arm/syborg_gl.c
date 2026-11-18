@@ -159,8 +159,9 @@ struct SyborgGlState {
     GLuint prog, vbo;
     GLuint vgProg;                  /* OpenVG: solid paint (src/khr, vg-host.md) */
     GLint vgSize, vgColor, vgKind, vgMode, vgM0, vgM1, vgM2, vgImgSize, vgTex;
-    GLint vgG, vgR, vgSpread, vgRamp, vgCT, vgCTs, vgCTb;
+    GLint vgG, vgR, vgSpread, vgRamp, vgCT, vgCTs, vgCTb, vgBlend, vgDst;
     GLuint rampTex;
+    GLuint dstTex;                  /* the target's pixels for the blend modes GL cannot express (vg_fill) */
     uint8_t ramp[RAMP_N * 4];
     GLuint cpProg;                  /* composition */
     GLint cpSize, cpTex, cpFmt, cpAlpha;
@@ -406,6 +407,7 @@ static int gl_init_now(SyborgGlState *s)
             "uniform vec2 uImgSize; uniform sampler2D uTex;\n"
             "uniform vec4 uG; uniform float uR; uniform int uSpread; uniform sampler2D uRamp;\n"
             "uniform int uCT; uniform vec4 uCTs, uCTb;\n"
+            "uniform int uBlend; uniform sampler2D uDst; uniform vec2 uSize;\n"
             "vec4 ct(vec4 c) {\n"
             "  if (uCT == 0) return c;\n"
             "  vec4 u = c.a > 0.0 ? vec4(c.rgb / c.a, c.a) : vec4(0.0);\n"
@@ -444,7 +446,17 @@ static int gl_init_now(SyborgGlState *s)
             "  else t = 1.0 - abs(mod(t, 2.0) - 1.0);\n"
             "  return texture2D(uTex, t);\n"
             "}\n"
-            "void main() { gl_FragColor = ct(paint()); }\n";
+            /* uBlend 1 multiply, 2 darken, 3 lighten: OpenVG's premultiplied formulas against a copy of the
+               target (uDst), exact for a translucent target too; GL blending is off then */
+            "vec4 blend(vec4 s) {\n"
+            "  if (uBlend == 0) return s;\n"
+            "  vec4 d = texture2D(uDst, gl_FragCoord.xy / uSize);\n"
+            "  vec3 a = s.rgb + d.rgb * (1.0 - s.a), b = d.rgb + s.rgb * (1.0 - d.a);\n"
+            "  vec3 c = uBlend == 1 ? s.rgb * (1.0 - d.a) + d.rgb * (1.0 - s.a) + s.rgb * d.rgb\n"
+            "         : uBlend == 2 ? min(a, b) : max(a, b);\n"
+            "  return vec4(c, s.a + d.a * (1.0 - s.a));\n"
+            "}\n"
+            "void main() { gl_FragColor = blend(ct(paint())); }\n";
         GLuint v = compile(GL_VERTEX_SHADER, vvs), f = compile(GL_FRAGMENT_SHADER, vfs);
         s->vgProg = glCreateProgram();
         glAttachShader(s->vgProg, v);
@@ -467,6 +479,14 @@ static int gl_init_now(SyborgGlState *s)
         s->vgCT = glGetUniformLocation(s->vgProg, "uCT");
         s->vgCTs = glGetUniformLocation(s->vgProg, "uCTs");
         s->vgCTb = glGetUniformLocation(s->vgProg, "uCTb");
+        s->vgBlend = glGetUniformLocation(s->vgProg, "uBlend");
+        s->vgDst = glGetUniformLocation(s->vgProg, "uDst");
+        glGenTextures(1, &s->dstTex);
+        glBindTexture(GL_TEXTURE_2D, s->dstTex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glGenTextures(1, &s->rampTex);
         glBindTexture(GL_TEXTURE_2D, s->rampTex);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, RAMP_N, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
@@ -1240,6 +1260,12 @@ static void vg_color(GLint u, uint32_t argb)
                 (argb >> 24) / 255.0f);
 }
 
+/* the blend modes vg_fill does in the shader: 1 multiply, 2 darken, 3 lighten (0: GL blending) */
+static int vg_shader_blend(uint32_t mode)
+{
+    return mode == 0x2005 ? 1 : mode == 0x2007 ? 2 : mode == 0x2008 ? 3 : 0;
+}
+
 /* premultiplied colours; the VG blend modes GL's fixed blending can express (multiply, screen,
    darken and lighten are exact for an opaque destination) */
 static void vg_blend(uint32_t mode)
@@ -1273,6 +1299,7 @@ static void vg_use(SyborgGlState *s, GlSurf *g)
     glUseProgram(s->vgProg);
     glUniform2f(s->vgSize, g->w, g->h);
     glUniform1i(s->vgKind, 0);
+    glUniform1i(s->vgBlend, 0);
     glDisableVertexAttribArray(1);
     glDisableVertexAttribArray(2);
     glBindBuffer(GL_ARRAY_BUFFER, s->vbo);
@@ -1506,6 +1533,17 @@ static int vg_fill(SyborgGlState *s, const uint32_t *a, size_t n)
         miny = MIN(miny, MIN(e[1], e[3])); maxy = MAX(maxy, MAX(e[1], e[3]));
     }
     int bx0 = (int)floorf(minx), by0 = (int)floorf(miny), bx1 = (int)ceilf(maxx), by1 = (int)ceilf(maxy);
+    /* multiply, darken, lighten: GL's fixed blending is exact only over an opaque target (DARKEN as GL_MIN made
+       alf's popup backdrop black: its dimmed screen copy darkened into a transparent buffer gave min(c, 0) = 0,
+       2026-11-18). The shader blends against a copy of the target instead. */
+    int sb = vg_shader_blend(blend);
+    if (sb) {
+        bind_read(g);
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D, s->dstTex);
+        glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 0, 0, g->w, g->h, 0);
+        glActiveTexture(GL_TEXTURE0);
+    }
     vg_use(s, g);
     /* stencil pass */
     scissor(g, bx0, by0, bx1, by1);
@@ -1526,7 +1564,13 @@ static int vg_fill(SyborgGlState *s, const uint32_t *a, size_t n)
     glDrawArrays(GL_TRIANGLES, 0, ne * 3);
     /* cover pass: where the stencil says inside (even-odd: odd count), resetting it */
     glColorMask(1, 1, 1, 1);
-    vg_blend(blend);
+    if (sb) {
+        glDisable(GL_BLEND);
+        glUniform1i(s->vgDst, 2);
+    } else {
+        vg_blend(blend);
+    }
+    glUniform1i(s->vgBlend, sb);
     vg_color(s->vgColor, argb);
     if (kind >= 3) {
         const float *m = (const float *)pb, *gp = (const float *)(pb + 11);

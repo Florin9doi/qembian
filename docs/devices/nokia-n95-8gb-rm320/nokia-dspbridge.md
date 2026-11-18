@@ -79,14 +79,14 @@ missing manager token in reply 1 (not a handle the stub must return).
 
 ## 4. Stand-in design for `ehwa.cpp`
 
-Control hook (`NOKIA_STUB_LDD_CTLHOOK`) plus per-channel state. The hook gets `aClient`, `a1`,
+Control hook (`TABLE_STUB_LDD_CTLHOOK`) plus per-channel state. The hook gets `aClient`, `a1`,
 `a2` and the first 4 words; it reads larger blocks itself. State: a DCD table (96 entries of
 `{uuid[16], type, path TBuf16<256>}`), the upload `DChunk*`, optional shared-buffer chunk. Keep
 `completeRequests = ETrue` (no `DoRequest` is used by this path).
 
 ```cpp
 // ehwa.cpp -- "Hwa" DSP bridge stand-in: enough for MmRmServerThread init (docs/nokia-dspbridge.md)
-#include "nokiastub.h"
+#include "tablestub.h"
 #include <memmodel/epoc/platform.h>   // EMapAttr*
 
 struct SDcdEntry { TUint8 iUuid[16]; TInt iType; TBuf16<256> iPath; };
@@ -222,7 +222,7 @@ static TInt HwaCtl(DThread* aClient, TInt aFn, TAny* a1, TAny* a2, const TUint32
 	}
 
 NO_CONTROLS
-NOKIA_STUB_LDD_CTLHOOK("Hwa", KCtl, ETrue, HwaCtl)
+TABLE_STUB_LDD_CTLHOOK("Hwa", KCtl, ETrue, HwaCtl)
 ```
 
 Notes:

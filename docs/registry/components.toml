@@ -1,0 +1,302 @@
+# SEED ONLY. Imported once into <build dir>/registry.sqlite3 by `tools/registry.py seed`; after that the
+# database is canonical - change facts there (`registry.py` CLI or the served UI), not here. This file stays
+# in the tree so a fresh checkout can recreate the registry from zero.
+#
+# A component is a *logical role*, independent of any firmware. `binaries` are globs that attribute
+# firmware-specific binaries to it (a binary is per device+firmware+path; the component is not).
+#
+# strategy (see STRATEGY_HELP in tools/registry.py):
+#   retain | build-source | adapt-source | replace-interface | reverse-selected | defer | undecided
+
+[[component]]
+key = "qt"
+title = "Qt 4.7 / QtWebKit (Belle UI toolkit)"
+role = "Qt runtime, QtWebKit, QtScript/Declarative on the phone's UI side; huge dependency fan-in"
+strategy = "undecided"
+source_availability = "available"
+subsystems = ["ui-toolkit", "source-assessment"]
+# family globs on purpose: the Qt stack is one strategy decision, not one per module
+binaries = ["qt*.dll", "qml*.dll", "xq*.dll", "javascriptcore.dll", "webkitengine.dll", "libgstqt*.dll"]
+sources = [
+  { repo = "qt/qt (LGPL 2.1)", revision = "4.7.x-belle?", relation = "related", notes = "Nokia's Belle Qt carries Symbian-specific patches; exact revision and ABI not established" },
+]
+notes = """
+Undecided on purpose - and it must stay that way until a short source/compatibility assessment is done.
+229 modules import QtCore, but that is a dependency fact, not a work order: the phone ships Qt and Qt is
+retainable. The assessment asks: which Qt revision/patches does this firmware use, can it be rebuilt with a
+compatible ABI/ordinal set, and is anything we actually need to change inside it (vs. underneath it)?
+Do not create per-class research tasks here.
+"""
+
+[[component]]
+key = "avkon"
+title = "Avkon / Uikon / CONE (S60 UI framework)"
+role = "S60 UI controls, app framework and window-owning client side (Eikon/Avkon/Uikon/CONE)"
+strategy = "undecided"
+source_availability = "partial"
+subsystems = ["ui-framework", "source-assessment"]
+binaries = ["avkon.dll", "uikon.dll", "cone.dll", "eikcoctl.dll", "eikctl.dll", "eiksrv.dll", "akn*.dll",
+            "eik*.dll", "laf*.dll", "laf*"]
+sources = [
+  { repo = "oss.FCL.sf.os.ui (EPL, partial)", revision = "Symbian^3/Anna-era drop", relation = "related", notes = "source coverage per component is not established" },
+]
+notes = """
+Source exists for part of this stack (EPL drop), but "source exists" is not "this firmware can be rebuilt
+compatibly": the task is a coverage/version assessment, then decide per component whether to retain, build
+or replace the interface. Nothing here is a blanket RE target.
+"""
+
+[[component]]
+key = "wserv"
+title = "Window server (EwSrv, Ws32, graphic drawers)"
+role = "The phone's window server: render-stage pipeline, screen/drawable management, event routing"
+strategy = "undecided"
+source_availability = "partial"
+subsystems = ["wserv", "source-assessment"]
+binaries = ["ewsrv.exe", "ws32.dll", "wsgraphicdrawer.dll", "ws32*.dll", "screen*.dll", "arrowcursor*.dll",
+            "wserv*"]
+sources = [
+  { repo = "oss.FCL.sf.os.graphics (EPL) + Nokia's NGA code", revision = "Symbian^3-era drop", relation = "related", notes = "Belle FP2 deltas unknown; EwSrv.exe itself is a ROFS binary" },
+]
+notes = """
+EPL window-server source is available locally, so the value is in the Belle-specific deltas, not in a
+rewrite. EwSrv.exe is RAM-loaded from ROFS1 and picks its render stage by name ("gce") through ECom
+interface 0x10285A29 - that is the seam to start any WSERV work from.
+"""
+
+[[component]]
+key = "gce-render-stage"
+title = "GCE render stage (WSERV <-> compositor seam)"
+role = "WSERV render stage that drives the GCE compositor: Begin/End, scene elements, surface bookkeeping"
+strategy = "reverse-selected"
+source_availability = "none"
+subsystems = ["composition", "wserv"]
+binaries = ["gcerenderstage.dll"]
+notes = """
+Documented far enough to know the contract (ECom plugin 0x20031CBA, CWsRenderStage + MWsDisplayControl +
+MWsContentReadyForComposition + MWsScene, CGceWrapper owning Gce::CGce and a refcounted surface cache).
+Everything beyond that is answered per question, not explored for its own sake.
+"""
+
+[[component]]
+key = "gce"
+title = "GCE compositor (gce.dll + compositionbackend.dll)"
+role = "Nokia's composition engine and its VideoCore-backed backend"
+strategy = "replace-interface"
+source_availability = "none"
+subsystems = ["composition"]
+binaries = ["gce.dll", "compositionbackend.dll", "vcendpointgce*.dll", "vcbackendserver.dll", "vcdispman*.dll",
+            "alfclosedrs.dll"]
+notes = """
+We replace the backend behind it (src/gcebe) with our own code bound at compositionbackend.dll's entry. The
+open work is the observable contract the caller relies on, not the internals of the backend.
+"""
+
+[[component]]
+key = "tsy-nokia"
+title = "Nokia telephony stack (TSY, ETel server, phone/settings servers)"
+role = "Telephony client side: ETel server, Nokia TSY, SIM/phone/settings services over the modem protocol"
+strategy = "retain"
+source_availability = "none"
+subsystems = ["telephony"]
+binaries = ["nokiatsy.dll", "etelserver.exe", "etel.dll", "phoneserver.exe", "satserver.exe", "saserver.exe",
+            "sastartupservice.exe", "etelmm.dll", "etelgsm.dll"]
+notes = """
+Retained and exercised, not reverse-engineered. It is the *consumer* of the modem model, so it is the oracle
+for the protocol work: when a request hangs, we look at which ETel request never completed.
+"""
+
+[[component]]
+key = "modem-protocol"
+title = "Modem protocol model (ISI/ISC) and the fake baseband"
+role = "The emulated modem's application-facing behaviour: services, SIM, SMS, data, indications, failures"
+strategy = "replace-interface"
+source_availability = "available"
+subsystems = ["telephony", "platform"]
+binaries = ["isaaccessldd.ldd", "iscdriver.*", "iscapi.dll"]
+sources = [
+  { repo = "in-tree", revision = "src/qemu-syborg/hw/arm/syborg_modem_core.c", relation = "exact", recipe = "built into QEMU and hosted EKA2 from the same file" },
+]
+notes = """
+Ours, shared by QEMU and hosted EKA2. Value now is in state/ordering/completion/cancellation semantics and
+in failures we can inject (no SIM, registration loss, timeouts), not in more packet formats.
+"""
+
+[[component]]
+key = "haptics"
+title = "Haptics / vibra: HWRM plugins down to the ISI vibra packet"
+role = "Touch/vibra effects: tactile plugins -> HWRMVibraClient -> HWRMServer -> haptics plugin manager -> packetizer -> ISI 1C 9E to the modem/PMU"
+strategy = "reverse-selected"
+source_availability = "none"
+subsystems = ["ui-feedback", "sensors", "vibra"]
+binaries = ["hwrmhaptics*.dll", "hwrmvibra*.dll", "savibraservice.dll", "vibraadaptation.dll",
+            "hapticsadaptation.dll", "coreaudiovibracontrol.dll", "vibractrl.dll", "tactilevibraplugin.dll",
+            "tactilehapticsplugin.dll", "vibraactionplugin.dll", "HWRMVibraClient.dll", "HWRMServer.exe",
+            "hwrmhapticsserver.exe", "hwrmhapticsclient.dll", "hwrmhapticspacketizer.dll"]
+notes = """
+There is NO vibra LDD/PDD in the 808 firmware (49 ldd/pdd modules, none vibra/haptics): the stack ends in an ISI
+message, 1C 9E, produced by hwrmhapticsvibepacketizerplugin.dll/hapticsadaptation.dll and answered by the
+modem/PMU. So a real vibra device needs no driver stand-in at all - it needs the 1C 9E/1C 9F packet
+understood, a correct success reply, and a QEMU device driven from the ISI handler. Today we answer 1C 9E with
+a failure status, which is what keeps the UI from stalling (platform/isi/replies-bb5.txt: "H-haptics-fail");
+an "OK with an empty packet" reply froze the UI because the plugin waits for effect data.
+"""
+[[component]]
+key = "sensors-hw"
+title = "Sensors (accelerometer, ALS) and their LDD/PDD split"
+role = "Motion/light sensing: original LDD over a replacement PDD"
+strategy = "adapt-source"
+source_availability = "none"
+subsystems = ["sensors"]
+binaries = ["accelerometer*.ldd", "accelerometer*.pdd", "als*.ldd", "als*.pdd", "lightldd.ldd", "lightpdd.pdd",
+            "lightsaiscservice.dll", "sensorserver*.exe", "sensor*.dll"]
+notes = """
+The accelerometer study established the boundary: the original LDD imports only ekern, the PDD pulls in GPIO,
+I2C and power management. So: original LDD + compatible replacement PDD, after checking the kernel ABI.
+"""
+
+[[component]]
+key = "video-core"
+title = "VideoCore / KHRN (EGL, OpenVG, GLES clients)"
+role = "Broadcom's graphics user libraries talking to the VideoCore over a private message protocol"
+strategy = "defer"
+source_availability = "none"
+subsystems = ["graphics", "research"]
+binaries = ["libegl.dll", "libopenvg.dll", "libopenvgu.dll", "libgles_cm.dll", "libglesv1_cm.dll",
+            "libglesv2.dll", "khmangle.dll", "khclient.dll", "khegl_ldd.ldd", "khrn*", "vc*.dll"]
+notes = """
+Deferred with a reason: ~340 private RPC layouts plus Nokia's kernel-side clients. The cheap boundary is the
+stand-in LDD set that keeps every user-side library unmodified; a full VideoCore is a separate research
+track with its own objective and budget.
+"""
+
+[[component]]
+key = "audio-dsp"
+title = "Audio: RAPIDO DSP, DevSound, audio server"
+role = "Playback/record path from the audio server down to the DSP and the audio driver"
+strategy = "replace-interface"
+source_availability = "none"
+subsystems = ["audio"]
+binaries = ["aamdaifdriver.*", "dspbootldd.ldd", "dspcontrolldd.ldd", "extsound*.ldd", "extsound*.pdd",
+            "audioserver.exe", "devsound*.dll", "mmf*.dll", "audio*.dll"]
+notes = """
+The start-up tone (H-startuptone-none) is the visible symptom: the DSP model plays the PCM rings on the guest
+shared chunk and reports stream end. ISI replies for the DSP are already in syborg-modem - reconcile what is
+implemented before planning more.
+"""
+
+[[component]]
+key = "bt-fm"
+title = "Bluetooth HCI + FM combo (and the patches they remove)"
+role = "HCI transport and the FM part of the BT/FM chip, enough for the radio HAL to open a session"
+strategy = "defer"
+source_availability = "none"
+subsystems = ["connectivity", "radio"]
+# Deliberately narrow: broad globs here (bt*.dll, bluetooth*.dll, hci*.dll) shadowed the sharp Bluetooth
+# components below (hciaccess.dll landed in this bucket). The wide BT/FM set stays unassigned until the
+# transport contract splits it; only the modules named in this work item belong here.
+binaries = ["fmradioaudiocontrol.dll", "radiohalserver.dll", "radioadaptationserver.exe"]
+notes = """
+Deferred: two byte patches exist precisely because this is missing (H-fmradio-nosession/none). Public HCI on a
+UART plus a "no signal" FM responder would remove them, but nothing blocks the phone from booting.
+"""
+
+[[component]]
+key = "drive-map"
+title = "Drive map / ROM as-is"
+role = "Our media drivers on the phone's own drive numbers, COMPS/ESTARTCOMP, ROFS replacement"
+strategy = "adapt-source"
+source_availability = "available"
+subsystems = ["platform"]
+binaries = ["estartcomp.txt", "efile.exe", "efsrv.dll", "f32fsy.fsy", "locodrvr.dll", "locodrvr.*"]
+sources = [{ repo = "in-tree", revision = "models/<device>/model.toml [rom]", relation = "exact" }]
+notes = """
+Kernel-side configuration, mostly done; recorded here so the map does not present it as open research.
+"""
+
+[[component]]
+key = "kernel-personality"
+title = "Kernel / EPL personality and exec"
+role = "Our EKA2 kernel, the Symbian exec personality, and the patches that make it look like the phone's own"
+strategy = "adapt-source"
+source_availability = "available"
+subsystems = ["kernel"]
+binaries = ["ekern.exe", "euser.dll", "elf*.dll", "d_*.dll", "platform*.dll", "baseport*", "pal*.dll"]
+sources = [{ repo = "in-tree", revision = "personalities/sym92, src/ekern", relation = "exact" }]
+notes = """
+Anything that fails below the user window lands here. Kernel-side stand-ins and the personality patches are
+the adaptation surface.
+"""
+
+[[component]]
+key = "surface-update"
+title = "Surface update: server + client (gcebe's own dependency)"
+role = "Content-update bookkeeping between a client that pushes frames and the compositor that displays them"
+strategy = "replace-interface"
+source_availability = "none"
+subsystems = ["composition", "wserv"]
+binaries = ["surfaceupdateserver.dll", "surfaceupdateclient.dll"]
+notes = """
+The server is imported by exactly one module in the 808 firmware - compositionbackend.dll, the module src/gcebe
+replaces - and our gcebe.c already links surfaceupdateserver_ord1 and hand-builds a 4-slot
+MCompositionSurfaceUpdate vtable (ApiVersion/InternalVersion/ContentUpdated/Extension, UID 0x10286498) from
+assumption. The client is imported by 63 modules, so its side of the contract is observable. This component
+exists to verify that assumption, not to explore the subsystem.
+"""
+
+[[component]]
+key = "bt-hctl"
+title = "Bluetooth H4+ transport (h4plushciv2_hctl.dll)"
+role = "Client-facing HCI transport: opens the BC02 channel, frames H4+ packets, owns buffers, completes requests asynchronously"
+strategy = "reverse-selected"
+source_availability = "none"
+subsystems = ["connectivity", "bluetooth", "patch-removal"]
+binaries = ["h4plushciv2_hctl.dll", "hctl_base.dll"]
+notes = """
+7468 B, uid3 0x2001cb65; imports euser(59), hctl_base(2), esock(1). This is where the HCTL-to-BC02 contract can be
+recovered cheaply: channel opening, control/request numbers, buffer ownership, async completion, cancellation,
+power/wake and packet framing. It is the first step toward removing the FM byte patches (H-fmradio-none) and
+H-bt-ondemand, but this DLL alone does not remove them.
+"""
+
+[[component]]
+key = "bt-controller-link"
+title = "BC02 LDD + UART PDD (the transport's kernel side)"
+role = "Kernel-side HCI transport: BC02.LDD (logical) over bc02_uart1.PDD (physical: UART, GPIO, DMA, power)"
+strategy = "undecided"
+source_availability = "none"
+subsystems = ["connectivity", "bluetooth", "kernel"]
+binaries = ["BC02.LDD", "bc02_uart1.PDD"]
+notes = """
+BC02.LDD 23012 B imports ekern only (72 refs) - it is an ordinary EKA2 LDD. bc02_uart1.PDD 26856 B imports ekern(58)
+plus egpio(17), dma(6), karap(4), powerresourcemanager(3), i.e. the same platform-driver class that blocked the
+accelerometer PDD. Decision after the HCTL contract: original LDD + replacement PDD, or deeper UART/platform
+emulation. Keep "original user-side binaries without patches" and "original drivers on an emulated SoC" separate.
+"""
+
+[[component]]
+key = "bt-vendor-init"
+title = "Bluetooth controller/vendor initialisation (h4plushciv2_initialisor.dll)"
+role = "Loads controller firmware and runs vendor init over the transport; uses btmanclient, iscapi/isimessage"
+strategy = "defer"
+source_availability = "none"
+subsystems = ["connectivity", "bluetooth"]
+binaries = ["h4plushciv2_initialisor.dll"]
+notes = """
+44640 B, uid3 0x2001cb66, imports commandsevents(7), btmanclient(7), iscapi(7), isimessage(6), bluetooth(5). A later
+obstacle: an emulated controller must survive this initialisation before the stack is usable. Deferred until the
+transport contract exists.
+"""
+
+[[component]]
+key = "bt-hci-access"
+title = "Direct HCI access path used by the radio HAL (hciaccess.dll)"
+role = "Direct HCI access session that the FM radio HAL opens; its failure is what the FM patches work around"
+strategy = "reverse-selected"
+source_availability = "none"
+subsystems = ["connectivity", "bluetooth", "radio"]
+binaries = ["hciaccess.dll"]
+notes = """
+2892 B, uid3 0x200212f2, imports euser(26), esock(3). Follow-up to the HCTL contract: this is the path
+radiohalserver.dll actually opens, so its expectations decide whether a transport-only emulation is enough.
+"""

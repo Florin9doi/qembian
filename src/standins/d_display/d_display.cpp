@@ -1,4 +1,4 @@
-// N95 d_display.ldd stand-in (see nokiastub.h): channel "DisplayDriver" used by the N95's
+// N95 d_display.ldd stand-in (see tablestub.h): channel "DisplayDriver" used by the N95's
 // r_display.dll (CDisplayDriver): scdv.dll (WSERV's screen driver) and, through
 // power_save_display_mode.dll, the screensaver. The real driver is documented in
 // docs/devices/nokia-n95-8gb-rm320/nokia-d_display.md (section 4 = what this stand-in follows). Geometry and the frame buffer
@@ -28,7 +28,7 @@
 //   req 0x23                      display event notification: stays pending (as on the device)
 //   req 0x7f01                    ours (not on the device): complete at the next vsync. Used by the
 //                                 sygl blob's eglSwapBuffers (src/n95gl, hack H-vsync-wait)
-#include "nokiastub.h"
+#include "tablestub.h"
 #include "syborg.h"
 #include "boardconfig.h"
 
@@ -39,6 +39,9 @@ const TInt KMaxCapsWords = 28;		// KCaps below
 static TInt CapsWords = 26;			// d_display.caps
 static TBool NativeLandscape = ETrue;	// d_display.native=landscape|portrait
 static TInt FbPitch = 1280;			// d_display.pitch
+static TInt Screen1W = 0, Screen1H = 0;	// d_display.screen1 = "WxH": a second panel (E90 cover); 0 = one screen
+static TInt PitchTurned = 0;			// d_display.pitch_turned: the stride while the picture is turned a quarter
+										// (portrait panel showing a landscape mode); 0 = FbPitch at every rotation
 static TUint PanelRows = 240;			// d_display.rows
 static TBool PartialCtls = ETrue;		// d_display.partial: controls 3..5 are the partial display mode
 static TBool PanelCopy = EFalse;		// d_display.panel: the panel shows what ctl 8/9 posted (see PanelUpdate)
@@ -52,6 +55,17 @@ static void ReadDisplayConfig()
 	if (BoardConfig("d_display.native", b, sizeof(b)) > 0)
 		NativeLandscape = b[0] == 'l';
 	FbPitch = BoardConfigInt("d_display.pitch", 1280);
+	PitchTurned = BoardConfigInt("d_display.pitch_turned", 0);
+	if (BoardConfig("d_display.screen1", b, sizeof(b)) > 0)
+		{
+		const char* c = b;			// "WxH"
+		while (*c >= '0' && *c <= '9')
+			Screen1W = Screen1W * 10 + (*c++ - '0');
+		if (*c)
+			++c;
+		while (*c >= '0' && *c <= '9')
+			Screen1H = Screen1H * 10 + (*c++ - '0');
+		}
 	PanelRows = BoardConfigInt("d_display.rows", NativeLandscape ? 240 : 320);
 	// the N95/5800 driver's partial (power save) display mode; the N8's driver has none, and Belle's
 	// TV-out behaviour plugin uses control 3 for something else (args 1,0,1,1; it panics on an error)
@@ -91,6 +105,15 @@ static TInt PartialActive;
 static TUint PartialStart, PartialEnd;
 static TBool PartialFullColour;
 static TUint Rotation = 0;
+
+// the stride ScDv draws with (ctl 31) and the frame buffer scans (ROW_PITCH 0: the picture's width x 4) at the current
+// rotation. A portrait panel (6720, E52) draws 240x320 with 960-byte lines and 320x240 (Photos) with 1280: one fixed
+// pitch broke one of them (stripes, 2026-11-17)
+static TInt CurPitch()
+	{
+	TBool turned = NativeLandscape ? (Rotation & 1) == 0 : (Rotation & 1) != 0;
+	return PitchTurned && turned ? PitchTurned : FbPitch;
+	}
 
 // Syborg fb registers (src/qemu-syborg/hw/arm/syborg_fb.c)
 enum { KFbOrientation = 4, KFbPartialStart = 14, KFbPartialEnd = 15, KFbPartialMode = 16 };
@@ -358,13 +381,18 @@ static TInt DisplayCtl(DThread* aClient, TInt aFn, TAny* a1, TAny*, const TUint3
 		return Kern::ThreadRawWrite(aClient, a1, &lin, sizeof(lin));
 		}
 	case 3:		// {startRow, endRow, fullColour}: start < end < panel rows
-		if (aWords[0] >= aWords[1] || aWords[1] >= PanelRows)
+		// the 5730's screensaver passes TRect::iBr.iY, an exclusive bottom: a band down to the last row arrives as
+		// end = panel rows (docs/research/5730-partial-display.md) and was refused with KErrArgument
+		{
+		TUint end = aWords[1] == PanelRows && aWords[0] < aWords[1] ? PanelRows - 1 : aWords[1];
+		if (aWords[0] >= end || end >= PanelRows)
 			return KErrArgument;
-		SetPartial(ETrue, aWords[0], aWords[1], aWords[2] != 0);
+		SetPartial(ETrue, aWords[0], end, aWords[2] != 0);
 		Kern::Printf("SYBSTUB: DisplayDriver partial display panel rows %d..%d %s, rotation %d -> picture %s",
-					 aWords[0], aWords[1], aWords[2] ? "full colour" : "8 colours", Rotation,
+					 aWords[0], end, aWords[2] ? "full colour" : "8 colours", Rotation,
 					 (Rotation & 1) ? "columns" : "rows");
 		return KErrNone;
+		}
 	case 4:
 		SetPartial(EFalse, 0, 0, EFalse);
 		return KErrNone;
@@ -376,7 +404,10 @@ static TInt DisplayCtl(DThread* aClient, TInt aFn, TAny* a1, TAny*, const TUint3
 		return Kern::ThreadRawWrite(aClient, a1, KCaps, CapsWords * sizeof(TUint32));
 	case 31:	// scan-line bytes (r_display export 77 on the N95): the frame buffer stride, as on the
 				// device (N95: 320 x 4 at every rotation; lcd_n95 programs the same pitch)
-		return Kern::ThreadRawWrite(aClient, a1, &FbPitch, sizeof(TInt));
+		{
+		TInt pitch = CurPitch();
+		return Kern::ThreadRawWrite(aClient, a1, &pitch, sizeof(TInt));
+		}
 	case 8:		// update the whole screen (d_display.panel; else the frame buffer is live: nothing to do)
 	case 9:		// update a rect: a1 -> {x | w<<16, y | h<<16}, 0xffff = the whole width / height
 		{
@@ -525,11 +556,11 @@ static TInt PanelUpdate(TInt aX, TInt aY, TInt aW, TInt aH)
 	{
 	if (!PanelSetUp())
 		return KErrNone;			// no panel: the frame buffer stays live (as before)
-	TInt cols = FbPitch / KBpp;
-	if (aX >= cols || aY >= PanelRowsMax)
+	TInt pitch = CurPitch(), cols = pitch / KBpp, rowsMax = PanelBytes / pitch;
+	if (aX >= cols || aY >= rowsMax)
 		return KErrNone;
 	aW = Min(aW, cols - aX);
-	aH = Min(aH, PanelRowsMax - aY);
+	aH = Min(aH, rowsMax - aY);
 	NKern::FMWait(&PanelLock);
 	// the LCD driver may have set BASE again (power up): the panel takes over again, with the new video RAM
 	TPhysAddr base = (TPhysAddr)ReadReg(KHwBaseClcd, KFbBase);
@@ -539,8 +570,8 @@ static TInt PanelUpdate(TInt aX, TInt aY, TInt aW, TInt aH)
 			memcpy(PanelKern, VideoKern, PanelBytes);
 		WriteReg(KHwBaseClcd, KFbBase, PanelPhys);
 		}
-	TInt off = aY * FbPitch + aX * KBpp;
-	for (TInt y = 0; y < aH; ++y, off += FbPitch)
+	TInt off = aY * pitch + aX * KBpp;
+	for (TInt y = 0; y < aH; ++y, off += pitch)
 		memcpy(PanelKern + off, VideoKern + off, aW * KBpp);
 	++PanelUpdates;
 	NKern::FMSignal(&PanelLock);
@@ -639,8 +670,9 @@ static void VsyncDfcFn(TAny*)
 	NKern::FMSignal(&DsbLock);
 	// the frame "goes to the panel": copy into the live frame buffer (with d_display.panel: the video RAM, then
 	// the rect to the panel)
-	TUint8* dst = FbKern + ry * FbPitch + rx * KBpp;
-	for (TInt y = 0; y < rh; ++y, src += pitch, dst += FbPitch)
+	TInt fbPitch = CurPitch();
+	TUint8* dst = FbKern + ry * fbPitch + rx * KBpp;
+	for (TInt y = 0; y < rh; ++y, src += pitch, dst += fbPitch)
 		memcpy(dst, src, rw * KBpp);
 	if (PanelState > 0)
 		PanelUpdate(rx, ry, rw, rh);
@@ -808,13 +840,13 @@ static void DsbEnd(DThread* aClient, TAny* aChannel, TRequestStatus* aStatus, TI
 		SetVsyncIrq(ETrue);
 	}
 
-class DDisplayChannel : public DNokiaStubChannel
+class DDisplayChannel : public DTableStubChannel
 	{
 public:
-	DDisplayChannel(DNokiaStubFactory* aF) : DNokiaStubChannel(aF), iPid(0) {}
+	DDisplayChannel(DTableStubFactory* aF) : DTableStubChannel(aF), iPid(0), iScreen(0) {}
 	virtual TInt DoCreate(TInt aUnit, const TDesC8* aInfo, const TVersion& aVer)
 		{
-		TInt r = DNokiaStubChannel::DoCreate(aUnit, aInfo, aVer);
+		TInt r = DTableStubChannel::DoCreate(aUnit, aInfo, aVer);
 		if (r == KErrNone)
 			{
 			iPid = Kern::CurrentThread().iOwningProcess->iId;	// = the owner id of ctl 0x7f10
@@ -836,6 +868,22 @@ public:
 		DThread* client = &Kern::CurrentThread();
 		switch (aFn)
 			{
+		case 10:		// the screen this channel serves (the window server opens one per screen): 0, or 1 with a
+						// second panel (d_display.screen1, the E90's cover; LCD HAL device 1, patch qemu-baseport 0028)
+			if ((TInt)a1 == 0 || ((TInt)a1 == 1 && Screen1W))
+				{
+				iScreen = (TInt)a1;
+				Kern::Printf("SYBSTUB: DisplayDriver channel %08x serves screen %d", this, iScreen);
+				return KErrNone;
+				}
+			return KErrNotSupported;
+		case 31:		// scan-line bytes of this channel's screen
+			if (iScreen == 1)
+				{
+				TInt pitch = Screen1W * 4;
+				return Kern::ThreadRawWrite(client, a1, &pitch, sizeof(TInt));
+				}
+			break;
 		case 23: return DsbCreate(client, this, a1, (TInt)a2);
 		case 24: return DsbBegin(client, a1);			// every frame: not logged
 		case 25: return DsbRelease(this);
@@ -858,17 +906,18 @@ public:
 			DsbCancelPending(this, KErrCancel);
 			break;
 			}
-		return DNokiaStubChannel::Request(aFn, a1, a2);
+		return DTableStubChannel::Request(aFn, a1, a2);
 		}
 private:
 	TUint32 iPid;		// the process that opened the channel
+	TInt iScreen;		// ctl 10: 0, or 1 (the second panel)
 	};
 
-class DDisplayFactory : public DNokiaStubFactory
+class DDisplayFactory : public DTableStubFactory
 	{
 public:
 	DDisplayFactory(const TDesC& aName)
-		: DNokiaStubFactory(aName, KCtl, sizeof(KCtl) / sizeof(KCtl[0]), ETrue, ETrue, DisplayReq, DisplayCtl) {}
+		: DTableStubFactory(aName, KCtl, sizeof(KCtl) / sizeof(KCtl[0]), ETrue, ETrue, DisplayReq, DisplayCtl) {}
 	virtual TInt Install()
 		{
 		static TBool bound = EFalse;	// later loads of the LDD create (and drop) more factories
@@ -885,7 +934,7 @@ public:
 			bound = r == KErrNone;
 			Kern::Printf("SYBDSB: vsync interrupt %d, refresh %d Hz", r, ReadReg(KHwBaseClcd, KFbRefreshRate));
 			}
-		return DNokiaStubFactory::Install();
+		return DTableStubFactory::Install();
 		}
 	virtual TInt Create(DLogicalChannelBase*& aChannel)
 		{

@@ -26,3 +26,7 @@ tools/probes/*/libs/
 # Android native build outputs (android/native/build.sh)
 build/android/
 downloads/android/
+
+# firmware binaries never go into models/ (proprietary; build/evidence is the place)
+models/**/*.dll
+models/**/*.exe

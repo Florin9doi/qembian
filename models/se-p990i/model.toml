@@ -1,0 +1,324 @@
+# Sony Ericsson P990i: UIQ 3.0 on Symbian 9.1, the P1i's predecessor on the same platform (PNX4008 + Ericsson CCPU).
+# Started 2026-11-17 from the P1i profile (models/se-p1i): what is not yet checked for the P990i is marked [I P1i].
+# Firmware formats: docs/semc-firmware.md; bring-up log: docs/devices/se-p990i/bring-up.md.
+# Evidence tags: [V] checked against the firmware or a run, [I] inferred.
+schema = 2
+family = "semc-uiq3"
+
+[device]
+id = "se-p990i"
+vendor = "Sony Ericsson"
+model = "P990i"
+type_code = "SE-P990i"                       # tools/fw/semc.py: no type designator in SE firmware
+aliases = ["p990i", "p990"]
+market = "global"
+
+[platform]
+os_version = "9.1"
+ui = "uiq-3.0"
+personality = "sym91r"                     # sym91 (EUser SWI sequence identical to the N73's [V probe.py stubs])
+                                           # with the 9.2 TLS calls of an RVCT EUSER (personalities/sym91r/README.md)
+soc = "pnx4008"                            # Philips Nexperia PNX4008, ARM926EJ-S 208 MHz, PowerVR MBX [I spec sheets]
+
+# ---------------------------------------------------------------------------------------------
+[firmware]
+default = "R6E28"
+container = "semc"                         # tools/fw/semc.py: plain XIP core + ROFS1 + ROFx + customer ROFS + FAT C:
+
+[firmware.identity]
+drivers = ["lcd_ctrl.ldd", "vtcaifdrv.ldd"]
+no_drivers = []
+
+[firmware.rom]
+base = 0xF8000000                          # TRomHeader iRomBase [V]: moving memory model
+kernel_data = 0x64000000                   # [V]
+memory_model = "moving"                    # seven fixed processes (efile, SettingSvr, centralrepositorysrv, EventSvr,
+                                           # c32exe, AtServer, EComServer) [V probe.py header]
+paged = false
+
+# ---------------------------------------------------------------------------------------------
+[board]
+cpu = "arm926"                             # ARM926EJ-S
+ram_mb = 132                               # 128 MB on the phone [I spec sheets]; the XIP core is in NAND there, RAM here
+ram_mb_real = 128
+
+[board.display]
+width = 240                                # 2.8" 240x320 [I spec sheets; wsini.ini to check]
+height = 320
+native_orientation = "portrait"
+line_pitch = 1024                          # SE ScDv writes 240-pixel lines into 1024-byte rows (256 px; measured on the frame buffer 2026-11-17: 960 smeared the UI)
+panel_rows = 320
+touch = true                               # resistive touch: exyin.dll on the phone, our exyin stand-in
+touch_rate_hz = 60                         # [I] as the 5800
+
+[board.flash]
+size_mb = 128
+
+# Drives: the P1i's own ESTART.TXT [V]: C: 0 NAND user data (FAT), D: 1 Memory Stick, E: 2 IRAM,
+# Z: 7 ROFS1 (+ROFx) and Z: 8 ROFS2 (customer). Ours: C: NVMemory 1, D: second NVMemory 2, E: IRAM 0,
+# Z: composite drives 8 and 9 (medrofs v2, one partition each).
+[[board.drives]]
+letter = "C"
+local_drive = 1
+kind = "nvmem"
+image = "nvmemory.img"
+size = "160M"                              # the user data FAT32 is 160 MB [V EPOC_Trade_Russia boot sector]
+flags = "FS_FORMAT_CORRUPT,FS_SCANDRIVE"
+
+[[board.drives]]
+letter = "D"
+local_drive = 2
+kind = "nvmem2"
+image = "nvmemory2.img"
+size = "1G"
+removable = true
+format = "fat"                             # an empty card: SE's start-up does not format it (a blank image gave the
+                                           # "Memory corrupt D:" note on every boot)
+flags = "FS_FORMAT_CORRUPT,FS_SCANDRIVE"   # Memory Stick Micro (M2) slot
+
+[[board.drives]]
+letter = "E"
+local_drive = 0
+kind = "iram"
+flags = "FS_FORMAT_COLD,FS_SYNC_DRIVE"
+
+[[board.drives]]
+letter = "Z"
+local_drive = 8
+kind = "composite"
+flags = "FS_COMPOSITE"
+
+[[board.drives]]
+letter = "Z"
+local_drive = 9
+kind = "composite"
+flags = "FS_COMPOSITE"
+
+# ---------------------------------------------------------------------------------------------
+[hardware]
+wlan = true
+bluetooth = true
+camera = { main_mp = 2.0, front = true }     # [I spec sheets]
+fm_radio = true
+gps = false
+accelerometer = false
+slides = ["flip"]                          # the keypad flip: closed = phone keypad + softkey UI on the top 240x256 (wsini
+                                           # screen mode 4), open = QWERTY + pen UI on 240x320 (flip.dll, H-p990i-flip)
+leds = ["display-backlight"]
+memory_card = true                         # Memory Stick Duo [I spec sheets]
+mass_memory_gb = 0
+tv_out = false
+dsp = "philips"
+gpu = "powervr-mbx"
+
+# ---------------------------------------------------------------------------------------------
+[kernel]
+baseport = "syborgmv"                      # moving memory model, ARM926, no VFP (as the N73)
+place = "after-firmware"                   # kernel-side and user-side files are interleaved in the core [V]
+patchsets = ["platform", "sym92", "sym91", "policy"]
+missing_drivers = []                       # filled from the first boots
+omit_baseport = ["epointer.dll"]            # Syborg mouse driver: the exyin stand-in owns the pointer device
+
+[kernel.lcd]
+target = "lcd_semc_p1i"                       # 256-pixel rows (SYBORG_FB_LINE_PIXELS, patch 0027)
+
+[[standins]]
+name = "halke"
+kind = "ldd"
+family = "semc"
+role = "HALKE: HAL attributes 0..7 for Hal.dll (control 0), the HAL.DAT restore of EStart (controls 1, 2)"
+# Z:\resource\apps\ProductInfo.ini of R6E28 [V]: EManufacturer, hardware rev (commented out there as on the P1i:
+# Hermione FP2.1 0x2104 [I]), software rev 5, build 0, EModel 0x503DE69F "P990i", EMachineUid 0x1020E285
+# (KUidModelHermione), EDeviceFamily 0x10274BD1, family rev 0
+config = { attr0 = 270494957, attr1 = 8452, attr2 = 5, attr3 = 0, attr4 = 1346234015, attr5 = 270590597, attr6 = 271010769, attr7 = 0 }
+
+[[standins]]
+name = "bridgedrv"
+kind = "ldd"
+family = "semc"
+role = "BridgeDRV: CCPU packet link under caifmux.csy; CAIF link layer + first BridgeServer replies (caifpeer.h), logs OPA (SYBCAIF:)"
+
+[[standins]]
+name = "gpiodriver"
+kind = "ldd"
+family = "semc"
+role = "GPIODRIVER: GPIO/I2C expander channel of EStart, APS, Hal.dll; logs, controls 0, requests pending"
+
+[[standins]]
+name = "lcdctrl"
+file = "lcd_ctrl"
+kind = "ldd"
+family = "semc"
+role = "LCDCTRL: LCD controller channel of Hal.dll, startuphandler.aps, lcdhandler.aps; logs, controls 0, requests pending"
+
+[[standins]]
+name = "dspbootldd"
+kind = "ldd"
+family = "semc"
+role = "DSP_BOOT_DRV: DSP boot by APS (startuphandler.aps); no DSP, everything succeeds"
+
+[[standins]]
+name = "dspcontrolldd"
+kind = "ldd"
+family = "semc"
+role = "DSP_CONTROL_DRV: audio DSP control of the start-up animation player and M3SAudioDevMgr; no DSP"
+
+[[standins]]
+name = "extsoundldd"
+kind = "ldd"
+family = "semc"
+role = "EXT_SOUND_DRV: sound output of the start-up animation player and A2dp.dll; silent, requests complete"
+
+[[standins]]
+name = "extsoundpdd"
+kind = "pdd"
+family = "semc"
+role = "EXT_SOUND_DRV.SUZI_PDD: empty PDD so ExtSoundPdd.pdd loads"
+
+[[standins]]
+name = "pvrservices"
+rom_name = "services"
+kind = "ldd"
+family = "powervr"
+role = "PowerVR services.ldd, no device: loads and opens, every bridge call refused (H-p1i-pvr-absent); the window server loads it"
+
+[[standins]]
+name = "semccrypto"
+rom_name = "crypto"
+kind = "ldd"
+family = "semc"
+role = "crypto.ldd: SE hardware crypto (dcl.dll); opens, refuses every control (H-p1i-crypto-absent)"
+
+[[standins]]
+name = "usbcc"
+kind = "kext"
+family = "common"
+role = "usbcc.dll: EPL's USB client layer on a no-hardware controller, no cable ever (H-usbc-null)"
+
+[[standins]]
+name = "eusbc"
+kind = "ldd"
+family = "common"
+role = "eusbc.ldd: EPL's USB client LDD on usbcc's null controller: usbman/usbmsman (SysStart) need a working one"
+
+# H-p1i-euart-alias: the port handler (c32, porthandlersvr.dll) loads the PDD "EUART"; our Syborg serial PDD is in the
+# ROM only as EUART1.PDD. Without it CEdbPort::ConstructL left and the still-active CCable panicked E32USER-CBase 40
+# (docs/research/p1i-porthandler.md)
+[[standins]]
+name = "euart"
+file = "eserial"
+rom_name = "euart"
+kind = "pdd"
+baseport = true
+family = "common"
+role = "euart.pdd: the Syborg serial PDD (eserial) a second time, under the name SE's port handler loads"
+
+[[standins]]
+name = "mpeg4dec"
+kind = "ldd"
+family = "semc"
+role = "MPEG4DECDRV: hardware MPEG-4 decoder of the start-up animation player; no input buffer, stream ends at once"
+
+[[standins]]
+name = "flip"
+kind = "kext"
+family = "semc"
+role = "flip.dll: the keypad flip from QEMU's switch (syborg-sensor SWITCHES bit 0) into P&S 0x100039EA/2 and 0x102086EF/1, 1 = open (H-p990i-flip)"
+
+[[standins]]
+name = "yuv2rgbldd"
+rom_name = "YUV2RGB"
+kind = "ldd"
+family = "semc"
+role = "YUV2RGBDRV: intergraphapi's YUV->RGB (CamServer's render engine); the load is what start-up needs, no converter (H-p990i-yuv2rgb-absent)"
+
+[[standins]]
+name = "threadpriority"
+kind = "ldd"
+family = "semc"
+role = "THREADPRIORITY_LDD: absolute thread priorities for the Phone app (CallControl); the original's protocol (H-semc-threadpriority)"
+
+[[standins]]
+name = "camdrv"
+kind = "ldd"
+family = "semc"
+role = "camdrv.ldd: the camera channel (units 3, 4); a camera that never delivers a frame (H-p990i-camera-absent)"
+
+[[standins]]
+name = "cammsoc2010"
+rom_name = "DMsoc2010"
+kind = "pdd"
+family = "semc"
+role = "DMsoc2010.pdd: main camera sensor PDD \"camdrv.ldd.Msoc2010\", load only"
+
+[[standins]]
+name = "cammsoc366"
+rom_name = "DMsoc366"
+kind = "pdd"
+family = "semc"
+role = "DMsoc366.pdd: front camera sensor PDD \"camdrv.ldd.Msoc366\", load only"
+
+[[standins]]
+name = "medrofs"
+kind = "extension"
+family = "common"
+role = "ROFS1 + ROFx on local drive 8, customer ROFS on 9"
+
+[[standins]]
+name = "mednvmem2"
+kind = "extension"
+family = "common"
+role = "second NVMemory (D:, Memory Stick) on local drive 2"
+
+[[standins]]
+name = "exyin"
+kind = "kext"
+family = "common"
+role = "touch: DDigitiser on the Syborg pointer"
+
+[rom]
+code_patches = ["code-patches.txt"]
+files = [{ rom = "sys/Data/ESTART.TXT", local = "ESTART.TXT" }]
+
+[gl]
+impl = "none"                              # PowerVR MBX: later (libgles_cm.dll in ROFS1)
+
+[milestones]
+
+[status]
+level = "L1"                               # home screen (Flight mode), the flip both ways, keys from EKData (2026-11-17)
+updated = "2026-11-17"
+open = ["the Calls / More softkey keys", "boot with the flip closed (window option)", "camera (none by design), sound, Bluetooth (as the P1i)"]
+
+# H-p1i-pvr2dif-stub: PVR2DIF.dll (SE ScDv's hardware-bitmap / accelerator interface, PowerVR underneath) replaced by
+# the generic screen driver's "no hardware" answers (src/semc/pvr2dif/build.sh): the window server panicked USER 47
+# at its first PowerVR bridge call; ScDv draws in software without it (docs/research/p1i-pvr2d.md)
+[[rom.rofs_replace]]
+image = 1
+path = "Sys/Bin/PVR2DIF.dll"
+built = "pvr2dif/PVR2DIF.dll"
+hack = "H-p1i-pvr2dif-stub"
+
+# H-p1i-no-drmclock: the DRM clock plug-in of the second APS process drives SE's crypto engine (crys.dll programs
+# its registers; our crypto.ldd stand-in gives RAM, docs/research/p1i-crypto-ldd.md) and panics on the junk results
+# (TDes8::SetLength, USER 23), taking SysStart down. An offline phone needs no DRM clock: its aps.ini line is blanked
+[[rom.rofs_patches]]
+image = 2
+path = "private/102030fe/aps.ini"
+# drop drmclockhandler, keep asrhandler: the APS loader stops at a blank line, so asrhandler goes first and the
+# spaces after it (a blank line before the line ending: earlier version blanked drmclockhandler in place, the
+# loader then never loaded asrhandler.aps, asrexe died -1 and the Phone app panicked TeleApp -1, 2026-11-17)
+old = "\"drmclockhandler.aps\"\r\n\"asrhandler.aps\""
+new = "\"asrhandler.aps\"                       "
+hack = "H-p1i-no-drmclock"
+
+# ---------------------------------------------------------------------------------------------
+# Phone window (tools/sydb/phone.py): the keypad flip. Closed: the flip covers the bottom of the panel, the UI
+# (softkey style) uses the top 240x256 [V wsini SCR_WIDTH4/HEIGHT4]; open: the whole 240x320 and the QWERTY.
+[skin.slides.flip]
+label = "Flip\n(open: QWERTY)"
+group = "qwerty"                           # shown while open; the keypad group while closed
+closed_group = "keypad"
+switch = 0                                 # syborg-sensor switches bit (set = closed)
+closed_view = [0, 0, 240, 256]
+initially_open = true

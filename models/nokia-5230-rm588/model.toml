@@ -49,6 +49,7 @@ touch_rate_hz = 60                         # [I] resistive panel report rate: mo
 [board.audio]
 dsp = "rapido"                             # RAPIDO DSP model: aamdaifdriver + the ISC peer's F3 replies
 ring_units = 16                            # DSP ring per stream (docs/devices/nokia-n8-rm596/rapido-audio.md)
+streams = "48000/2/24/240,48000/1/24,16000/1/24"   # stream type -> PCM format (as the N8; type 0 checked on the 5230 2026-11-17 with a left-only 1 kHz WAV)
 
 
 [board.flash]
@@ -223,6 +224,10 @@ impl = "none"
 
 [milestones]
 idle = "Startup::startup sets 101f8766/46 = 104"    # [V] UI phase all done: home screen (after the first-boot queries)
+
+# Phone window (tools/sydb/phone.py, docs/devices.md [skin]).
+[skin]
+turn = "cw"                                # Turn view: clockwise, as the 5800 (owner 2026-11-17)
 
 [props]
 startup = { category = 0x101F8766, state = 0x41, ui_phase = 0x46 }

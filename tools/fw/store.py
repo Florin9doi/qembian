@@ -74,7 +74,7 @@ def entries():
     import tomllib
     out = []
     for tc in sorted(os.listdir(STORE)) if os.path.isdir(STORE) else []:
-        if not re.match(r'(RM-\d+|SE-[\w.-]+)$', tc):        # Nokia type codes, Sony Ericsson SE-<product>
+        if not re.match(r'(R[A-Z]-\d+|SE-[\w.-]+)$', tc):    # Nokia type codes (RM-, RA- for the E90 ...), SE-<product>
             continue
         for v in sorted(os.listdir(os.path.join(STORE, tc))):
             m = os.path.join(STORE, tc, v, 'rom.toml')
@@ -121,8 +121,15 @@ def import_paths(paths, label='', move=False, source=None):
                 move_this = move
         files = idmod.collect(dirs, tmp)
         recs = idmod.identify(dirs)
+        if not recs:                # say so: an import that stores nothing must not look like success
+            print('nothing identified as a firmware in %s (tools/fw/identify.py; SE: tools/fw/semc.py identify)'
+                  % ', '.join(paths), file=sys.stderr)
         done = []
-        for rec in recs:
+        for n_rec, rec in enumerate(recs):
+            # several firmwares in one archive share package files (RM-609: two versions, one data block and
+            # card-reference set): only the last record may move them, the others copy (bug 2026-11-17: the
+            # first record moved them and the second died with FileNotFoundError)
+            move_now = move_this and n_rec == len(recs) - 1
             if not rec['type_code'] or not rec['sw_version']:
                 # an extra file no firmware claims (an ENO/loader image of its own version scheme, several
                 # cores in one directory): reported and left out, the rest of the archive is stored
@@ -150,7 +157,7 @@ def import_paths(paths, label='', move=False, source=None):
                     continue
                 if os.path.exists(to):
                     os.remove(to)
-                (shutil.move if move_this else shutil.copy2)(p, to)
+                (shutil.move if move_now else shutil.copy2)(p, to)
                 stored[n] = to
             if not os.listdir(os.path.join(dst, 'package')):
                 os.rmdir(os.path.join(dst, 'package'))

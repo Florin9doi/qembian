@@ -148,3 +148,5 @@ reply 8C 21 22 F7 00 00 00 00 01 00 2A 00 08 00 00 00 00   # on: 808 (701 parser
 # thread for good. Parser nokiatsy 0x80e8d940 [V]: FindSubBlock(id 8, 8-bit id/len) from offset 12; none ->
 # the pending request completes KErrNone; with one, [sb+2]/[sb+3] cause type/cause map to an error.
 reply C9 24 25 00 00   # on: n8 701 808
+reply 0A E0 E1 00 02 00 04 06 02 09 18 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # NET_REG_STATUS_GET (the 9.3 TSY's form of 0A 00, same tid 4: E52/E72/E5-00): the same no-SIM payload in RESP E1 [I layout as 01]; unanswered, Messaging hung in RConnectionMonitor::ConnectL (2026-11-17, verified E52)
+reply 0A 40 41 01 00 00                                   # PN_NETWORK 0x40 (S60 3.2/5th TSYs): as the real N8 Delight answers C8 40 (phonet) [I same meaning on PN_NETWORK]

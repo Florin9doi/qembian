@@ -5,7 +5,8 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="$ROOT/build/sygl-tests"; mkdir -p "$OUT"
 CF=(-DSYGL_HOST -O1 -g -Wall -Wno-unused-function -I"$(python3 -I "$ROOT/tools/device.py" paths dir)/sygl/gen" -I"$ROOT/src/sygl" -fsanitize=address,undefined)
 for t in "$ROOT"/tests/sygl/*_test.c; do
+  extra=(); [ -f "${t%_test.c}_stubs.c" ] && extra=("${t%_test.c}_stubs.c")
   n=$(basename "$t" .c)
-  gcc "${CF[@]}" -o "$OUT/$n" "$t" "$ROOT/src/sygl/raster.c"
+  gcc "${CF[@]}" -o "$OUT/$n" "$t" "${extra[@]}" "$ROOT/src/sygl/raster.c"
   echo "== $n"; "$OUT/$n"
 done

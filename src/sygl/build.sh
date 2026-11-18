@@ -37,6 +37,12 @@ d = json.load(sys.stdin)
 for k, m in (('vendor', 'GL_VENDOR'), ('renderer', 'GL_RENDERER'), ('version', 'GL_VERSION'),
              ('egl_vendor', 'EGL_VENDOR'), ('egl_version', 'EGL_VERSION')):
     print('#define SYGL_%s %s' % (m, json.dumps(d[k])))" > "$GEN/identity.h"
+# the screen the blit clips to ([board.display]: the N95 320x240, the E90 800x352): its long and short side
+"${DPY[@]}" get board.display | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+w, h = d.get('width', 240), d.get('height', 320)
+print('#define SYGL_SCREEN_LONG %d' % max(w, h)); print('#define SYGL_SCREEN_SHORT %d' % min(w, h))" >> "$GEN/identity.h"
 [ -n "${TRACE:-}" ] && OPT+=(-DSY_TRACE_MAX=700)
 
 python3 -I "$ROOT/tools/gen-gles-glue.py" --blob-addr $SYGL_BASE \

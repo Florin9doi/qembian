@@ -1,0 +1,12 @@
+// Sony Ericsson UIQ 3 threadpriority.ldd stand-in (see threadpriority.cpp)
+#include "../../variant.mmh"
+#include <kernel/kern_ext.mmh>
+target			VariantTarget(threadpriority,ldd)
+linkas			threadpriority.ldd
+targettype		ldd
+sourcepath		.
+source			threadpriority.cpp
+noexportlibrary
+vendorid		0x70000001
+capability		all
+userinclude		../_shared	// src/standins/_shared: tablestub.h

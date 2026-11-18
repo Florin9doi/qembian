@@ -48,12 +48,35 @@ class Bits:
 
 
 
-def _dev_path(key):
-    """a file of the current device ($SYBORG_DEVICE / the registry default): tools/device.py paths"""
+def _dev_model():
     import importlib.util
     spec = importlib.util.spec_from_file_location('device', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'device.py'))
     d = importlib.util.module_from_spec(spec); spec.loader.exec_module(d)
-    return d.paths(d.load(os.environ.get('SYBORG_DEVICE')))[key]
+    return d, d.load(os.environ.get('SYBORG_DEVICE'))
+
+def _dev_path(key):
+    """a file of the current device ($SYBORG_DEVICE / the registry default): tools/device.py paths"""
+    d, prof = _dev_model()
+    return d.paths(prof)[key]
+
+def sdk_lib_default():
+    """The import-library directory for this *device* (firmware.sdk_lib), not a hard-coded SDK.
+
+    Ordinals are per platform and append-only: naming them from the wrong SDK silently produces either no
+    names or - worse - names for the wrong function. $S60_SDK_LIB still wins when set (deliberate override),
+    then the device profile, then the old S60 3rd FP1 path for machines without a profile.
+    """
+    env = os.environ.get('S60_SDK_LIB')
+    if env:
+        return env
+    try:
+        d, prof = _dev_model()
+        v = d.get(prof, 'firmware.sdk_lib')
+        if v:
+            return os.path.expanduser(v)
+    except Exception:
+        pass
+    return os.path.expanduser('~/work/S60_3rd_FP1/Epoc32/release/armv5/lib')
 
 def table_from_encoding(enc):
     """{(len, code): symbol} from Symbian encode-table entries (len<<27 | code<<(27-len))."""
@@ -151,10 +174,17 @@ HDR = ('uid1 uid2 uid3 uidck sig hdrcrc modver comp toolsver timelo timehi flags
 
 
 def parse(path):
-    raw = open(path, 'rb').read()
+    try:
+        return parse_bytes(open(path, 'rb').read())
+    except ValueError as e:
+        raise SystemExit('%s: %s' % (path, e))
+
+
+def parse_bytes(raw):
+    """(header, decompressed image) of an E32 image in memory - e.g. one entry read out of a ROFS image"""
+    if len(raw) < 128 or raw[16:20] != b'EPOC':
+        raise ValueError('not an E32 image')
     h = dict(zip(HDR, struct.unpack_from('<30I', raw, 0)))
-    if raw[16:20] != b'EPOC':
-        raise SystemExit('not an E32 image')
     h['uncomp'] = struct.unpack_from('<I', raw, 124)[0]
     hsize = h['codeoff']
     if h['comp'] == 0:
@@ -202,8 +232,10 @@ def main():
     ap.add_argument('--base', type=lambda s: int(s, 0))
     ap.add_argument('--rom', default=_dev_path('core_flat'))
     ap.add_argument('--rom-json', default=_dev_path('core_json'))
-    ap.add_argument('--sdk-lib', default=os.environ.get('S60_SDK_LIB', os.path.expanduser('~/work/S60_3rd_FP1/Epoc32/release/armv5/lib')))
+    ap.add_argument('--sdk-lib', default=None,
+                    help='import libraries for ordinal names (default: $S60_SDK_LIB, else the device profile sdk_lib)')
     a = ap.parse_args()
+    a.sdk_lib = a.sdk_lib or sdk_lib_default()
     h, img = parse(a.image)
     base = a.base if a.base is not None else h['codebase']
     cs, ds = h['codesize'], h['datasize']
@@ -229,6 +261,7 @@ def main():
             if 'image' in f:
                 files[f['path'].split('/')[-1].lower()] = f['image']
     sdk = {n.lower(): n for n in os.listdir(a.sdk_lib)} if os.path.isdir(a.sdk_lib) else {}
+    unnamed = {}                     # dll -> [ordinals] whose names the SDK libraries did not provide
     syms = []
     imp_fmt = (h['flags'] >> 28) & 7       # 1 = ELF-style import blocks (code offsets)
     if h['importoff']:
@@ -242,6 +275,8 @@ def main():
             dll_l = dll.lower()
             k = os.path.splitext(dll_l)[0] + '.dso'
             names = dso_ordinals.load(os.path.join(a.sdk_lib, sdk[k])) if k in sdk else {}
+            if not names:
+                unnamed.setdefault(dll, [])      # no .dso for this DLL in --sdk-lib at all
             fi = files.get(dll_l)
             exps = struct.unpack_from('<%dI' % fi['expcount'], rom, fi['expdir'] - B) if fi and fi['expcount'] else ()
             for j in range(n):
@@ -250,6 +285,8 @@ def main():
                 ordn, addend = w & 0xffff, w >> 16
                 target = (exps[ordn - 1] + addend) if 0 < ordn <= len(exps) else 0
                 struct.pack_into('<I', code, coff, target)
+                if ordn not in names:
+                    unnamed.setdefault(dll, []).append(ordn)
                 sym = names.get(ordn, ('ord%d' % ordn,))[0]
                 nmx = 'imp_%s_%s' % (os.path.splitext(dll)[0], sym)
                 if coff >= 4 and struct.unpack_from('<I', code, coff - 4)[0] == 0xE51FF004:
@@ -304,6 +341,14 @@ def main():
     print('%s: uid3 %08x comp %08x code %x@%08x (link %08x) data %x@%08x, %d imports, %d exports, entry %08x'
           % (a.image, h['uid3'], h['comp'], cs, base, h['codebase'], ds, dbase,
              sum(1 for s in syms if s[0].startswith('imp_')), h['expdircount'], ep))
+    if unnamed:
+        # Loud on purpose: an unnamed ordinal is a name nobody should guess. Load a .dso that has it
+        # (the device's own SDK: firmware.sdk_lib) or leave the ordinal visible and say so in the notes.
+        print('%s: %d import ordinal(s) could not be named from %s:' %
+              (a.image, sum(len(v) for v in unnamed.values()), a.sdk_lib), file=sys.stderr)
+        for dll, ords in sorted(unnamed.items()):
+            print('    %-18s %s' % (dll, ','.join(str(x) for x in sorted(set(ords)))), file=sys.stderr)
+        print('    (no <dll>.dso in that directory, or the .dso predates the DLL)', file=sys.stderr)
 
 
 if __name__ == '__main__':

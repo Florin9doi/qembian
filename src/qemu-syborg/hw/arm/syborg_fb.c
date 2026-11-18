@@ -7,7 +7,12 @@
  * 14 PARTIAL_START, 15 PARTIAL_END (inclusive), 16 PARTIAL_MODE (bit 0 on, bit 1 full colour,
  *   bit 2 the band is a range of rows; clear = a range of columns),
  * 17 FRAME_COUNT (read: vsyncs since reset), 18 REFRESH_RATE (read: Hz, 0 = no vsync timer),
+ * 19 BASE1, 20 WIDTH1, 21 HEIGHT1, 22 BLANK1: a second panel with its own frame buffer (32 bpp, upright, lines
+ *   WIDTH1 x 4 bytes apart; the Nokia E90's cover display, screen 1 of the LCD HAL, patch qemu-baseport 0028),
  * 0x100.. palette (256 entries).
+ * Two panels: property "panel" (0/1, also settable at run time: qom-set .. panel N) says which one faces the user
+ * (the E90: the lid open = the inner panel 0, closed = the cover panel 1). The console shows that panel; the
+ * other keeps its own picture, as a second LCD does.
  * WIDTH x HEIGHT is the screen (what the QEMU console shows). The picture in memory has that size
  * at ORIENTATION 0/2 and HEIGHT x WIDTH at 1/3; it is rotated onto the screen. This models a
  * display controller that rotates (the N95's natively landscape panel shows the portrait UI, and
@@ -59,6 +64,8 @@ struct SyborgFbState {
     int64_t next_vsync;       /* QEMU_CLOCK_VIRTUAL ns */
     QEMUTimer *vsync_timer;
     uint32_t *pic;            /* the picture in memory, processed before it is rotated (w*h words) */
+    uint32_t base1, width1, height1, blank1;   /* a second panel (registers 19..22) */
+    uint32_t panel;           /* the panel shown: 0, or 1 when the second one is set up */
 };
 
 static void syborg_fb_update_irq(SyborgFbState *s)
@@ -97,6 +104,29 @@ static bool syborg_fb_update_display(void *opaque)
         syborg_fb_update_irq(s);
     }
     surf = qemu_console_surface(s->con);
+    if (s->panel == 1 && s->base1 && s->width1 && s->height1) {
+        /* the second panel faces the user: its own frame buffer, upright, full colour */
+        if (surface_width(surf) != (int)s->width1 || surface_height(surf) != (int)s->height1) {
+            qemu_console_resize(s->con, s->width1, s->height1);
+            surf = qemu_console_surface(s->con);
+        }
+        uint8_t *dst = surface_data(surf);
+        int dstride = surface_stride(surf);
+        for (uint32_t y = 0; y < s->height1; y++) {
+            uint32_t *row = (uint32_t *)(dst + y * dstride);
+            address_space_read(&address_space_memory, s->base1 + y * s->width1 * 4,
+                               MEMTXATTRS_UNSPECIFIED, row, s->width1 * 4);
+            if (s->blank1) {
+                for (uint32_t x = 0; x < s->width1; x++) {
+                    uint32_t v = row[x];
+                    row[x] = ((((v >> 16) & 0xff) * s->blank_dim / 100) << 16) |
+                             ((((v >> 8) & 0xff) * s->blank_dim / 100) << 8) | ((v & 0xff) * s->blank_dim / 100);
+                }
+            }
+        }
+        qemu_console_update(s->con, 0, 0, s->width1, s->height1);
+        return true;
+    }
     if (surface_width(surf) != (int)s->width || surface_height(surf) != (int)s->height) {
         qemu_console_resize(s->con, s->width, s->height);
         surf = qemu_console_surface(s->con);
@@ -216,6 +246,10 @@ static uint64_t syborg_fb_read(void *opaque, hwaddr offset, unsigned size)
     case 16: return s->partial_mode;
     case 17: return s->frame_count;
     case 18: return s->refresh_rate;
+    case 19: return s->base1;
+    case 20: return s->width1;
+    case 21: return s->height1;
+    case 22: return s->blank1;
     default: return 0;
     }
 }
@@ -247,6 +281,10 @@ static void syborg_fb_write(void *opaque, hwaddr offset, uint64_t value,
     case 14: s->partial_start = value; break;
     case 15: s->partial_end = value; break;
     case 16: s->partial_mode = value & 7; break;
+    case 19: s->base1 = value; break;
+    case 20: s->width1 = value; break;
+    case 21: s->height1 = value; break;
+    case 22: s->blank1 = value; break;
     default: break;
     }
 }
@@ -280,7 +318,7 @@ static void syborg_fb_realize(DeviceState *dev, Error **errp)
 
 static const VMStateDescription vmstate_syborg_fb = {
     .name = "syborg-fb",
-    .version_id = 3,
+    .version_id = 4,
     .minimum_version_id = 1,
     .fields = (const VMStateField[]) {
         VMSTATE_UINT32(base, SyborgFbState),
@@ -303,6 +341,11 @@ static const VMStateDescription vmstate_syborg_fb = {
         VMSTATE_UINT32_V(partial_mode, SyborgFbState, 2),
         VMSTATE_UINT32_V(frame_count, SyborgFbState, 3),
         VMSTATE_INT64_V(next_vsync, SyborgFbState, 3),
+        VMSTATE_UINT32_V(base1, SyborgFbState, 4),
+        VMSTATE_UINT32_V(width1, SyborgFbState, 4),
+        VMSTATE_UINT32_V(height1, SyborgFbState, 4),
+        VMSTATE_UINT32_V(blank1, SyborgFbState, 4),
+        VMSTATE_UINT32_V(panel, SyborgFbState, 4),
         VMSTATE_END_OF_LIST()
     }
 };
@@ -314,6 +357,8 @@ static const Property syborg_fb_properties[] = {
     DEFINE_PROP_UINT32("blank-dim", SyborgFbState, blank_dim, 25),
     /* panel refresh / vsync rate (N95: assumed 60 Hz, not measured) */
     DEFINE_PROP_UINT32("refresh-rate", SyborgFbState, refresh_rate, 60),
+    /* the panel facing the user at power on (two-panel phones: the E90 booted with its lid closed = 1) */
+    DEFINE_PROP_UINT32("panel", SyborgFbState, panel, 0),
 };
 
 /* a machine reset: the panel as at power on (no frame buffer, no interrupts), the old picture gone; the
@@ -327,12 +372,20 @@ static void syborg_fb_reset(DeviceState *dev)
     s->need_int = 1;
     memset(s->palette, 0, sizeof(s->palette));
     s->partial_start = s->partial_end = s->partial_mode = 0;
+    s->base1 = s->width1 = s->height1 = s->blank1 = 0;
     s->frame_count = 0;
     if (s->pic) {
         memset(s->pic, 0, (size_t)s->width * s->height * 4);
     }
     syborg_fb_update_irq(s);
     syborg_fb_invalidate(s);
+}
+
+/* the lid at run time: qom-set /machine/.../syborg-fb active-panel 0|1 (sydb phone's Lid button) */
+static void syborg_fb_instance_init(Object *obj)
+{
+    SyborgFbState *s = SYBORG_FB(obj);
+    object_property_add_uint32_ptr(obj, "active-panel", &s->panel, OBJ_PROP_FLAG_READWRITE);
 }
 
 static void syborg_fb_class_init(ObjectClass *oc, const void *data)
@@ -350,6 +403,7 @@ static const TypeInfo syborg_fb_info = {
     .parent = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(SyborgFbState),
     .class_init = syborg_fb_class_init,
+    .instance_init = syborg_fb_instance_init,
 };
 
 static void syborg_fb_register_types(void)

@@ -1,4 +1,4 @@
-// N95 xbus.ldd stand-in (see nokiastub.h)
+// N95 xbus.ldd stand-in (see tablestub.h)
 #include "../../variant.mmh"
 #include <kernel/kern_ext.mmh>
 target			VariantTarget(xbus,ldd)
@@ -9,4 +9,4 @@ source			xbus.cpp
 noexportlibrary
 vendorid		0x70000001
 capability		all
-userinclude		../_shared	// src/standins/_shared: nokiastub.h, iscpeer.inl, isireplies.h, stubcert.h
+userinclude		../_shared	// src/standins/_shared: tablestub.h, iscpeer.inl, isireplies.h, stubcert.h

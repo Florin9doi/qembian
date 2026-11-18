@@ -1,4 +1,4 @@
-// custom.ldd stand-in (see nokiastub.h): EStart's start-up handshake with Nokia's Custom driver.
+// custom.ldd stand-in (see tablestub.h): EStart's start-up handshake with Nokia's Custom driver.
 // Two interfaces; the device profile declares which one ([[standins]] custom config = { api = 1 } ->
 // board config "custom.api", default 2):
 //   2.0 (N95, 9.2): controls. DoControl 32 must give 0/1, 2 a flag, 1 the startup mode
@@ -9,7 +9,7 @@
 //                   request 1 {TInt* mode}  start-up mode, written then completed; EStart waits 5 s,
 //                                           then takes mode 10; 4/5 = reset path, 0 = normal
 //                   (EStart.exe 0xf825a642.. in RM-132 v3.0717; docs/devices/nokia-n73-rm132)
-#include "nokiastub.h"
+#include "tablestub.h"
 static const SStubCtl KCtl[] =
 	{
 	{ 32, EWriteInt, 0, 0, 0 },	// EStart: value must be 0 or 1 to continue normally
@@ -33,4 +33,4 @@ static TInt CustomReq(DThread* aClient, TInt aReq, const TUint32* aArgs, TInt)
 	return KStubNotHandled;
 	}
 
-NOKIA_STUB_LDD_HOOKS("Custom", KCtl, EFalse, CustomReq, NULL)
+TABLE_STUB_LDD_HOOKS("Custom", KCtl, EFalse, CustomReq, NULL)

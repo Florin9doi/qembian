@@ -73,11 +73,15 @@ sydb wg | fg WGID                                     # window groups, focus mar
 sydb unlock | lock | keylock | keepawake on|unlocked|off
 sydb prop get 101f8766 41 | prop set CAT KEY VALUE
 sydb key menu down ok 1.5 back | type hello | screenshot [OUT] --scale 0.5 --changed
+sydb text 'Hello, мир! @(x)'                         # any characters straight into the focused app (agent key events
+                                                      # with that code); digits, * and # are keypad keys to the FEP: use key
+sydb view 0x10005A32 3                                # one view of an app (view server), as the Help app's app://vsa links:
+                                                      # the 5800's Themes > Wallpaper; tables: tools/helplinks.py DEVICE
 sydb log --grep 'Panic|DEVAGENT' --since 20 | events --kind agent.exit --wait 30
 sydb update-agent                                     # rebuilt agent deployed without reboot
 sydb hmp 'info registers' | status | stop
 ```
-Key aliases: `lsk rsk ok menu star hash clear back` (F5, F7, F6, F8, numpad *, F10, backspace, F7).
+Key aliases (per device, from its keymap: e.g. the 5730's `star` is F9): `lsk rsk ok menu star hash clear back` (F5, F7, F6, F8, numpad *, F10, backspace, F7).
 
 ## Autostart: the EStart hook
 

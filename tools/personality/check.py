@@ -10,6 +10,17 @@ sys.path.insert(0, os.path.join(ROOT, 'tools'))
 import device as devmodel
 
 
+def supported_execs(lines):
+    """An explicitly invalid slot is not an implementation of a firmware SWI."""
+    import re
+    keys = set()
+    for line in lines:
+        m = re.match(r'^([FS])([0-9a-fA-F]+)\s+(\S+)', line)
+        if m and m.group(3) != '!invalid':
+            keys.add((m.group(1), int(m.group(2), 16)))
+    return keys
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--device')
@@ -20,7 +31,6 @@ def main():
     # map and driver ABI it uses: personalities/<p>/personality.toml base = "..."
     pt = os.path.join(ROOT, 'personalities', pers, 'personality.toml')
     if os.path.exists(pt):
-        import tomllib
         base = tomllib.load(open(pt, 'rb')).get('base')
         if base:
             print('%s: personality %s uses %s\'s exec map and driver ABI' % (prof['_id'], pers, base))
@@ -56,14 +66,10 @@ def main():
                 if x != y:
                     print('   %2d device %-50s | ours %s' % (i, x[:50], y))
     # exec numbering: every SWI the device's own EUSER uses has an entry in the personality's map
-    import re
     swi = os.path.join(devmodel.paths(prof)['dir'], 'abi', 'n95-euser-swi.json')
     if os.path.exists(swi):
-        keys = set()
-        for l in open(os.path.join(ROOT, 'personalities', pers, 'exec.map')):
-            m = re.match(r'^([FS])([0-9a-fA-F]+)\s+(\S+)', l)
-            if m:
-                keys.add((m.group(1), int(m.group(2), 16)))
+        with open(os.path.join(ROOT, 'personalities', pers, 'exec.map')) as f:
+            keys = supported_execs(f)
         used = json.load(open(swi))['swis']
         miss = ['%s%02x' % k for k in (('F', s & 0x7fffff) if s & 0x800000 else ('S', s) for s in used) if k not in keys]
         print('%-22s %s (%d SWIs used by the device EUSER%s)' % ('exec numbering', 'ok' if not miss else 'MISSING',

@@ -1,0 +1,145 @@
+# SEED ONLY - imported by `tools/registry.py seed`; the database is canonical afterwards.
+#
+# A claim is one statement with an exact scope, evidence and a confidence. `verified` requires identifiable
+# evidence. A correction does not edit history: the new claim names the one it supersedes, which is then
+# marked superseded (kept, and shown as such).
+#
+# scope: device / firmware. A claim without a firmware scope is about a component in general and must not be
+# read as "true of this firmware".
+
+[[claim]]
+component = "gce-render-stage"
+contract = "gce-factory"
+statement = "gcerenderstage.dll is an ECom plugin: uid3 0x20031CB9, implementation 0x20031CBA, export ordinal 1 is ImplementationGroupProxy returning a one-entry TImplementationProxy table at 0x91DC."
+device = "nokia-808-rm807"
+firmware = "113.010.1508"
+detail = "module-relative 0x91DC; factory NewL at 0x840C"
+confidence = "verified"
+status = "accepted"
+author = "seed:gce-pass"
+evidence = [
+  { kind = "doc", ref = "docs/research/gcerenderstage-808.md" },
+  { kind = "decompilation", ref = "build/roms/nokia-808-rm807/RM-807_113.010.1508_04.01+C00.01/ghidra/gcerenderstage.annotated.c" },
+  { kind = "audit", ref = "2026-11-15 validation: table bytes + ECom registry entry" },
+]
+
+[[claim]]
+component = "gce-render-stage"
+contract = "ws-render-stage"
+statement = "CGceRenderStage::End completes synchronously with KErrNone when the scene did not change since Begin(); otherwise it hands the caller's TRequestStatus to the compositor (Gce::CGce vtable offset 0x18)."
+device = "nokia-808-rm807"
+firmware = "113.010.1508"
+detail = "0x830A / 0x888C / 0x886A"
+confidence = "verified"
+status = "accepted"
+author = "seed:gce-pass"
+evidence = [
+  { kind = "doc", ref = "docs/research/gcerenderstage-808.md" },
+  { kind = "decompilation", ref = "0x830A CGceRenderStage::End, 0x888C CGceWrapper::FlushFrame" },
+]
+
+[[claim]]
+component = "gce-render-stage"
+contract = "rsurfacemanager-subset"
+statement = "gcerenderstage.dll imports the RSurfaceManager subset Open(12), ctor(14), Close(13), OpenSurface(2), SurfaceInfo(3), CloseSurface(4) - the import block is not in ordinal order."
+device = "nokia-808-rm807"
+firmware = "113.010.1508"
+detail = "thunks at module-relative 0x160,0x178,0x190,0x1A8,0x1B0,0x1B8"
+confidence = "verified"
+status = "open"
+author = "seed:correction"
+evidence = [
+  { kind = "import-index", ref = "tools/import_index.py module gcerenderstage.dll" },
+  { kind = "test-suite", ref = "tests/import_index_test.py::test_ordinals_are_not_in_thunk_address_order" },
+]
+
+[[claim]]
+component = "gce-render-stage"
+statement = "SUPERSEDED: the six RSurfaceManager imports of gcerenderstage.dll were OpenSurface, SurfaceInfo, CloseSurface, Open, Close, ctor in thunk-address order."
+device = "nokia-808-rm807"
+firmware = "113.010.1508"
+confidence = "inferred"
+status = "superseded"
+author = "seed:gce-pass"
+evidence = [
+  { kind = "audit", ref = "2026-11-15 validation: wrong mapping, five of six rotated" },
+]
+
+[[claim]]
+component = "gce-render-stage"
+statement = "CGceWrapper+0x20 is CScene<CSceneElement<CGceWrapperElement>>: a doubly linked element list (count/head/tail) with links at element +0x50/+0x54."
+device = "nokia-808-rm807"
+firmware = "113.010.1508"
+detail = "0x848C stores the CScene; 0x90D4/0x9136 walk it"
+confidence = "inferred"
+status = "open"
+author = "seed:gce-pass"
+evidence = [
+  { kind = "doc", ref = "docs/research/gcerenderstage-808.md" },
+  { kind = "decompilation", ref = "0x848C CGceWrapper::ConstructL, 0x90D4 CScene::UnlinkElement" },
+]
+
+[[claim]]
+component = "gce-render-stage"
+statement = "The block at 0x8FE8 in gcerenderstage.dll is the module's exception-cleanup pad chain (destroy local, then __cxa_end_cleanup), not an initialiser run."
+device = "nokia-808-rm807"
+firmware = "113.010.1508"
+confidence = "verified"
+status = "accepted"
+author = "seed:correction"
+evidence = [
+  { kind = "decompilation", ref = "0x8FE8 ExceptionCleanupPads (Thumb, TMode fixed 2026-11-15)" },
+]
+
+[[claim]]
+component = "gce"
+statement = "On the 808 firmware, gce.dll ordinal 1 has exactly one importer: gcerenderstage.dll. (The N8 firmware additionally has 10286378.dll.)"
+device = "nokia-808-rm807"
+firmware = "113.010.1508"
+confidence = "verified"
+status = "accepted"
+author = "seed:index"
+evidence = [
+  { kind = "import-index", ref = "tools/import_index.py dll gce --ordinal 1" },
+]
+
+[[claim]]
+component = "wserv"
+statement = "EwSrv.exe selects its render stage by name ('gce') and maps it to an ECom implementation UID through a {name, name2, TUid} table; interface UID 0x10285A29."
+device = "nokia-808-rm807"
+firmware = "113.010.1508"
+confidence = "inferred"
+status = "open"
+author = "seed:gce-pass"
+evidence = [
+  { kind = "doc", ref = "docs/research/gcerenderstage-808.md" },
+  { kind = "decompilation", ref = "EwSrv.exe (ROFS1) name->UID table at code offset ~0x21474" },
+]
+
+[[claim]]
+statement = "surfaceupdateserver.dll exports an entry our gcebe binds as surfaceupdateserver_ord1 with the shape TInt Start(void** aProvider)."
+component = "surface-update"
+contract = "surface-update-server-provider"
+device = "nokia-808-rm807"
+firmware = "113.010.1508"
+detail = "assumption taken from src/gcebe/gcebe.c:59, never checked against the binary"
+confidence = "inferred"
+status = "open"
+author = "seed:gcebe-assumption"
+evidence = [
+  { kind = "doc", ref = "src/gcebe/gcebe.c", note = "extern TInt SUS_Start(void **provider) __asm__(\"surfaceupdateserver_ord1\")" },
+]
+
+[[claim]]
+statement = "The MCompositionSurfaceUpdate provider vtable has exactly four slots in this order: ApiVersion, InternalVersion, ContentUpdated, Extension (UID 0x10286498)."
+component = "surface-update"
+contract = "surface-update-server-provider"
+device = "nokia-808-rm807"
+firmware = "113.010.1508"
+detail = "assumption taken from src/gcebe/gcebe.c:740; slot order never verified"
+confidence = "inferred"
+status = "open"
+author = "seed:gcebe-assumption"
+evidence = [
+  { kind = "doc", ref = "src/gcebe/gcebe.c", note = "KSurfaceUpdate[4] = { SuApiVersion, SuInternalVersion, SuContentUpdated, SuExtension }" },
+]

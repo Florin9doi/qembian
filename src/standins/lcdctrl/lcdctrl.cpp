@@ -6,6 +6,6 @@
 // lcdhandler.aps and bco.exe. The frame buffer itself is ours (the Syborg display).
 // H-p1i-lcdctrl (docs/hacks.md): controls return KErrNone (values read as 0), requests stay pending
 // (display event notifications [I]), every call is logged ("SYBSTUB:").
-#include "nokiastub.h"
+#include "tablestub.h"
 NO_CONTROLS
-NOKIA_STUB_LDD("LCDCTRL", KCtl, 1)
+TABLE_STUB_LDD("LCDCTRL", KCtl, 1)

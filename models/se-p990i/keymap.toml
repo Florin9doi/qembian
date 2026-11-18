@@ -1,0 +1,463 @@
+# Sony Ericsson P990i keys -> Symbian scan codes -> host keys (QEMU translates: platform/families/semc-uiq3.toml).
+# The scan codes are the ones the phone's own key table knows: EKData.dll (core 0xf83957f0) blocks 0x00-0x11,
+# 0x41-0x5A, 0x60-0xA0, 0xA4-0xAC, 0xB1, 0xB5, 0xB9, 0xD4-0xD7 [V]; what each one does, from probes on the home
+# screen (2026-11-17, docs/devices/se-p990i/bring-up.md "Keys") [V] or from its key code [I]. Digits are the numeric
+# keypad codes (EStdKeyNkp0..9: 0x30-0x39 are not in the table, they produce nothing).
+# Groups: "keypad" = the flip's phone keys (shown while the flip is closed), "qwerty" = the keyboard under the flip
+# (shown while open), "nav" = the 5-way key and the jog dial, "front"/"side" = the rest.
+schema = 1
+device = "se-p990i"
+
+[aliases]
+select = "ok"
+lock = "keylock"
+
+[[keys]]
+key = "up"
+label = "Up"
+scancode = "EStdKeyDevice4"
+host = ["up"]
+group = "nav"                    # 5-way up -> EKeyDevice4 [V: home screen opens the shortcut above]
+
+[[keys]]
+key = "down"
+label = "Down"
+scancode = "EStdKeyDevice5"
+host = ["down"]
+group = "nav"                    # 5-way down [V: list highlight moves down]
+
+[[keys]]
+key = "left"
+label = "Left"
+scancode = "EStdKeyDevice6"
+host = ["left"]
+group = "nav"                    # 5-way left [V: Calendar shortcut]
+
+[[keys]]
+key = "right"
+label = "Right"
+scancode = "EStdKeyDevice7"
+host = ["right"]
+group = "nav"                    # 5-way right [V: Today shortcut]
+
+[[keys]]
+key = "ok"
+label = "Ok"
+scancode = "EStdKeyDevice8"
+host = ["ret", "f6"]
+group = "nav"                    # 5-way centre = confirm [V: opens the Main menu]
+
+[[keys]]
+key = "jogup"
+label = "Jog up"
+scancode = "EStdKeyDevice1"
+host = ["pgup"]
+group = "nav"                    # jog dial up [V: focus moves; I: which way]
+
+[[keys]]
+key = "jogdown"
+label = "Jog down"
+scancode = "EStdKeyDevice2"
+host = ["pgdn"]
+group = "nav"                    # jog dial down [V: focus moves]
+
+[[keys]]
+key = "jogpress"
+label = "Jog press"
+scancode = "EStdKeyDevice1B"
+host = ["home"]
+group = "nav"                    # -> EKeyDevice8 (confirm) [I]
+
+[[keys]]
+key = "back"
+label = "Back"
+scancode = "EStdKeyDevice3"
+host = ["esc"]
+group = "front"                    # -> EKeyEscape [I]
+
+[[keys]]
+key = "clear"
+label = "C"
+scancode = "EStdKeyDevice0"
+host = ["backspace"]
+group = "front"                    # -> EKeyBackspace [I]
+
+[[keys]]
+key = "camera"
+label = "Camera"
+scancode = "EStdKeyDevice1D"
+host = ["f9"]
+group = "side"                    # -> EKeyDevice1D [V: starts the camera application]
+
+[[keys]]
+key = "keylock"
+label = "Lock"
+scancode = "EStdKeyDeviceD"
+host = ["f8"]
+group = "side"                    # the keylock slide: keylock.dll adds 0xB1 down/up [V unlocks]
+
+[[keys]]
+key = "1"
+label = "1"
+scancode = "EStdKeyNkp1"
+host = ["1"]
+group = "keypad"
+
+[[keys]]
+key = "2"
+label = "2"
+scancode = "EStdKeyNkp2"
+host = ["2"]
+group = "keypad"
+
+[[keys]]
+key = "3"
+label = "3"
+scancode = "EStdKeyNkp3"
+host = ["3"]
+group = "keypad"
+
+[[keys]]
+key = "4"
+label = "4"
+scancode = "EStdKeyNkp4"
+host = ["4"]
+group = "keypad"
+
+[[keys]]
+key = "5"
+label = "5"
+scancode = "EStdKeyNkp5"
+host = ["5"]
+group = "keypad"
+
+[[keys]]
+key = "6"
+label = "6"
+scancode = "EStdKeyNkp6"
+host = ["6"]
+group = "keypad"
+
+[[keys]]
+key = "7"
+label = "7"
+scancode = "EStdKeyNkp7"
+host = ["7"]
+group = "keypad"
+
+[[keys]]
+key = "8"
+label = "8"
+scancode = "EStdKeyNkp8"
+host = ["8"]
+group = "keypad"
+
+[[keys]]
+key = "9"
+label = "9"
+scancode = "EStdKeyNkp9"
+host = ["9"]
+group = "keypad"
+
+[[keys]]
+key = "0"
+label = "0"
+scancode = "EStdKeyNkp0"
+host = ["0"]
+group = "keypad"
+
+[[keys]]
+key = "star"
+label = "*"
+scancode = "EStdKeyNkpAsterisk"
+host = ["asterisk", "f11"]
+group = "keypad"
+
+[[keys]]
+key = "hash"
+label = "#"
+scancode = "EStdKeyHash"
+host = ["f12"]
+group = "keypad"
+
+# QWERTY under the flip (letters 0x41-0x5A as the table maps them; the rest as the E90's)
+[[keys]]
+key = "qq"
+label = "Q"
+scancode = "'Q'"
+host = ["q"]
+group = "qwerty"
+
+[[keys]]
+key = "qw"
+label = "W"
+scancode = "'W'"
+host = ["w"]
+group = "qwerty"
+
+[[keys]]
+key = "qe"
+label = "E"
+scancode = "'E'"
+host = ["e"]
+group = "qwerty"
+
+[[keys]]
+key = "qr"
+label = "R"
+scancode = "'R'"
+host = ["r"]
+group = "qwerty"
+
+[[keys]]
+key = "qt"
+label = "T"
+scancode = "'T'"
+host = ["t"]
+group = "qwerty"
+
+[[keys]]
+key = "qy"
+label = "Y"
+scancode = "'Y'"
+host = ["y"]
+group = "qwerty"
+
+[[keys]]
+key = "qu"
+label = "U"
+scancode = "'U'"
+host = ["u"]
+group = "qwerty"
+
+[[keys]]
+key = "qi"
+label = "I"
+scancode = "'I'"
+host = ["i"]
+group = "qwerty"
+
+[[keys]]
+key = "qo"
+label = "O"
+scancode = "'O'"
+host = ["o"]
+group = "qwerty"
+
+[[keys]]
+key = "qp"
+label = "P"
+scancode = "'P'"
+host = ["p"]
+group = "qwerty"
+
+[[keys]]
+key = "qa"
+label = "A"
+scancode = "'A'"
+host = ["a"]
+group = "qwerty"
+
+[[keys]]
+key = "qs"
+label = "S"
+scancode = "'S'"
+host = ["s"]
+group = "qwerty"
+
+[[keys]]
+key = "qd"
+label = "D"
+scancode = "'D'"
+host = ["d"]
+group = "qwerty"
+
+[[keys]]
+key = "qf"
+label = "F"
+scancode = "'F'"
+host = ["f"]
+group = "qwerty"
+
+[[keys]]
+key = "qg"
+label = "G"
+scancode = "'G'"
+host = ["g"]
+group = "qwerty"
+
+[[keys]]
+key = "qh"
+label = "H"
+scancode = "'H'"
+host = ["h"]
+group = "qwerty"
+
+[[keys]]
+key = "qj"
+label = "J"
+scancode = "'J'"
+host = ["j"]
+group = "qwerty"
+
+[[keys]]
+key = "qk"
+label = "K"
+scancode = "'K'"
+host = ["k"]
+group = "qwerty"
+
+[[keys]]
+key = "ql"
+label = "L"
+scancode = "'L'"
+host = ["l"]
+group = "qwerty"
+
+[[keys]]
+key = "qz"
+label = "Z"
+scancode = "'Z'"
+host = ["z"]
+group = "qwerty"
+
+[[keys]]
+key = "qx"
+label = "X"
+scancode = "'X'"
+host = ["x"]
+group = "qwerty"
+
+[[keys]]
+key = "qc"
+label = "C"
+scancode = "'C'"
+host = ["c"]
+group = "qwerty"
+
+[[keys]]
+key = "qv"
+label = "V"
+scancode = "'V'"
+host = ["v"]
+group = "qwerty"
+
+[[keys]]
+key = "qb"
+label = "B"
+scancode = "'B'"
+host = ["b"]
+group = "qwerty"
+
+[[keys]]
+key = "qn"
+label = "N"
+scancode = "'N'"
+host = ["n"]
+group = "qwerty"
+
+[[keys]]
+key = "qm"
+label = "M"
+scancode = "'M'"
+host = ["m"]
+group = "qwerty"
+
+[[keys]]
+key = "qspace"
+label = "Space"
+scancode = "EStdKeySpace"
+host = ["spc"]
+group = "qwerty"
+
+[[keys]]
+key = "qenter"
+label = "Enter"
+scancode = "EStdKeyEnter"
+host = ["kp_enter"]
+group = "qwerty"
+
+[[keys]]
+key = "qshift"
+label = "Shift"
+scancode = "EStdKeyLeftShift"
+host = ["shift"]
+group = "qwerty"
+
+[[keys]]
+key = "qshiftr"
+label = "Shift R"
+scancode = "EStdKeyRightShift"
+host = ["shift_r"]
+group = "qwerty"
+
+[[keys]]
+key = "qfn"
+label = "Fn"
+scancode = "EStdKeyLeftFunc"
+host = ["alt"]
+group = "qwerty"
+
+[[keys]]
+key = "qfnr"
+label = "Fn R"
+scancode = "EStdKeyRightFunc"
+host = ["alt_r"]
+group = "qwerty"
+
+[[keys]]
+key = "qctrl"
+label = "Chr"
+scancode = "EStdKeyLeftCtrl"
+host = ["ctrl"]
+group = "qwerty"
+
+[[keys]]
+key = "qcomma"
+label = ","
+scancode = "EStdKeyComma"
+host = ["comma"]
+group = "qwerty"
+
+[[keys]]
+key = "qdot"
+label = "."
+scancode = "EStdKeyFullStop"
+host = ["dot"]
+group = "qwerty"
+
+[[keys]]
+key = "qquote"
+label = "'"
+scancode = "EStdKeySingleQuote"
+host = ["apostrophe"]
+group = "qwerty"
+
+[[keys]]
+key = "qbl"
+label = "["
+scancode = "EStdKeySquareBracketLeft"
+host = ["bracket_left"]
+group = "qwerty"
+
+[[keys]]
+key = "qbr"
+label = "]"
+scancode = "EStdKeySquareBracketRight"
+host = ["bracket_right"]
+group = "qwerty"
+
+[[keys]]
+key = "qminus"
+label = "-"
+scancode = "EStdKeyMinus"
+host = ["minus"]
+group = "qwerty"
+
+[[keys]]
+key = "qtab"
+label = "Tab"
+scancode = "EStdKeyTab"
+host = ["tab"]
+group = "qwerty"
+

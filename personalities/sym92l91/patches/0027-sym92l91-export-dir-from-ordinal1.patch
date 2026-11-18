@@ -1,0 +1,54 @@
+sym92l91: export directories from ordinal 1, also in the multiple memory model
+
+The N81 8GB / E71 loader (9.1 layout F32) allocates iExportDirCount words for E32Loader::ReadExportDir and
+indexes buf[ordinal - 1] (N81 efile 0x801620c2). The multiple model always wrote count + 1 words starting at
+ordinal 0: a 4-byte overrun of the loader heap per RAM-loaded DLL (USER 45 / the fatal loader fault) and imports
+bound one ordinal off. ExecExportDirFromOrdinal1 (sym91) now also covers sym92l91 and the multiple model.
+
+--- a/kernel/eka/kernel/sexecpers.cpp
++++ b/kernel/eka/kernel/sexecpers.cpp
+@@ -352,6 +352,7 @@
+ 		ExecLoaderCodeSegSize = _FOFF(TCodeSegCreateInfo, iCodeRelocTable);		// 380
+ 		ExecLoaderCodeSegUserSize = ExecLoaderCodeSegSize;
+ 		ExecLoaderProcessTail = _FOFF(TProcessCreateInfo, iDebugAttributes) - sizeof(TCodeSegCreateInfo);	// 36
++		ExecExportDirFromOrdinal1 = 1;	// its loader: User::Alloc(iExportDirCount * 4), buf[ordinal - 1] [V N81 efile 0x801620c2]
+ 		}
+ 	else if (pers == KPersonalitySym91 || pers == KPersonalitySym91R)
+ 		{
+--- a/kernel/eka/memmodel/epoc/multiple/mcodeseg.cpp
++++ b/kernel/eka/memmodel/epoc/multiple/mcodeseg.cpp
+@@ -460,6 +460,12 @@
+ 	return DEpocCodeSeg::Loaded(aInfo);
+ 	}
+ 
++// syborg-pg, personalities sym91/sym92l91 (sexecpers.cpp): a 9.1-style loader allocates iExportDirCount words and
++// wants the table from ordinal 1; 9.2 and later take the ordinal-0 word first (count + 1 words). The N81 8GB / E71
++// loader got count + 1 words into its count-word buffer: a heap overrun on every RAM-loaded DLL, and every import
++// bound one ordinal off (2026-11-17)
++extern "C" TInt ExecExportDirFromOrdinal1;
++
+ void DMemModelCodeSeg::ReadExportDir(TUint32* aDest)
+ 	{
+ 	__KTRACE_OPT(KDLL,Kern::Printf("DMemModelCodeSeg::ReadExportDir %C %08x",this, aDest));
+@@ -467,17 +473,18 @@
+ 	if (!iXIP)
+ 		{
+ 		SRamCodeInfo& ri=RamInfo();
+-		TInt size=(ri.iExportDirCount+1)*sizeof(TLinAddr);
++		TInt skip = ExecExportDirFromOrdinal1 ? sizeof(TLinAddr) : 0;
++		TInt size=(ri.iExportDirCount+1)*sizeof(TLinAddr) - skip;
+ 
+ 		if (Memory()->iCopyOfExportDir)
+ 			{
+-			kumemput(aDest, Memory()->iCopyOfExportDir, size);
++			kumemput(aDest, (const TUint8*)Memory()->iCopyOfExportDir + skip, size);
+ 			return;
+ 			}
+ 		
+ 		NKern::ThreadEnterCS();
+ 		Mmu& m=Mmu::Get();
+-		TLinAddr src=ri.iExportDir-sizeof(TLinAddr);
++		TLinAddr src=ri.iExportDir-sizeof(TLinAddr)+skip;
+ 
+ 		MmuBase::Wait();
+ 		TInt offset=src-ri.iCodeRunAddr;

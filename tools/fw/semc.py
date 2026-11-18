@@ -498,7 +498,9 @@ def quick_core(path):
     [address][length] prefix before an EKA1 TRomHeader): a cheap test before package()"""
     try:
         with open(path, 'rb') as f:
-            d = f.read(0x400)
+            # the root list must be readable: the P1i's and P990i's is at +0x1A90 (bug 2026-11-17: with
+            # 0x400 bytes no SE core was recognised and store.py import stored nothing, silently)
+            d = f.read(0x10000)
         size = os.path.getsize(path)
     except OSError:
         return False

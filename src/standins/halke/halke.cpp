@@ -9,7 +9,7 @@
 //   control 1 (a1 = attribute, a2 = value): set (EStart restores HAL.DAT through it [V EStart f80b141e]):
 //             kept for later gets.
 //   control 2: end of the HAL.DAT restore [V EStart f80b143e]: KErrNone.
-#include "nokiastub.h"
+#include "tablestub.h"
 #include "boardconfig.h"
 
 static const TInt KAttrs = 8;
@@ -52,9 +52,9 @@ static TInt Control(DThread* aClient, TInt aFn, TAny* a1, TAny* a2, const TUint3
 	case 2:
 		return KErrNone;
 	default:
-		return KStubNotHandled;		// logged by nokiastub.h, KErrNone
+		return KStubNotHandled;		// logged by tablestub.h, KErrNone
 		}
 	}
 
 NO_CONTROLS
-NOKIA_STUB_LDD_CTLHOOK("HALKE", KCtl, ETrue, Control)
+TABLE_STUB_LDD_CTLHOOK("HALKE", KCtl, ETrue, Control)

@@ -1,0 +1,22 @@
+# Firmware 3.0633.09.04 of nokia-e61-rm89 (merged over models/nokia-e61-rm89/model.toml).
+
+[firmware]
+version = "3.0633.09.04"
+obtain = """
+Flash files of RM-89 3.0633.09.04 (RM-089 v.03.06 E-61.rar or Nokia_E61_RM-89_0530150_3.0633.09.04_V001.zip):
+rm89_m128_h20_ks_prod_306330904_c00_combined.bin (core, FIASCO) and a language variant (*_v05_variant.bin).
+tools/fw/store.py import the archive (roms/RM-89/3.0633.09.04).
+"""
+[[firmware.files]]
+role = "core"
+glob = "rm89_*_c00_combined.bin"
+
+[[firmware.files]]
+role = "rofs2"                             # language variant: a FIASCO image (Elf2flash 02.37) [V header]
+glob = "rm89_*_v05_variant.bin"
+
+[firmware.identity]
+sw = { version = "3.0633.09.04", type_code = "RM-89" }
+
+[firmware.rom]
+user_window_start = 0xF809F540             # IscApi.dll: the user side starts among the firmware's kernel-side files (probe.py header) [V]

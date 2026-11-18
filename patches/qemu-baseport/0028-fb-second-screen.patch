@@ -1,0 +1,186 @@
+LCD HAL: a second screen (SYBORG_FB_SCREEN1_W / _H)
+
+The Nokia E90's display driver serves two panels: screen 0 the inner 800x352, screen 1 the cover 240x320, each with
+its own frame buffer (docs/research/e90-two-displays.md). With HAL reporting a second screen but no display device 1,
+the window server built screen 1 with no modes and died. A build with -DSYBORG_FB_SCREEN1_W=w -DSYBORG_FB_SCREEN1_H=h
+registers EHalGroupDisplay device 1 with its own video RAM (not Syborg::VideoRamPhys, which stays screen 0's) and
+gives it the Syborg fb's second panel (registers BASE1, WIDTH1, HEIGHT1, BLANK1); screen 0 keeps the first panel as
+before. Which panel faces the user is the fb's active-panel (the lid), not the kernel's. Screen 1 registers no power
+handler. Used by src/standins/lcd/lcd_e90.mmp.
+
+--- a/baseport/syborg/fb/syborg_fb.h
++++ b/baseport/syborg/fb/syborg_fb.h
+@@ -113,6 +113,9 @@
+ 
+ public:
+   TLinAddr iPortAddr;
++public:
++  TInt iScreen;			// HAL display device number: 0, or 1 = a second panel (SYBORG_FB_SCREEN1_W/H, the E90's cover)
++  TInt iPanelW, iPanelH;	// this screen's panel size (two-screen builds)
+ 
+ enum {
+     FB_ID               = 0,
+@@ -130,6 +133,10 @@
+     FB_PIXEL_ORDER      = 11,
+     FB_ROW_PITCH        = 12,
+     FB_ENABLED          = 13,
++    FB_BASE1            = 19,	// syborg-pg: a second panel (the E90's cover): its frame buffer, size, blank
++    FB_WIDTH1           = 20,
++    FB_HEIGHT1          = 21,
++    FB_BLANK1           = 22,
+     FB_PALETTE_START    = 0x400 >> 2,
+     FB_PALETTE_END   = FB_PALETTE_START+256-1,
+     /* end new interface */
+--- a/baseport/syborg/fb/syborg_fb.cpp
++++ b/baseport/syborg/fb/syborg_fb.cpp
+@@ -160,6 +160,15 @@
+   Kern::Printf("SYBLCD: power up secure=%d base %08x", aSecure, aSecure ? iSecurevRamPhys : ivRamPhys);
+ #endif
+ 
++#ifdef SYBORG_FB_SCREEN1_W
++  if (iScreen == 1)		// the second panel: its own registers, the first panel's are left alone
++	{
++	WriteReg(iPortAddr, FB_BASE1, aSecure ? iSecurevRamPhys : ivRamPhys);
++	WriteReg(iPortAddr, FB_BLANK1, 0);
++	Kern::Printf("SYBLCD: screen 1 on");
++	return;
++	}
++#endif
+   WriteReg(iPortAddr, FB_ENABLED, 0);
+   WriteReg(iPortAddr, FB_BASE, aSecure ? iSecurevRamPhys : ivRamPhys);
+ 
+@@ -182,6 +191,14 @@
+ 
+ void DLcdPowerHandler::PowerDownLcd()
+ {
++#ifdef SYBORG_FB_SCREEN1_W
++  if (iScreen == 1)
++	{
++	WriteReg(iPortAddr, FB_BLANK1, 1);
++	Kern::Printf("SYBLCD: screen 1 off");
++	return;
++	}
++#endif
+   WriteReg(iPortAddr, FB_BLANK, 1);
+ }
+ 
+@@ -191,6 +208,7 @@
+ 		iPowerUpDfc(&power_up_dfc,this,6),
+ 		iPowerDownDfc(&power_down_dfc,this,7)
+ {
++  iScreen = 0;
+ }
+ 
+ void DLcdPowerHandler::ScreenInfo(TScreenInfoV01& anInfo)
+@@ -284,6 +302,18 @@
+ 	//read width and height of display from board model and allocate size
+ 	TInt width = ReadReg(iPortAddr, FB_WIDTH);
+ 	TInt height = ReadReg(iPortAddr, FB_HEIGHT);
++#ifdef SYBORG_FB_SCREEN1_W
++	// syborg-pg two-screen build (E90: inner 800x352 = screen 0 from the board, cover = screen 1 from the macros): each
++	// screen has its own video RAM and its own panel in the fb (screen 1: registers BASE1/WIDTH1/HEIGHT1/BLANK1); which
++	// panel faces the user is the lid's business (fb property active-panel), not the kernel's
++	if (iScreen == 1)
++		{
++		width = SYBORG_FB_SCREEN1_W;
++		height = SYBORG_FB_SCREEN1_H;
++		}
++	iPanelW = width;
++	iPanelH = height;
++#endif
+ 	
+ 	TInt vSize = 4*width*height; //*4 as 32bits per pixel
+ #ifdef SYBORG_FB_LINE_PIXELS
+@@ -300,7 +330,13 @@
+ #endif
+ 
+ 	NKern::ThreadEnterCS();
+-	TInt r = Epoc::AllocPhysicalRam(vSize,Syborg::VideoRamPhys);
++	TInt r;
++#ifdef SYBORG_FB_SCREEN1_W
++	if (iScreen == 1)		// the second screen's RAM is its own: Syborg::VideoRamPhys stays screen 0's
++		r = Epoc::AllocPhysicalRam(vSize, ivRamPhys);
++	else
++#endif
++	r = Epoc::AllocPhysicalRam(vSize,Syborg::VideoRamPhys);
+ 	if (r != KErrNone)
+ 	{
+ 	        NKern::ThreadLeaveCS();
+@@ -308,6 +344,9 @@
+ 	}
+ 
+ 	// Map the video RAM
++#ifdef SYBORG_FB_SCREEN1_W
++	if (iScreen != 1)
++#endif
+ 	ivRamPhys = TSyborg::VideoRamPhys();
+ 
+ 	r = DPlatChunkHw::New(iChunk,ivRamPhys,vSize,EMapAttrUserRw|EMapAttrBufferedC);
+@@ -321,6 +360,11 @@
+ 
+ 	// Allocate physical RAM for secure display
+ 	NKern::ThreadEnterCS();
++#ifdef SYBORG_FB_SCREEN1_W
++	if (iScreen == 1)
++		r = Epoc::AllocPhysicalRam(vSize, iSecurevRamPhys);
++	else
++#endif
+ 	r = Epoc::AllocPhysicalRam(vSize,Syborg::VideoRamPhysSecure);
+ 	if (r != KErrNone)
+ 	{
+@@ -329,6 +373,9 @@
+ 	}
+ 	// the address this allocation returned: the two buffers are adjacent only when RAM happens to be free
+ 	// right after the first (N8 025.007: the page after it held a page table, AssignPage faulted)
++#ifdef SYBORG_FB_SCREEN1_W
++	if (iScreen != 1)
++#endif
+ 	iSecurevRamPhys = TSyborg::VideoRamPhysSecure();
+ 	TInt r2 = DPlatChunkHw::New(iSecureChunk,iSecurevRamPhys,vSize,EMapAttrUserRw|EMapAttrBufferedC);
+ 
+@@ -535,7 +582,7 @@
+ 	iPortAddr = KHwBaseClcd;
+ 
+ 	AllocateFrameBuffer();
+-	TInt r = Kern::AddHalEntry(EHalGroupDisplay,DoHalFunction,this);
++	TInt r = Kern::AddHalEntry(EHalGroupDisplay,DoHalFunction,this,iScreen);
+ 	if(r != KErrNone)
+ 	  return r;
+ 
+@@ -544,6 +591,17 @@
+ 	iMsgQ.SetDfcQ(iDfcQ);
+ 	iMsgQ.Receive();
+ 
++	if (iScreen != 0)
++		{
++		// a second screen: its panel is set up and lit (its backlight, SALights DISPLAY2, is not modelled), no power
++		// handler of its own
++		WriteReg(iPortAddr, FB_BASE1, ivRamPhys);
++		WriteReg(iPortAddr, FB_WIDTH1, iPanelW);
++		WriteReg(iPortAddr, FB_HEIGHT1, iPanelH);
++		WriteReg(iPortAddr, FB_BLANK1, 0);
++		Kern::Printf("SYBLCD: screen 1 panel %dx%d, video RAM %08x", iPanelW, iPanelH, ivRamPhys);
++		return KErrNone;
++		}
+ 	Add();
+ 	DisplayOn();
+ 
+@@ -556,6 +614,18 @@
+   DLcdPowerHandler* pH=new DLcdPowerHandler;
+   if(pH)
+ 	r = pH->Create();
++#ifdef SYBORG_FB_SCREEN1_W
++  if (r == KErrNone)
++	{
++	DLcdPowerHandler* p1 = new DLcdPowerHandler;
++	r = KErrNoMemory;
++	if (p1)
++		{
++		p1->iScreen = 1;
++		r = p1->Create();
++		}
++	}
++#endif
+   
+   return r;
+ }

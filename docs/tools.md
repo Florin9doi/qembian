@@ -58,6 +58,77 @@ shows as `Export+offset`). Addresses below the firmware's user window resolve to
 files (`ours.json`, `hybrid-manifest.txt`) with function names from the device's `_<baseport>_ekern.exe.sym`.
 RAM-loaded ROFS code is not indexed (see `tools/e32load.py`).
 
+
+## Import ordinals, whole firmware: `tools/import_index.py`
+
+Ordinals are per platform and **not** in thunk-address order (the 808's `gcerenderstage.dll` imports
+`surfacemanager` ordinals 12,14,13,2,3,4 in that block order), and a `.dso` from the wrong SDK silently
+gives either no name or the wrong one. This tool builds one table per device so nothing is guessed:
+
+```
+tools/import_index.py build [--scope all|xip|rofs] [--limit N]   # -> <build dir>/imports.json
+tools/import_index.py dll surfacemanager --ordinal 2            # what ordinal 2 of a DLL is, and who uses it
+tools/import_index.py dll wsgraphicdrawer --grep Stage          # name search inside one DLL's exports
+tools/import_index.py module gcerenderstage.dll                 # thunk address, dll, ordinal, name
+tools/import_index.py at gcerenderstage.dll 0xcc                # what one thunk imports
+tools/import_index.py unresolved [--dll NAME]                   # every ordinal no SDK could name
+tools/import_index.py stats
+```
+
+Covers every XIP module in `core.json` (thunks resolved through the target module's export table) and every
+E32 image in ROFS1-3, found by its header, not its extension (import block: dll, ordinal, code offset; the
+offset is the thunk's `ldr` for both) - 4701 modules / 836k imports for the 808 in ~10 s; a path in two ROM
+layers marks the lower copy `shadowed_by` the loaded one. Names come from the profile's `firmware.sdk_lib`; ordinals the SDK does not know stay `null`
+and are listed by `unresolved` - `wsgraphicdrawer.dll` alone has 60 of them, which is exactly the set that
+has to be recovered from ROM bodies (`docs/research/gcerenderstage-808.md`). The JSON is a cache in the
+device's build dir (`tools/device.py paths imports`, ~30 MB) and is rebuilt incrementally (size + CRC32 per
+module). Tests: `tests/import_index_test.py`, `tests/e32load_test.py`.
+
+
+## Research registry: `tools/registry.py`
+
+The operational store for "understanding Symbian, preserving its contracts, selectively replacing or
+rebuilding components". Components, per-firmware binaries, typed edges, source candidates, contracts, claims
+and bounded tasks — not a per-binary progress score. The model is written down in
+[registry/README.md](registry/README.md); the seed content is `docs/registry/*.toml` (seed only — the SQLite
+database is canonical afterwards).
+
+```
+tools/registry.py seed                     # docs/registry/*.toml -> build/registry/registry.sqlite3 (idempotent)
+tools/registry.py seed --migrate           # explicit rewrite of curated columns (never operational state)
+tools/registry.py ingest                   # imports.json + resolved device profile + repo artifacts (idempotent)
+tools/registry.py export                   # registry.json + registry.md + snapshot.html + a SQLite backup
+tools/registry.py backup --out FILE        # / restore --from FILE [--to PATH]
+tools/registry.py search qt --strategy undecided
+tools/registry.py context gce-render-stage # compact briefing: binaries, edges, contracts, claims, open question
+tools/registry.py tasks --ready            # bounded, unblocked tasks with acceptance criteria
+tools/registry.py claim-task TASK --agent me --lease 1h
+tools/registry.py submit TASK --statement ... --evidence doc=... --confidence verified
+tools/registry.py complete TASK --evidence build/runs/x/serial.log
+```
+
+Mutations need the lease token `claim-task` prints (`--token`). Agents use the same functions through the MCP
+server `registry` (`tools/registry_mcp.py`, in `.mcp.json`): `registry_context`, `registry_tasks`,
+`registry_claim_task`, `registry_submit`, `registry_record_test`, `registry_complete`, `imports_module`,
+`imports_dll`.
+
+`snapshot.html` is a portable read-only page (no network): device status, contracts that block the next
+capability, bounded tasks, known/disputed claims, and the component table by strategy. Tests:
+`tests/registry_test.py`.
+
+## ECom plugins, whole firmware: `tools/ecom_index.py`
+
+```
+tools/ecom_index.py build [--device ID]     # -> <build dir>/ecom.json from Private/10009d8f/ecom-*.spi
+tools/ecom_index.py iface 0x10285A29        # every implementation of an interface (here: WSERV render stages)
+tools/ecom_index.py dll gcerenderstage      # what a plugin DLL implements
+tools/ecom_index.py impl 0x20031CBA
+```
+
+Parses the SPI files (the ROM's pre-built ECom registry) with their resource files (SCSU-compressed text):
+1380 plugins / 1773 implementations on the 808 in 0.3 s, no parse errors; `registry.py ingest` turns them
+into `ecom-plugin` edges. Tests: `tests/ecom_index_test.py`.
+
 ## ROM blobs: `tools/blob_glue.py`
 
 Glue for code placed at a fixed ROM address (src/gcebe; sygl has its own generator):

@@ -1,0 +1,23 @@
+// SE P1i LCD HAL: as lcd_portrait, with 256-pixel rows (SE ScDv writes 240-pixel lines into 1024-byte rows; patch 0027)
+// rotation 0 upright): the Syborg frame buffer as it is, 32 bpp (EColor16MU = HAL mode 1 of 2),
+// stride = width x 4 (the d_display stand-in's d_display.pitch must match). None of the N95's
+// native-landscape changes (SYBORG_FB_N95: H-lcd-native-landscape, H-lcd-alwayson).
+#include "../../variant.mmh"
+#include "kernel/kern_ext.mmh"
+TARGET			VariantTarget(lcd_semc_p1i,dll)
+TARGETTYPE		kext
+MACRO			__PORTRAIT_DISPLAY__
+MACRO			SYBORG_FB_REPORTED_BPP=32
+MACRO			SYBORG_FB_DISPLAY_MODE=1
+MACRO			SYBORG_FB_NUM_MODES=2
+MACRO			SYBORG_FB_LINE_PIXELS=256
+SYSTEMINCLUDE	AsspNKernIncludePath
+SYSTEMINCLUDE	../../fb
+SOURCEPATH		../../fb
+SOURCE			syborg_fb.cpp
+LIBRARY			PlatformLib
+EPOCALLOWDLLDATA
+UID				0x1000008d 0x100039e8
+VENDORID		0x70000001
+ROMTARGET		lcd.dll
+CAPABILITY		all

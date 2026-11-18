@@ -12,8 +12,8 @@ F06  SetActiveScheduler                   # eka2l1
 F07  LockPeriod                           # export
 F08  TrapHandler                          # eka2l1
 F09  SetTrapHandler                       # eka2l1
-F0a  !invalid                             # manual: no caller in N95 EUSER
-F0b  !invalid                             # manual: no caller in N95 EUSER
+F0a  @LockedInc91                         # N81 11.0.045 EUSER 0x8011dc64: LockedInc; N95 uses inline atomics
+F0b  @LockedDec91                         # N81 11.0.045 EUSER 0x8011dc6c: LockedDec (RCriticalSection); return OLD value
 F0c  DebugMask                            # manual: UserSvr::DebugMask calls it
 F0d  DebugMaskIndex                       # manual: sequence (export match)
 F0e  SetDebugMask                         # manual: sequence (export match)

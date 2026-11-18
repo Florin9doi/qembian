@@ -1,0 +1,442 @@
+# Nokia E61 keys -> Symbian scan codes -> host keys (QEMU translates). FIRST DRAFT [I], 2026-11-17: softkeys, menu, the
+# 5-way, call/end/clear and the side keys as the E72's (also an E-series QWERTY bar), the letters as the E90's
+# qwerty group. The E61's own keypad table (Fn/digits on the letter keys) is not read yet.
+schema = 1
+device = "nokia-e61-rm89"
+
+[[keys]]
+key = "lsk"
+label = "LSK"
+scancode = "EStdKeyDevice0"
+host = ["f5"]
+set1 = 0x3f
+group = "front"
+
+[[keys]]
+key = "ok"
+label = "OK"
+scancode = "EStdKeyDevice3"
+host = ["f6", "ret"]
+set1 = 0x40
+group = "nav"
+
+[[keys]]
+key = "rsk"
+label = "RSK"
+scancode = "EStdKeyDevice1"
+host = ["f7"]
+set1 = 0x41
+group = "front"
+
+[[keys]]
+key = "menu"
+label = "Menu"
+scancode = "EStdKeyApplication0"
+host = ["f8"]
+set1 = 0x42
+group = "front"
+
+[[keys]]
+key = "up"
+label = "^"
+scancode = "EStdKeyUpArrow"
+host = ["up"]
+set1 = 0xc8
+group = "nav"
+
+[[keys]]
+key = "down"
+label = "v"
+scancode = "EStdKeyDownArrow"
+host = ["down"]
+set1 = 0xd0
+group = "nav"
+
+[[keys]]
+key = "left"
+label = "<"
+scancode = "EStdKeyLeftArrow"
+host = ["left"]
+set1 = 0xcb
+group = "nav"
+
+[[keys]]
+key = "right"
+label = ">"
+scancode = "EStdKeyRightArrow"
+host = ["right"]
+set1 = 0xcd
+group = "nav"
+
+[[keys]]
+key = "call"
+label = "Call"
+scancode = "EStdKeyYes"
+host = ["f2"]
+set1 = 0x3c
+group = "front"
+
+[[keys]]
+key = "end"
+label = "End"
+scancode = "EStdKeyNo"
+host = ["f3"]
+set1 = 0x3d
+group = "front"
+
+[[keys]]
+key = "clear"
+label = "C"
+scancode = "EStdKeyBackspace"
+host = ["backspace"]
+set1 = 0x0e
+group = "front"
+
+[[keys]]
+key = "power"
+label = "Power"
+scancode = "EStdKeyDevice2"
+host = ["f4"]
+set1 = 0x3e
+group = "side"
+
+[[keys]]
+key = "volup"
+label = "Vol +"
+scancode = "EStdKeyIncVolume"
+host = ["f11"]
+set1 = 0x57
+group = "side"   # matrix 115
+
+[[keys]]
+key = "voldown"
+label = "Vol -"
+scancode = "EStdKeyDecVolume"
+host = ["f12"]
+set1 = 0x58
+group = "side"   # matrix 102
+
+# QWERTY (as the E90's qwerty group)
+[[keys]]
+key = "qq"
+label = "Q"
+scancode = "'Q'"
+host = ["q"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qw"
+label = "W"
+scancode = "'W'"
+host = ["w"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qe"
+label = "E"
+scancode = "'E'"
+host = ["e"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qr"
+label = "R"
+scancode = "'R'"
+host = ["r"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qt"
+label = "T"
+scancode = "'T'"
+host = ["t"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qy"
+label = "Y"
+scancode = "'Y'"
+host = ["y"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qu"
+label = "U"
+scancode = "'U'"
+host = ["u"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qi"
+label = "I"
+scancode = "'I'"
+host = ["i"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qo"
+label = "O"
+scancode = "'O'"
+host = ["o"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qp"
+label = "P"
+scancode = "'P'"
+host = ["p"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qa"
+label = "A"
+scancode = "'A'"
+host = ["a"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qs"
+label = "S"
+scancode = "'S'"
+host = ["s"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qd"
+label = "D"
+scancode = "'D'"
+host = ["d"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qf"
+label = "F"
+scancode = "'F'"
+host = ["f"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qg"
+label = "G"
+scancode = "'G'"
+host = ["g"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qh"
+label = "H"
+scancode = "'H'"
+host = ["h"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qj"
+label = "J"
+scancode = "'J'"
+host = ["j"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qk"
+label = "K"
+scancode = "'K'"
+host = ["k"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "ql"
+label = "L"
+scancode = "'L'"
+host = ["l"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qz"
+label = "Z"
+scancode = "'Z'"
+host = ["z"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qx"
+label = "X"
+scancode = "'X'"
+host = ["x"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qc"
+label = "C"
+scancode = "'C'"
+host = ["c"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qv"
+label = "V"
+scancode = "'V'"
+host = ["v"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qb"
+label = "B"
+scancode = "'B'"
+host = ["b"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qn"
+label = "N"
+scancode = "'N'"
+host = ["n"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qm"
+label = "M"
+scancode = "'M'"
+host = ["m"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qspace"
+label = "Space"
+scancode = "EStdKeySpace"
+host = ["spc"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qenter"
+label = "Enter"
+scancode = "EStdKeyEnter"
+host = ["kp_enter"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qshift"
+label = "Shift"
+scancode = "EStdKeyLeftShift"
+host = ["shift"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qshiftr"
+label = "Shift R"
+scancode = "EStdKeyRightShift"
+host = ["shift_r"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qfn"
+label = "Fn"
+scancode = "EStdKeyLeftFunc"
+host = ["alt"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qfnr"
+label = "Fn R"
+scancode = "EStdKeyRightFunc"
+host = ["alt_r"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qctrl"
+label = "Chr"
+scancode = "EStdKeyLeftCtrl"
+host = ["ctrl"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qcomma"
+label = ","
+scancode = "EStdKeyComma"
+host = ["comma"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qdot"
+label = "."
+scancode = "EStdKeyFullStop"
+host = ["dot"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qquote"
+label = "'"
+scancode = "EStdKeySingleQuote"
+host = ["apostrophe"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qbl"
+label = "["
+scancode = "EStdKeySquareBracketLeft"
+host = ["bracket_left"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qbr"
+label = "]"
+scancode = "EStdKeySquareBracketRight"
+host = ["bracket_right"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qminus"
+label = "-"
+scancode = "EStdKeyMinus"
+host = ["minus"]
+group = "qwerty"
+evidence = "I"
+
+[[keys]]
+key = "qtab"
+label = "Tab"
+scancode = "EStdKeyTab"
+host = ["tab"]
+group = "qwerty"
+
+# QWERTY slide: wsini.ini hardware states EKeyDeviceB = 240x320 at 0, EKeyDeviceA = 320x240 at 90,
+# EKeyDeviceC = 320x240 at 270 [V]; sent as keys until a switch stand-in exists.
+evidence = "I"
+

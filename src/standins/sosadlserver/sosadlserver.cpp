@@ -1,4 +1,4 @@
-// N95 sosadlserver.ldd stand-in (see nokiastub.h). EStart loads it and ignores the result.
-#include "nokiastub.h"
+// N95 sosadlserver.ldd stand-in (see tablestub.h). EStart loads it and ignores the result.
+#include "tablestub.h"
 NO_CONTROLS
-NOKIA_STUB_LDD("SosAdlServer", KCtl, 1)
+TABLE_STUB_LDD("SosAdlServer", KCtl, 1)
