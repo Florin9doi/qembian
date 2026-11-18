@@ -353,24 +353,52 @@ static void sim_plmn(SyborgModemState *s, uint8_t out[3])
 /* NET_MODEM_REG_STATUS payload: cause OK, 2 sub-blocks: NET_REG_INFO_COMMON (status 0 = HOME) and the GSM/WCDMA
  * registration info (sub-block 0x09, 24 bytes: u16 LAC @2, u32 CI @4, PLMN @8, then fields up to @0x16 that
  * nokiatsy reads (0x80e97ffc: @0x0d..0x12, 0x80e83820: @0x0c, 0x14..0x16); a 12-byte block panicked the TSY with
- * "IsiMessage OFFSET Invalid -9") [V reads, I the meaning of those fields, left 0] */
-static int net_reg_payload(SyborgModemState *s, uint8_t *d)
+ * "IsiMessage OFFSET Invalid -9") [V reads, I the meaning of those fields, left 0].
+ * common8: NET_REG_INFO_COMMON in the BB5 (N95) modem's 8-byte form `00 08 st mode nnames 00 00 00` (PN_NETWORK 0x0A,
+ * builder 0xF01EEAA6 [V] docs/research/n95-isi-encoders.md 4.1); otherwise the 4-byte form the N8 (PN_MODEM_NETWORK
+ * 0xC8) path has always sent. d holds NET_REG_PAYLOAD_MAX bytes. */
+#define NET_REG_PAYLOAD_MAX 34
+static int net_reg_payload(SyborgModemState *s, uint8_t *d, bool common8)
 {
     int lac = modem_config_int(s, "sim.lac", 1), ci = modem_config_int(s, "sim.ci", 1);
+    int c = common8 ? 8 : 4;
     uint8_t p[3];
     sim_plmn(s, p);
+    memset(d, 0, NET_REG_PAYLOAD_MAX);
     /* NET_REG_INFO_COMMON {status 0 HOME, selection mode 2 AUTOMATIC} (0 showed "Operator selection: Manual");
        sub-block 0x09 @0x0d = 1, @0x0e = 1, @0x0f = 1: the cell has packet service (nokiatsy 0x80e97ec2 turned 0/0
        into capability 5: MPM saw no packet data for destinations, the browser failed, "Network unavailable") [V
-       reads, I meanings] */
-    uint8_t b[30] = { 0x00, 0x02, 0x00, 0x04, 0x00, 0x02,
-                      0x09, 0x18, lac >> 8, lac & 0xff, ci >> 24, (ci >> 16) & 0xff, (ci >> 8) & 0xff, ci & 0xff,
-                      p[0], p[1], p[2] };
-    b[6 + 0x0d] = 1;
-    b[6 + 0x0e] = 1;
-    b[6 + 0x0f] = 1;
-    memcpy(d, b, sizeof(b));
-    return sizeof(b);
+       reads, I meanings]; [0x0e] is a mapped value 01..03 in the real modem, so 1 is legal [V 4.1] */
+    const uint8_t hdr[6] = { 0x00, 0x02, 0x00, (uint8_t)c, 0x00, 0x02 };
+    memcpy(d, hdr, sizeof(hdr));
+    uint8_t *b = d + 2 + c;
+    const uint8_t gsm[9] = { 0x09, 0x18, (uint8_t)(lac >> 8), (uint8_t)lac, (uint8_t)(ci >> 24), (uint8_t)(ci >> 16),
+                             (uint8_t)(ci >> 8), (uint8_t)ci, p[0] };
+    memcpy(b, gsm, sizeof(gsm));
+    b[9] = p[1];
+    b[10] = p[2];
+    b[0x0d] = 1;
+    b[0x0e] = 1;
+    b[0x0f] = 1;
+    return 2 + c + 0x18;
+}
+
+/* NET_RAT_INFO sub-block 0x2C after `00 01` (cause OK, nsb 1): rat 1 GSM / 2 UMTS. long8: the BB5 (N95) modem's
+ * 8-byte form, GSM `2C 08 01 01 00 00 00 00`, UMTS `2C 08 02 00 00 00 00 00` (0xF01EF884 / 0xF01EF8BA [V]
+ * n95-isi-encoders.md 4.1, 11.5 item 7); else the 4-byte `2C 04 rat 00` of the N8 path. Returns the length. */
+static int net_rat_payload(SyborgModemState *s, uint8_t *d, bool long8)
+{
+    uint8_t rat = (uint8_t)modem_config_int(s, "sim.rat", 2);
+    memset(d, 0, 10);
+    d[0] = 0x00;
+    d[1] = 0x01;
+    d[2] = 0x2c;
+    d[3] = long8 ? 0x08 : 0x04;
+    d[4] = rat;
+    if (long8 && rat == 1) {
+        d[5] = 0x01;
+    }
+    return long8 ? 10 : 6;
 }
 
 /* PN_SIM with a SIM: true when answered */
@@ -378,10 +406,12 @@ static bool sim_request(SyborgModemState *s, uint32_t ch, const uint8_t *m, uint
 {
     uint8_t svc = len > 10 ? m[10] : 0;
     switch (id) {
-    case 0xc0:                      /* SIM_STATUS: service 0 -> 01 OK in the real modem's 6-byte layout; SIM lock
-                                       service 01 -> 01 (no lock); others as configured below (modem.simst) */
+    case 0xc0:                      /* SIM_STATUS: service 0 -> the N95 modem's ready state (state 8): `00 01 01 b5 00 00`,
+                                       b5 = 00 (no card flag bit 7, not the value-4 case) [V] n95-isi-encoders.md 9.1, 11.5
+                                       item 12 (was {00 01 00 FF 00 00}); SIM lock service 01 -> 01 (no lock); others as
+                                       configured below (modem.simst) */
         if (svc == 0x00) {
-            const uint8_t d[6] = { 0x00, 0x01, 0x00, 0xff, 0x00, 0x00 };
+            const uint8_t d[6] = { 0x00, 0x01, 0x01, 0x00, 0x00, 0x00 };
             modem_reply(s, ch, RES_SIM, tid, 0xc1, d, 6);
             return true;
         }
@@ -402,6 +432,13 @@ static bool sim_request(SyborgModemState *s, uint32_t ch, const uint8_t *m, uint
             d[3 + (i + 1) / 2] = hi << 4 | lo;
         }
         modem_reply(s, ch, RES_SIM, tid, 0x1e, d, sizeof(d));
+        return true;
+    }
+    case 0x19: {                    /* SIM read service 2F -> 1A {2F, 24 data not available, 00 00 00 00}: the N95 modem's
+                                       SIM-present "not available" answer is 6 data bytes [V] n95-isi-encoders.md 9.1, 11.5
+                                       item 10 (no SIM: the table's {2F FB}) */
+        const uint8_t d[6] = { svc, 0x24 };
+        modem_reply(s, ch, RES_SIM, tid, 0x1a, d, 6);
         return true;
     }
     case 0x33: {                    /* {3E 00} at start-up -> 34 {3E, 01 OK, 50-byte name (UCS-2?), empty}: nokiatsy
@@ -1005,10 +1042,10 @@ static bool uicc_request(SyborgModemState *s, uint32_t ch, const uint8_t *m, uin
 /* PN_MODEM_NETWORK with a SIM: registered on the home network */
 static bool net_request(SyborgModemState *s, uint32_t ch, uint8_t tid, uint8_t id)
 {
-    uint8_t d[32];
+    uint8_t d[NET_REG_PAYLOAD_MAX];
     switch (id) {
     case 0x00:                      /* NET_MODEM_REG_STATUS_GET -> RESP 02 */
-        modem_reply(s, ch, 0xc8, tid, 0x02, d, net_reg_payload(s, d));
+        modem_reply(s, ch, 0xc8, tid, 0x02, d, net_reg_payload(s, d, false));
         return true;
     case 0x1a: {                    /* {05} (sent after every registration status; the TSY's packet-service
                                        registration waits on it) -> 1B {00 OK, ...} [I layout: being probed] */
@@ -1016,9 +1053,9 @@ static bool net_request(SyborgModemState *s, uint32_t ch, uint8_t tid, uint8_t i
         modem_reply(s, ch, 0xc8, tid, 0x1b, r, sizeof(r));
         return true;
     }
-    case 0x36: {                    /* NET_RAT -> 37 {OK, 1 sb: 2C {rat}} (1 GSM, 2 UMTS) [V] */
-        const uint8_t r[6] = { 0x00, 0x01, 0x2c, 0x04, modem_config_int(s, "sim.rat", 2), 0x00 };
-        modem_reply(s, ch, 0xc8, tid, 0x37, r, 6);
+    case 0x36: {                    /* NET_RAT -> 37 {OK, 1 sb: 2C {rat}} (1 GSM, 2 UMTS) [V N8 TSY] */
+        uint8_t r[10];
+        modem_reply(s, ch, 0xc8, tid, 0x37, r, net_rat_payload(s, r, false));
         return true;
     }
     }
@@ -1046,9 +1083,9 @@ static void sim_inds(SyborgModemState *s, uint32_t ch, int after_req)
                                        the N8 TSY does not subscribe to C8 01 but handles it */
         return;
     }
-    uint8_t d[32];
+    uint8_t d[NET_REG_PAYLOAD_MAX];
     c->ind_sent |= 1u << 31;
-    modem_reply(s, ch, 0xc8, 0x00, 0x01, d, net_reg_payload(s, d));
+    modem_reply(s, ch, 0xc8, 0x00, 0x01, d, net_reg_payload(s, d, false));
     modem_log(s, ch, "ch %u SIM: registration indication", CH_NUM(ch));
 }
 
@@ -1083,6 +1120,110 @@ static void modem_audio_params(SyborgModemState *s, const uint8_t *m, uint32_t l
     }
     s->aud_src = src;
     s->aud_on = on;
+}
+
+/* the table's reply to (res, req), or NULL */
+static const ModemReply *modem_table(SyborgModemState *s, uint8_t res, uint8_t req)
+{
+    for (unsigned i = 0; i < s->nreplies; i++) {
+        if (s->replies[i].res == res && s->replies[i].req == req) {
+            return &s->replies[i];
+        }
+    }
+    return NULL;
+}
+
+/* EM server (resource 0x17, em_srv.c): request {mask, 00} -> id + 1 {01 OK, nsb, one 4-byte sub-block per set mask
+ * bit, in bit order}; mask 0 or an unknown bit -> {02, 00} [V] docs/research/n95-isi-encoders.md 5 (0xF01B99E2,
+ * 0xF01B9996). Bit -> sub-block: 00 -> 00 01 02 03, 08 -> 13 14, 0A -> 15 16 17 18 25. The values come from the
+ * table's line for the request (its sub-blocks are the pool, looked up by id; hack H-em: battery 7/7 bars, charger
+ * not connected); a sub-block not in the pool is {id, 04, 00, 00} (25: FF FF). Without a table line the phone's EM
+ * requests stay unanswered, as before. */
+static bool em_request(SyborgModemState *s, uint32_t ch, const uint8_t *m, uint32_t len, uint8_t tid, uint8_t id)
+{
+    static const uint8_t sb00[] = { 0x00, 0x01, 0x02, 0x03 }, sb08[] = { 0x13, 0x14 },
+                         sb0a[] = { 0x15, 0x16, 0x17, 0x18, 0x25 };
+    const uint8_t *map;
+    unsigned nmap;
+    switch (id) {
+    case 0x00: map = sb00; nmap = sizeof(sb00); break;
+    case 0x08: map = sb08; nmap = sizeof(sb08); break;
+    case 0x0a: map = sb0a; nmap = sizeof(sb0a); break;
+    default: return false;
+    }
+    const ModemReply *t = modem_table(s, 0x17, id);
+    if (!t) {
+        return false;
+    }
+    unsigned mask = len > 10 ? m[10] : 0;
+    uint8_t d[2 + 4 * 5] = { 0x01, 0x00 };
+    if (!mask || mask >> nmap) {
+        d[0] = 0x02;                /* failure */
+        modem_reply(s, ch, 0x17, tid, t->resp, d, 2);
+        return true;
+    }
+    unsigned o = 2;
+    for (unsigned b = 0; b < nmap; b++) {
+        if (!(mask & 1u << b)) {
+            continue;
+        }
+        uint8_t *sb = d + o;
+        sb[0] = map[b];
+        sb[1] = 0x04;
+        sb[2] = sb[3] = map[b] == 0x25 ? 0xff : 0x00;
+        for (unsigned k = 2; k + 4 <= t->len && t->data[k + 1] >= 2; k += t->data[k + 1]) {
+            if (t->data[k] == map[b] && t->data[k + 1] == 0x04) {
+                memcpy(sb, t->data + k, 4);
+                break;
+            }
+        }
+        o += 4;
+        d[1]++;
+    }
+    modem_reply(s, ch, 0x17, tid, t->resp, d, o);
+    return true;
+}
+
+/* days since 1970-01-01 (unsigned: 1970..2106) -> civil date (proleptic Gregorian; H. Hinnant's civil_from_days).
+ * 32-bit arithmetic only: the hosted build has no 64-bit division helpers. */
+static void modem_civil(uint32_t days, int *y, int *mo, int *d)
+{
+    days += 719468;
+    uint32_t era = days / 146097;
+    uint32_t doe = days - era * 146097;
+    uint32_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    uint32_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    uint32_t mp = (5 * doy + 2) / 153;
+    *d = (int)(doy - (153 * mp + 2) / 5 + 1);
+    *mo = (int)(mp < 10 ? mp + 3 : mp - 9);
+    *y = (int)(yoe + era * 400 + (*mo <= 2));
+}
+
+/* RTC status 19 0A -> 0B {01 OK, 02, sb 01 date/time `01 0C 01 v2 YYYY MM DD hh mm ss x`, sb 04 `04 04 v 00`}
+ * [V layout] docs/research/n95-isi-encoders.md 11.1 (0xF014F356). The table line holds the whole reply with a fixed
+ * date; when the host has a clock, the date/time fields are the host's UTC (the phone's RTC, H-rtc, is UTC too).
+ * Without a table line, or one without sub-block 01 first, the table answers as written. */
+static bool rtc_request(SyborgModemState *s, uint32_t ch, uint8_t tid)
+{
+    const ModemReply *t = modem_table(s, 0x19, 0x0a);
+    if (!t || t->len < 14 || t->data[2] != 0x01 || t->data[3] != 0x0c || !s->host->wall_seconds) {
+        return false;
+    }
+    uint8_t d[MODEM_REPLY_MAX];
+    memcpy(d, t->data, t->len);
+    int64_t w = s->host->wall_seconds(s->host_ctx);
+    uint32_t now = w < 0 ? 0 : (uint32_t)w, days = now / 86400, sec = now % 86400;
+    int y, mo, dd;
+    modem_civil(days, &y, &mo, &dd);
+    d[6] = (uint8_t)(y >> 8);
+    d[7] = (uint8_t)y;
+    d[8] = (uint8_t)mo;
+    d[9] = (uint8_t)dd;
+    d[10] = (uint8_t)(sec / 3600);
+    d[11] = (uint8_t)(sec / 60 % 60);
+    d[12] = (uint8_t)(sec % 60);
+    modem_reply(s, ch, 0x19, tid, t->resp, d, t->len);
+    return true;
 }
 
 static void modem_request(SyborgModemState *s, uint32_t ch, const uint8_t *m, uint32_t len)
@@ -1126,6 +1267,13 @@ static void modem_request(SyborgModemState *s, uint32_t ch, const uint8_t *m, ui
         case 0x12:
             modem_reply(s, ch, res, tid, 0x75, z, 2);
             return;
+        case 0x16: {                /* MTC_RF_STATUS_QUERY -> 79 {x, rf}: rf = 1 in NORMAL (01), TEST (04), LOCAL (05),
+                                       else 0 (0xF0176CAE); x a RAM value not identified, 00 [V rule, I x]
+                                       docs/research/n95-isi-encoders.md 2 (was the table's {00 00}) */
+            const uint8_t d[2] = { 0x00, s->mtc_state == 0x01 || s->mtc_state == 0x04 || s->mtc_state == 0x05 };
+            modem_reply(s, ch, res, tid, 0x79, d, 2);
+            return;
+        }
         }
     } else if (res == RES_SIM) {
         if (sim_present(s) && sim_request(s, ch, m, len, tid, id)) {
@@ -1151,8 +1299,10 @@ static void modem_request(SyborgModemState *s, uint32_t ch, const uint8_t *m, ui
                     st = hex_nibble(c[k + 3]) << 4 | hex_nibble(c[k + 4]);
                 }
             }
-            uint8_t d[2] = { svc, st };
-            modem_reply(s, ch, res, tid, 0xc1, d, 2);
+            /* service 00: the N95 modem's 6-byte form, no card = `00 06 00 FF 00 00` (state 4 with the no-card flag) [V]
+               n95-isi-encoders.md 9.1, 11.5 item 11; other services: `svc st` (2 bytes, as C0 {01} -> `01 x`) [V] */
+            uint8_t d[6] = { svc, st, 0x00, 0xff, 0x00, 0x00 };
+            modem_reply(s, ch, res, tid, 0xc1, d, svc == 0x00 ? 6 : 2);
             return;
         }
         case 0xe4:
@@ -1178,9 +1328,11 @@ static void modem_request(SyborgModemState *s, uint32_t ch, const uint8_t *m, ui
         modem_reply_later(s, units > 0 ? units * 5 : 0, ch, res, tid, 0x35, m + 10, 6);
         return;
     } else if (res == RES_SEC && id == 0x11) {
-        /* SEC_STATE_REQ -> SEC_STARTUP_OK; 9.3 SAStartupService reads [10], [11] and [12] */
-        static const uint8_t d[3] = { 0x05, 0x00, 0x00 };
-        modem_reply(s, ch, res, tid, 0x12, d, 3);
+        /* SEC_STATE_REQ -> SEC_STATE_RESP {05 startup OK, 16 (no code query pending), flag 00, 00 00 00}: the N95
+           modem's 6 bytes (0xF01A1E52) [V layout] docs/research/n95-isi-encoders.md 3 (was {05 00 00}); 9.3
+           SAStartupService reads [10], [11] and [12] */
+        static const uint8_t d[6] = { 0x05, 0x16, 0x00, 0x00, 0x00, 0x00 };
+        modem_reply(s, ch, res, tid, 0x12, d, 6);
         return;
     } else if (res == 0x1c && id == 0x2d) {
         modem_reply(s, ch, res, tid, 0x2e, z, 6);
@@ -1242,15 +1394,15 @@ static void modem_request(SyborgModemState *s, uint32_t ch, const uint8_t *m, ui
     if (res == 0x0a && sim_present(s) && (id == 0x00 || id == 0x36)) {
         /* PN_NETWORK (S60 3rd/5th, N95): the same registration as PN_MODEM_NETWORK, in the old numbering:
            REG_STATUS_GET 00 -> 01 + REG_STATUS_IND 02 (the N95's NOKIATSY 0x808dd3c0 reads the same sub-blocks
-           and offsets as the N8's); NET_RAT 36 -> 37 */
-        uint8_t d[32];
+           and offsets as the N8's); NET_RAT 36 -> 37. Both in the N95 modem's layouts: sub-block 00 is 8 bytes and
+           sub-block 2C is 8 bytes [V] docs/research/n95-isi-encoders.md 4.1, 11.5 items 7-8 (realigned 2026-11-18) */
+        uint8_t d[NET_REG_PAYLOAD_MAX];
         if (id == 0x00) {
-            int n = net_reg_payload(s, d);
+            int n = net_reg_payload(s, d, true);
             modem_reply(s, ch, res, tid, 0x01, d, n);
             modem_reply(s, ch, res, 0x00, 0x02, d, n);
         } else {
-            const uint8_t r[6] = { 0x00, 0x01, 0x2c, 0x04, (uint8_t)modem_config_int(s, "sim.rat", 2), 0x00 };
-            modem_reply(s, ch, res, tid, 0x37, r, 6);
+            modem_reply(s, ch, res, tid, 0x37, d, net_rat_payload(s, d, true));
         }
         return;
     }
@@ -1306,12 +1458,16 @@ static void modem_request(SyborgModemState *s, uint32_t ch, const uint8_t *m, ui
     if (res == 0x31 && sim_present(s) && gpds_request(s, ch, m, len, tid, id)) {
         return;
     }
-    for (unsigned i = 0; i < s->nreplies; i++) {
-        ModemReply *r = &s->replies[i];
-        if (r->res == res && r->req == id) {
-            modem_reply(s, ch, res, tid, r->resp, r->data, r->len);
-            return;
-        }
+    if (res == 0x17 && em_request(s, ch, m, len, tid, id)) {
+        return;
+    }
+    if (res == 0x19 && id == 0x0a && rtc_request(s, ch, tid)) {
+        return;
+    }
+    const ModemReply *r = modem_table(s, res, id);
+    if (r) {
+        modem_reply(s, ch, res, tid, r->resp, r->data, r->len);
+        return;
     }
     modem_log(s, ch, "ch %u no reply for resource %02x msg %02x", CH_NUM(ch), res, id);
 }
@@ -1592,7 +1748,8 @@ int sybmodem_load_replies(SyborgModemState *s, char *text)
         if (hash) {
             *hash = 0;
         }
-        unsigned nf = 0, v[4 + 64];
+        static unsigned v[4 + MODEM_REPLY_MAX];     /* at set-up only: not re-entered */
+        unsigned nf = 0;
         for (char *w = l; *w && nf < sizeof(v) / sizeof(v[0]);) {
             while (*w == ' ' || *w == '\t' || *w == '\r') {
                 w++;
@@ -1607,8 +1764,8 @@ int sybmodem_load_replies(SyborgModemState *s, char *text)
         }
         if (nf >= 4) {
             ModemReply *r = &s->replies[s->nreplies++];
-            r->res = v[0]; r->req = v[1]; r->resp = v[2]; r->len = MIN(v[3], 64);
-            for (unsigned i = 4; i < nf && i - 4 < 64; i++) {
+            r->res = v[0]; r->req = v[1]; r->resp = v[2]; r->len = MIN(v[3], MODEM_REPLY_MAX);
+            for (unsigned i = 4; i < nf && i - 4 < MODEM_REPLY_MAX; i++) {
                 r->data[i - 4] = v[i];
             }
         }

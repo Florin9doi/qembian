@@ -1,0 +1,49 @@
+diff -ru a/hw/dma/omap_dma.c b/hw/dma/omap_dma.c
+--- a/hw/dma/omap_dma.c	2026-11-18 16:39:11.989634878 +0100
++++ b/hw/dma/omap_dma.c	2026-11-18 16:39:12.028457548 +0100
+@@ -130,27 +130,39 @@
+ #define TRANS_ERR_INTR  (1 << 8)
+ #define MISALIGN_INTR   (1 << 11)
+ 
++/*
++ * qembian: a channel interrupts only for the status bits its CICR enables (the line is
++ * status & interrupts). The status also carries SYNC (bit 6, set when a synchronised channel
++ * activates) and unmasked frame bits; raising the line for those gave the Nokia 9500's XbusDma
++ * an RX interrupt before its block had arrived: its handler (0x500B4C94) found no BLOCK bit,
++ * disabled the channel and returned, and the link died (XBUSProtocol fault 0x1000D).
++ */
++static inline int omap_dma_ch_pending(struct omap_dma_channel_s *ch)
++{
++    return ch->status & ch->interrupts;
++}
++
+ static inline void omap_dma_interrupts_update(struct omap_dma_s *s)
+ {
+     struct omap_dma_channel_s *ch = s->ch;
+ 
+     /* First three interrupts are shared between two channels each. */
+-    if (ch[0].status | ch[6].status) {
++    if (omap_dma_ch_pending(&ch[0]) | omap_dma_ch_pending(&ch[6])) {
+         qemu_irq_raise(ch[0].irq);
+     }
+-    if (ch[1].status | ch[7].status) {
++    if (omap_dma_ch_pending(&ch[1]) | omap_dma_ch_pending(&ch[7])) {
+         qemu_irq_raise(ch[1].irq);
+     }
+-    if (ch[2].status | ch[8].status) {
++    if (omap_dma_ch_pending(&ch[2]) | omap_dma_ch_pending(&ch[8])) {
+         qemu_irq_raise(ch[2].irq);
+     }
+-    if (ch[3].status) {
++    if (omap_dma_ch_pending(&ch[3])) {
+         qemu_irq_raise(ch[3].irq);
+     }
+-    if (ch[4].status) {
++    if (omap_dma_ch_pending(&ch[4])) {
+         qemu_irq_raise(ch[4].irq);
+     }
+-    if (ch[5].status) {
++    if (omap_dma_ch_pending(&ch[5])) {
+         qemu_irq_raise(ch[5].irq);
+     }
+ }

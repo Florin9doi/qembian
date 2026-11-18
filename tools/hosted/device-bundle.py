@@ -134,10 +134,19 @@ def main():
                 glargs += [opt, v]
     for d in ('src/hosted/glserver', 'src/syvg', 'src/hosted/include/board'):
         copy_tree(os.path.join(ROOT, d), os.path.join(out, d))
+    if gl:
+        # scripts/build-syvg.sh compiles the pinned OpenVG reference implementation and the Khronos headers;
+        # without them `run.sh build-gl` on the device fails with
+        # "cp: can't stat 'external/oss.FCL.sf.os.graphics/openvg/.../sfopenvg'" (bug 2026-11-14, Pixel 3a)
+        g = 'external/oss.FCL.sf.os.graphics'
+        for sub in ('openvg/openvgrefimplementation/sfopenvg',
+                    'openvg/openvginterface/include',
+                    'egl/eglinterface/include/1.4'):
+            copy_tree(os.path.join(ROOT, g, sub), os.path.join(out, g, sub))
     os.makedirs(os.path.join(out, 'src/qemu-syborg/hw/arm'), exist_ok=True)
     hw = os.path.join(ROOT, 'src/qemu-syborg/hw/arm')
     for f in os.listdir(hw):
-        if f.startswith('syborg_gl') or f in ('syvg.h', 'vg2_fn.h'):
+        if f.startswith('syborg_gl') or f in ('syborg.h', 'syvg.h', 'vg2_fn.h'):
             shutil.copy2(os.path.join(hw, f), os.path.join(out, 'src/qemu-syborg/hw/arm', f))
     os.makedirs(os.path.join(out, 'scripts'), exist_ok=True)
     for f in ('build-glserver.sh', 'build-syvg.sh'):

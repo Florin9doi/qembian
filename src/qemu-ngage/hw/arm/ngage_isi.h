@@ -8,6 +8,8 @@ void ngage_isi_ctor(uint32_t obj, uint32_t unit);
 void ngage_isi_open(uint32_t dlc, uint32_t unit);
 void ngage_isi_call(uint32_t obj, unsigned method, uint32_t r1, uint32_t a1, uint32_t a2);
 void ngage_isi_load(const char *path);
+void ngage_isi_isa_send(const uint8_t *b, uint32_t len);   /* Nokia 6600: ISA frames */
+uint32_t ngage_isi_isa_take(uint8_t *buf, uint32_t cap);   /* Nokia 9500: XBUS */
 bool ngage_isi_ready(void);
 bool ngage_isi_fetch(uint32_t *dlc, uint32_t *a1, uint32_t *req, uint32_t *len);
 uint32_t ngage_isi_fetched_word(unsigned off);

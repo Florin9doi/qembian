@@ -1,0 +1,20 @@
+--- a/target/arm/helper.c	2026-11-18 20:06:44.712197965 +0100
++++ b/target/arm/helper.c	2026-11-18 20:06:44.736003777 +0100
+@@ -8903,9 +8903,16 @@
+          * this is a lie, as there was no c1_sys on V4T/V5, but who cares
+          * and we should just guard the thumb mode on V4
+          */
+-        if (arm_feature(env, ARM_FEATURE_V4T)) {
++        /*
++         * SCTLR.TE exists from ARMv6T2 on; before that bit 30 is something else (ARM920T: nF, the
++         * clocking mode) or reserved, and exceptions are always taken in ARM state. The Sony Ericsson
++         * P910i bootstrap sets bit 30 on its ARM926 (it ORs in 0x40001000).
++         */
++        if (arm_feature(env, ARM_FEATURE_THUMB2)) {
+             env->thumb =
+                 (A32_BANKED_CURRENT_REG_GET(env, sctlr) & SCTLR_TE) != 0;
++        } else {
++            env->thumb = 0;
+         }
+         env->regs[14] = env->regs[15] + offset;
+     }

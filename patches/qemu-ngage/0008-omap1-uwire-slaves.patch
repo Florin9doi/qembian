@@ -1,0 +1,65 @@
+diff -ru a/hw/arm/omap1.c b/hw/arm/omap1.c
+--- a/hw/arm/omap1.c	2026-11-18 12:41:57.309925264 +0100
++++ b/hw/arm/omap1.c	2026-11-18 12:41:57.332240064 +0100
+@@ -2148,14 +2148,34 @@
+     uint16_t rxbuf;
+     uint16_t control;
+     uint16_t setup[5];
++
++    /* qembian: devices on the chip selects (board code, omap_uwire_attach) */
++    struct {
++        void (*send)(void *opaque, uint16_t word, int nbits);
++        uint16_t (*receive)(void *opaque, int nbits);
++        void *opaque;
++    } slave[4];
+ };
+ 
++void omap_uwire_attach(struct omap_uwire_s *s, int chipselect,
++                       void (*send)(void *opaque, uint16_t word, int nbits),
++                       uint16_t (*receive)(void *opaque, int nbits), void *opaque)
++{
++    s->slave[chipselect & 3].send = send;
++    s->slave[chipselect & 3].receive = receive;
++    s->slave[chipselect & 3].opaque = opaque;
++}
++
+ static void omap_uwire_transfer_start(struct omap_uwire_s *s)
+ {
+     int chipselect = (s->control >> 10) & 3;        /* INDEX */
+ 
+     if ((s->control >> 5) & 0x1f) {         /* NB_BITS_WR */
+-        if (s->control & (1 << 12)) {       /* CS_CMD */
++        int nbits = (s->control >> 5) & 0x1f;
++
++        if (s->slave[chipselect].send) {
++            s->slave[chipselect].send(s->slave[chipselect].opaque, s->txbuf >> (16 - nbits), nbits);
++        } else if (s->control & (1 << 12)) {       /* CS_CMD */
+             qemu_log_mask(LOG_UNIMP, "uWireSlave TX CS:%d data:0x%04x\n",
+                           chipselect,
+                           s->txbuf >> (16 - ((s->control >> 5) & 0x1f)));
+@@ -2166,7 +2186,10 @@
+     }
+ 
+     if ((s->control >> 0) & 0x1f) {         /* NB_BITS_RD */
+-        if (s->control & (1 << 12)) {       /* CS_CMD */
++        if (s->slave[chipselect].receive) {
++            s->rxbuf = s->slave[chipselect].receive(s->slave[chipselect].opaque,
++                                                    s->control & 0x1f);
++        } else if (s->control & (1 << 12)) {       /* CS_CMD */
+             qemu_log_mask(LOG_UNIMP, "uWireSlave RX CS:%d\n", chipselect);
+         }
+         s->control |= 1 << 15;              /* RDRB */
+diff -ru a/include/hw/arm/omap.h b/include/hw/arm/omap.h
+--- a/include/hw/arm/omap.h	2026-11-18 12:41:57.309925264 +0100
++++ b/include/hw/arm/omap.h	2026-11-18 12:41:57.332763826 +0100
+@@ -266,6 +266,10 @@
+ qemu_irq *omap_mpuio_in_get(struct omap_mpuio_s *s);
+ 
+ struct omap_uwire_s;
++/* qembian: a device on a Microwire chip select (word = the bits sent, right-aligned) */
++void omap_uwire_attach(struct omap_uwire_s *s, int chipselect,
++                       void (*send)(void *opaque, uint16_t word, int nbits),
++                       uint16_t (*receive)(void *opaque, int nbits), void *opaque);
+ 
+ struct I2SCodec {
+     void *opaque;

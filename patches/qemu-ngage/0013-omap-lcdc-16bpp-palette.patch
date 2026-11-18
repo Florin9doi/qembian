@@ -1,0 +1,44 @@
+diff -ru a/hw/display/omap_lcdc.c b/hw/display/omap_lcdc.c
+--- a/hw/display/omap_lcdc.c	2026-11-18 16:58:40.032746207 +0100
++++ b/hw/display/omap_lcdc.c	2026-11-18 17:01:50.802279159 +0100
+@@ -48,6 +48,8 @@
+     uint16_t palette[256];
+     int palette_done;
+     int frame_done;
++    hwaddr palette_irq_base;        /* qembian: the palette whose loaded-interrupt was given */
++    bool palette_irq_given;
+     int invalidate;
+     int sync_error;
+ };
+@@ -59,7 +61,15 @@
+         return;
+     }
+ 
+-    if (s->palette_done && (s->interrupts & 2)) {
++    /*
++     * qembian: the palette-loaded interrupt once per palette address. The Nokia 9500's
++     * VideoDriver acknowledges it by toggling LCD_EN; every re-enable reloaded the palette and
++     * raised it again, for ever [I: real-hardware clearing of the LP status bit not modelled].
++     */
++    if (s->palette_done && (s->interrupts & 2) &&
++        !(s->palette_irq_given && s->palette_irq_base == s->dma->src_f1_top)) {
++        s->palette_irq_given = true;
++        s->palette_irq_base = s->dma->src_f1_top;
+         qemu_irq_raise(s->irq);
+         return;
+     }
+@@ -221,8 +231,13 @@
+         physical_memory_read(
+                 omap_lcd->dma->phys_framebuffer[omap_lcd->dma->current_frame],
+                 omap_lcd->palette, 0x200);
++        /*
++         * qembian: only 8 bpp has a 256-entry palette (0x200 bytes); 1/2/4/12/16 bpp have the
++         * 16-entry one (0x20). With 0x200 for 16 bpp the Nokia 9500's frame (32-byte palette +
++         * 640x200x2) looked too short: sync error, and its LCD restart handler looped.
++         */
+         switch (omap_lcd->palette[0] >> 12 & 7) {
+-        case 3 ... 7:
++        case 3:
+             frame_offset += 0x200;
+             break;
+         default:

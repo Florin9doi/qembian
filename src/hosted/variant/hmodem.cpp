@@ -92,12 +92,20 @@ static bool HostSndRingWritten(void*, int, uint32_t, uint64_t*) { return false; 
 static uint32_t HostSndPending(void*, int, uint64_t) { return 0; }
 static uint32_t HostSndRingSize(void*, int) { return 0; }
 static void HostSndBeep(void*, uint32_t, uint32_t, uint32_t) {}
+// host UTC for the RTC status reply (19 0A date/time sub-block); the phone's own RTC offset (hvariant.cpp) is not
+// applied, as QEMU's modem does not apply syborg-rtc's
+static int64_t HostWallSeconds(void*)
+	{
+	struct { TInt32 s, ns; } ts;
+	hsys(SYS_clock_gettime, 0 /* CLOCK_REALTIME */, &ts);
+	return (int64_t)(TUint32)ts.s;
+	}
 
 static const SybModemHost ModemHost =
 	{
 	HostSetIrq, HostTimerMod, HostTimerDel, HostGuestError, HostPower,
 	HostNetPresent, HostNetSend, HostNetFlush,
-	HostSndRingWritten, HostSndPending, HostSndRingSize, HostSndBeep
+	HostSndRingWritten, HostSndPending, HostSndRingSize, HostSndBeep, HostWallSeconds
 	};
 
 // ---- timers: one host thread fires them in due order (under the modem lock)

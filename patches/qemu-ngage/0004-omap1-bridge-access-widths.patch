@@ -1,0 +1,109 @@
+--- a/hw/arm/omap1.c	2026-11-18 11:26:12.475175653 +0100
++++ b/hw/arm/omap1.c	2026-11-18 11:26:12.501487804 +0100
+@@ -378,12 +378,20 @@
+     MemoryRegion iomem;
+ };
+ 
++/*
++ * qembian: the OMAP1510 peripheral bridge takes 16-bit accesses to these 32-bit registers (the
++ * Nokia 9500's kernel starts the OS timer with 16-bit writes; dropped, its first tick never came):
++ * a read returns the addressed half, a write is merged into the register.
++ */
+ static uint64_t omap_os_timer_read(void *opaque, hwaddr addr,
+                                    unsigned size)
+ {
+     struct omap_32khz_timer_s *s = opaque;
+     int offset = addr & OMAP_MPUI_REG_MASK;
+ 
++    if (size == 2) {
++        return (omap_os_timer_read(opaque, addr & ~3, 4) >> ((addr & 2) * 8)) & 0xffff;
++    }
+     if (size != 4) {
+         qemu_log_mask(LOG_GUEST_ERROR, "%s: read at offset 0x%" HWADDR_PRIx
+                       " with bad width %d\n", __func__, addr, size);
+@@ -413,6 +421,14 @@
+     struct omap_32khz_timer_s *s = opaque;
+     int offset = addr & OMAP_MPUI_REG_MASK;
+ 
++    if (size == 2) {
++        unsigned sh = (addr & 2) * 8;
++        uint32_t cur = omap_os_timer_read(opaque, addr & ~3, 4);
++
++        omap_os_timer_write(opaque, addr & ~3,
++                            (cur & ~(0xffffu << sh)) | ((value & 0xffff) << sh), 4);
++        return;
++    }
+     if (size != 4) {
+         qemu_log_mask(LOG_GUEST_ERROR, "%s: write at offset 0x%" HWADDR_PRIx
+                       " with bad width %d\n", __func__, addr, size);
+@@ -1257,6 +1273,13 @@
+ {
+     struct omap_mpu_state_s *s = opaque;
+ 
++    if (size == 2) {            /* qembian: 16-bit access merged, as omap_os_timer_write */
++        unsigned sh = (addr & 2) * 8;
++        uint32_t cur = omap_tcmi_read(opaque, addr & ~3, 4);
++
++        omap_tcmi_write(opaque, addr & ~3, (cur & ~(0xffffu << sh)) | ((value & 0xffff) << sh), 4);
++        return;
++    }
+     if (size != 4) {
+         qemu_log_mask(LOG_GUEST_ERROR, "%s: write at offset 0x%" HWADDR_PRIx
+                       " with bad width %d\n", __func__, addr, size);
+@@ -1418,6 +1441,9 @@
+ {
+     struct omap_mpu_state_s *s = opaque;
+ 
++    if (size == 4) {            /* qembian: a 32-bit read of a 16-bit register: the low half */
++        size = 2;
++    }
+     if (size != 2) {
+         qemu_log_mask(LOG_GUEST_ERROR, "%s: read at offset 0x%" HWADDR_PRIx
+                       " with bad width %d\n", __func__, addr, size);
+--- a/hw/gpio/omap_gpio.c	2026-11-18 11:26:12.476175692 +0100
++++ b/hw/gpio/omap_gpio.c	2026-11-18 11:26:12.503595976 +0100
+@@ -74,6 +74,9 @@
+     struct omap_gpio_s *s = opaque;
+     int offset = addr & OMAP_MPUI_REG_MASK;
+ 
++    if (size == 4) {            /* qembian: 32-bit access to a 16-bit register: the low half */
++        size = 2;
++    }
+     if (size != 2) {
+         qemu_log_mask(LOG_GUEST_ERROR, "%s: read at offset 0x%" HWADDR_PRIx
+                       " with bad width %d\n", __func__, addr, size);
+@@ -116,6 +119,10 @@
+     uint16_t diff;
+     int ln;
+ 
++    if (size == 4) {            /* qembian: 32-bit access to a 16-bit register: the low half */
++        size = 2;
++        value &= 0xffff;
++    }
+     if (size != 2) {
+         qemu_log_mask(LOG_GUEST_ERROR, "%s: write at offset 0x%" HWADDR_PRIx
+                       " with bad width %d\n", __func__, addr, size);
+--- a/hw/intc/omap_intc.c	2026-11-18 11:34:48.461562965 +0100
++++ b/hw/intc/omap_intc.c	2026-11-18 11:34:48.485028459 +0100
+@@ -302,11 +302,21 @@
+     OMAP_BAD_REG(addr);
+ }
+ 
++/*
++ * qembian: byte and halfword accesses are widened to the 32-bit registers (the OMAP1510 bridge
++ * takes them). The Nokia 9500's kernel acknowledges with a byte read-modify-write of CONTROL_REG
++ * and sets the ILRs by byte; dropped, the IRQ line never fell (110000 interrupts a second) and
++ * every line stayed edge-triggered at priority 0.
++ */
+ static const MemoryRegionOps omap_inth_mem_ops = {
+     .read = omap_inth_read,
+     .write = omap_inth_write,
+     .endianness = DEVICE_NATIVE_ENDIAN,
+     .valid = {
++        .min_access_size = 1,
++        .max_access_size = 4,
++    },
++    .impl = {
+         .min_access_size = 4,
+         .max_access_size = 4,
+     },

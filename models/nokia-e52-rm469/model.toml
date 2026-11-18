@@ -215,5 +215,6 @@ idle = "Startup::startup sets 101f8766/46 = 104"    # [V] UI phase all done: hom
 startup = { category = 0x101F8766, state = 0x41, ui_phase = 0x46 }
 
 [status]
+smoke_skip = { switch-off = "power key opens no power menu (power-key path not brought up on this phone; F4 and a 2 s End press tried 2026-11-18) [V]" }
 level = "L0"
 updated = "2026-11-10"

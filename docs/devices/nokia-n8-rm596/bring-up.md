@@ -347,3 +347,49 @@ Measured on fresh isolated boots [V]:
   timer) [V disassembly 0x80e71a4e]; channel 35 does not subscribe to MTC indications (`15 C0`): an
   MTC_STATE_INFO_IND experiment changed nothing (not delivered) [V].
 - 701 channel 35 subscribes PN_UICC (8c 05/0b/26), N8 Belle PN_SIM (09 EF) [V].
+
+## Fixed 2026-11-13: `*#0000#` ("Device manager", the software-version dialog) hung forever
+
+Owner report: "`*#0000#` (some service menu with firmware and device info) hangs on n8-delight and
+later phones from n8; the app tries a request and the response never arrives".
+
+**Reproduced deterministically without tapping**: `sydb run 'Z:\sys\bin\NSmlDMSync.exe'` (by *path*;
+`sydb launch 0x101f6de5` is the AppList path, which panics `ViewSrv 14` without the view the `*#0000#`
+handler passes). The window group `40|101f6de5|Device manager|` comes up front and stays; the screen is
+black (no content, only later a busy spinner); the whole system idles (`dbg attach` → `NKIdle`), i.e.
+the app waits for something nobody will deliver.
+
+**Cause: no canned reply for `PN_PHONE_INFO 0x1B` message `0x0B`.** The chain, from the KIPC trace
+[V]:
+
+```
+nsmldmsync.exe::Device manager -> EInfoServer        M:-1 (Connect)  = 0
+nsmldmsync.exe::Device manager -> EInfoServer        M:2             (the info read)
+    EInfoServer (einfoserver.exe) -> modem:  ISCPEER ch 11 send  ... 1b ... 0b ...
+    ISCPEER ch 11 no reply for resource 1b msg 0b                    ← nothing ever came back
+```
+
+`einfoserver.exe` builds that message and sends it with `IscApi::SendSynchron` + `User::WaitForRequest`
+and **no timeout** (Thumb disassembly, `einfoserver.exe+0x94a` region: `movs r1,#11` →
+`blx iscapi.dll!#21` → `blx User::WaitForRequest`), so the info server blocks for good, the app's
+`M:2` never completes, and `*#0000#` shows an empty window. The info server is what the dialog asks for
+the phone's identity ("RM-596"); the modem is the only source.
+
+**Fixed in the device's own reply table** (`models/nokia-n8-rm596/isi-replies.txt`):
+
+```
+reply 1B 0B 0C 00 01 4E 0C 00 06 52 4D 2D 35 39 36 00 00   # "RM-596"
+```
+
+Layout from the N95 protocol notes (`docs/devices/nokia-n95-8gb-rm320/n95-isc-isi-protocol-2.md`
+3.5 and the reply table there): cause OK, subblock id `'N'` (0x4E = product name; a request carrying
+`00 01` asks for `'M'`/manufacturer instead), 16-bit length 6, then the string; the trailing `00 00`
+is unused. A reply table change needs no ROM rebuild — the session regenerates
+`<session>/isi-replies.tab` at launch.
+
+After the fix the modem answers (`ch 11 deliver (24): 00 6c 00 1b 12 00 0b 00 02 0c 00 01 4e 0c 00 06
+52 4d 2d 35 39 36 00 00`) and the dialog comes up.
+
+Why not in `platform/isi/replies-bb5.txt`: this is a Belle-era EInfoServer read; the 9.2/9.4 phones do
+not send it (the N95 notes call the reply "optional" there), so it belongs to the N8 model. The 701 and
+808 (Belle FP) have their own EInfoServer: check theirs before copying the reply there.

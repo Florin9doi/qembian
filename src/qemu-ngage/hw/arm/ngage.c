@@ -20,6 +20,11 @@
  *               device 5: the Bluetooth module (LPRF, ngage_lprf.c), its interrupt CTSI 2 bit 4
  *   0x0C000000  UPP peripherals and internal SRAM (0x0C004000), virtual 0x58000000: catch-all
  *
+ * Machines: -M ngage (N-Gage QD, RH-29) and -M nokia6600 (Nokia 6600, NHL-10, Symbian 7.0s,
+ * docs/devices/nokia-6600-nhl10/bring-up.md). Both are the same DCT4 UPP SoC; what differs per
+ * phone (flash chips, ROM split, NOS entry, kernel addresses the workarounds use) is an
+ * NgageModel below. Comments name N-Gage addresses unless they say otherwise.
+ *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 #include "qemu/osdep.h"
@@ -62,8 +67,43 @@
                                                 the top 8 KB parameter blocks are not modelled */
 #define NGAGE_FLASH_MANUF   0x89            /* Intel; accepted by 0x599c and 0x97c (Q2, Q4) */
 #define NGAGE_FLASH_DEVICE  0x8874          /* bootstrap type 8 (Q5) */
-#define NGAGE_ROM_SPLIT     0x00f00000      /* ROM.bin offset held at the start of chip 1 (Q12) */
 #define NGAGE_SDRAM_BASE    0x0a000000      /* Q3 */
+#define NGAGE_MAX_CHIPS     4               /* chip n at n << 25 */
+
+/*
+ * What differs between the phones on this board. ROM.bin (virtual 0x50000000) is split over
+ * chips by rom_map; ppm segments below the first range's end go into the ROM image (boot block),
+ * the others into the chip their flash address names.
+ */
+typedef struct {
+    uint32_t rom_off, len;          /* ROM.bin range ... */
+    unsigned chip;                  /* ... at the start of this chip */
+} NgageRomRange;
+
+typedef struct {
+    const char *name;
+    unsigned nchips;                /* chips 0..n-1 answer an ID query (the bootstrap halts otherwise) */
+    NgageRomRange rom_map[3];
+    unsigned nrom_map;
+    uint32_t nos_alias;             /* virtual address of physical flash 0 (the NOS's view, Q19) */
+    const uint8_t *stub;            /* NOS stand-in stub, copied at stub_va (H-nos-standin) */
+    size_t stub_len;
+    uint32_t stub_va;
+    const uint32_t (*nos_exports)[2];   /* {NOS address, stub symbol}: jumps into the stub */
+    unsigned nnos_exports;
+    uint32_t screen_chunk_ptr;      /* H-ngage-fb: kernel word holding the screen chunk (0 = off) */
+    bool screen_rgb565;             /* screen chunk pixels: RGB565 (EColor64K), else 0RGB 4444 */
+    uint32_t nos_rx_dfc, nos_rx_flag;   /* the stub's ISI delivery DFC and flag (0 = none) */
+    uint32_t trace_mask_or;         /* bits set in the ROM header's trace mask (+0xD8) */
+    uint16_t flash_manuf, flash_device;     /* the ID every chip answers (CFI01: Intel commands) */
+    uint16_t flash_device1;                 /* chips 1.. if they differ (0 = flash_device) */
+    bool uem_rtc;                   /* the UEM's RTC kept like a phone's: calibration set, so rtc.dll
+                                       finds a valid clock (H-nhl10-rtc) */
+    uint32_t md5_entries[2];        /* ROM offsets of the bootstrap's digest entries (H-ngage-md5);
+                                       0 = the N-Gage's 0x8F00 / 0x8F18 */
+} NgageModel;
+
+static const NgageModel *ngm;
 
 /* Guest PC of the instruction doing the current MMIO access (0 if unknown), for the logs. */
 static uint32_t ngage_pc(void)
@@ -358,6 +398,17 @@ static void ngage_cbus_write(void *opaque, hwaddr addr, uint64_t val, unsigned s
                     v = ngage_cbus_status[i].val;
                     src = " (declared status)";
                 }
+            }
+            if (ngm->uem_rtc && r == (1 << 5 | 0x04) && !c->written[r]) {
+                /*
+                 * H-nhl10-rtc: UEM RTC calibration. rtc.dll takes the clock as valid only when
+                 * this is non-zero (and days != 0xFF) [V docs/research/6600-rtc-clock.md]; a phone
+                 * keeps it (the driver's default is 0xC0). Read as 0, every boot asked for the time
+                 * and date, and a slow answer let the view server kill Phone.app (regression
+                 * "locked_after_restart").
+                 */
+                v = 0xc0;
+                src = " (UEM RTC calibration, H-nhl10-rtc)";
             }
             if (r >> 5 == NGAGE_CBUS_LPRF) {
                 v = ngage_lprf_read(&ngage_lprf, r & 0x1f);
@@ -676,6 +727,7 @@ typedef struct {
     uint64_t panel_frames;      /* whole frames of pixels from the OS side (not the bootstrap) */
     bool os_ramwr;              /* the current RAMWR was issued by lcd.ldd */
     bool fb_logged;
+    bool from_chunk;            /* fb holds the screen chunk (H-ngage-fb), not panel pixels */
 } NgageLcdIf;
 
 #define NGAGE_LCD_LOG_MAX 4000
@@ -806,7 +858,6 @@ static void ngage_lcdif_write(void *opaque, hwaddr addr, uint64_t val, unsigned 
  * EColor4K pixels, 16 bits each (0x0RGB) [V: the buffer reads 0x0FFF white after the header;
  * chunk object +20 physical base 0x0A000000, +24 virtual base, +28 size 0x12000]. Off while the pointer is not set yet (the bootstrap's panel picture shows).
  */
-#define NGAGE_SCREEN_CHUNK_PTR 0x800066ec
 #define NGAGE_SCREEN_HDR       32          /* [V] header (first halfword 0x2000), then pixels */
 
 static bool ngage_lcd_from_screen_chunk(NgageLcdIf *l)
@@ -815,7 +866,8 @@ static bool ngage_lcd_from_screen_chunk(NgageLcdIf *l)
     static uint16_t line[NGAGE_LCD_W];
     CPUState *cs = first_cpu;
 
-    if (!cs || cpu_memory_rw_debug(cs, NGAGE_SCREEN_CHUNK_PTR, &chunk, 4, false) || !chunk ||
+    if (!cs || !ngm->screen_chunk_ptr ||
+        cpu_memory_rw_debug(cs, ngm->screen_chunk_ptr, &chunk, 4, false) || !chunk ||
         cpu_memory_rw_debug(cs, chunk + 24, &base, 4, false) || !base) {
         return false;
     }
@@ -825,7 +877,7 @@ static bool ngage_lcd_from_screen_chunk(NgageLcdIf *l)
             return false;
         }
         for (int x = 0; x < NGAGE_LCD_W; x++) {
-            l->fb[y][x] = le16_to_cpu(line[x]) & 0xfff;
+            l->fb[y][x] = ngm->screen_rgb565 ? le16_to_cpu(line[x]) : le16_to_cpu(line[x]) & 0xfff;
         }
     }
     if (!l->fb_logged) {
@@ -845,6 +897,7 @@ static bool ngage_lcd_gfx_update(void *opaque)
 
     if (!l->panel_frames && ngage_lcd_from_screen_chunk(l)) {
         l->dirty = true;
+        l->from_chunk = true;
     }
     if (!l->dirty) {
         return true;
@@ -859,8 +912,14 @@ static bool ngage_lcd_gfx_update(void *opaque)
         uint32_t *row = (uint32_t *)(dst + y * stride);
         for (int x = 0; x < NGAGE_LCD_W; x++) {
             uint16_t p = l->fb[y][x];
-            uint32_t r = (p >> 8) & 0xf, g = (p >> 4) & 0xf, b = p & 0xf;
-            row[x] = (r * 0x11) << 16 | (g * 0x11) << 8 | (b * 0x11);
+
+            if (ngm->screen_rgb565 && l->from_chunk) {
+                uint32_t r = p >> 11, g = (p >> 5) & 0x3f, b = p & 0x1f;
+                row[x] = (r << 3 | r >> 2) << 16 | (g << 2 | g >> 4) << 8 | (b << 3 | b >> 2);
+            } else {
+                uint32_t r = (p >> 8) & 0xf, g = (p >> 4) & 0xf, b = p & 0xf;
+                row[x] = (r * 0x11) << 16 | (g * 0x11) << 8 | (b * 0x11);
+            }
         }
     }
     l->dirty = false;
@@ -953,6 +1012,8 @@ static const MemoryRegionOps ngage_dbg_ops = {
 #define NGAGE_NOS_BASE  0x0c1f0000          /* board-only address, virtual 0x581F0000 */
 
 #include "ngage_nos_stub.h"
+#include "ngage_nhl10_nos_stub.h"
+#include "ngage_nhl2_nos_stub.h"
 static bool ngage_flash_restored;    /* Q55: saved flash applied, not a factory-fresh phone */
 #include "ngage_isi.h"
 #include "ngage_keys.h"
@@ -968,9 +1029,6 @@ typedef struct {
     uint32_t rx_flag;           /* last value written to the stub's RX_FLAG */
 } NgageNos;
 
-/* The stub's ISI delivery TDfc and "delivery waits" flag, in the NOS bss (nos_standin.S) */
-#define NGAGE_NOS_RX_DFC  0x8000c578
-#define NGAGE_NOS_RX_FLAG 0x8000c570
 
 /*
  * Hand the stub its delivery DFC when a reply waits for a posted receive (Q50). While one
@@ -982,13 +1040,16 @@ static void ngage_nos_rx_kick(NgageNos *n)
     bool ready = ngage_isi_ready();
     uint32_t flag;
 
+    if (!ngm->nos_rx_dfc) {
+        return;
+    }
     if (ready && !n->rx_dfc_busy && !n->dfc) {
-        n->dfc = NGAGE_NOS_RX_DFC;
+        n->dfc = ngm->nos_rx_dfc;
         n->rx_dfc_busy = true;
     }
     flag = cpu_to_le32(ready && !n->dfc);
     if (flag != n->rx_flag && current_cpu &&
-        !cpu_memory_rw_debug(current_cpu, NGAGE_NOS_RX_FLAG, &flag, 4, true)) {
+        !cpu_memory_rw_debug(current_cpu, ngm->nos_rx_flag, &flag, 4, true)) {
         n->rx_flag = flag;
     }
 }
@@ -1033,6 +1094,33 @@ static void ngage_nos_write_out(uint32_t va, uint32_t value, uint32_t len)
     if (current_cpu && va) {
         cpu_memory_rw_debug(current_cpu, va, buf, len, true);
     }
+}
+
+/*
+ * Read an EKA1 8-bit descriptor at virtual 'va' (the current process's view) into buf: the top
+ * 4 bits of the first word are the type [V: 6.1/7.0s e32des8.h layout], the rest the length.
+ *   0 TBufC: data at +4; 1 TPtrC: pointer at +4; 2 TPtr: pointer at +8; 3 TBuf: data at +8;
+ *   4 TPtr over an HBufC (EBufCPtr): +8 points to the HBufC, its data at +4.
+ * Returns the length read, -1 if unreadable.
+ */
+static int ngage_read_des8(uint32_t va, uint8_t *buf, int max)
+{
+    uint32_t w[3], p;
+    int len;
+
+    if (!current_cpu || cpu_memory_rw_debug(current_cpu, va, w, sizeof(w), false)) {
+        return -1;
+    }
+    len = MIN((int)(le32_to_cpu(w[0]) & 0x0fffffff), max);
+    switch (le32_to_cpu(w[0]) >> 28) {
+    case 0: p = va + 4; break;
+    case 1: p = le32_to_cpu(w[1]); break;
+    case 2: p = le32_to_cpu(w[2]); break;
+    case 3: p = va + 8; break;
+    case 4: p = le32_to_cpu(w[2]) + 4; break;
+    default: return -1;
+    }
+    return cpu_memory_rw_debug(current_cpu, p, buf, len, false) ? -1 : len;
 }
 
 static uint64_t ngage_nos_read(void *opaque, hwaddr addr, unsigned size)
@@ -1088,6 +1176,16 @@ static void ngage_nos_write(void *opaque, hwaddr addr, uint64_t val, unsigned si
         qemu_log_mask(LOG_UNIMP, "ngage-nos: NOSDRIVER channel object %08x constructed, unit %u\n",
                       n->a[1], n->a[2]);
         ngage_isi_ctor(n->a[1], n->a[2]);
+        return;
+    }
+    if (val == 0xf900) {
+        qemu_log_mask(LOG_UNIMP, "ngage-nos: NOS object %08x constructed (enosdriver, export 4)\n",
+                      n->a[1]);
+        return;
+    }
+    if (val == 0xfa00) {
+        qemu_log_mask(LOG_UNIMP, "ngage-nos: H-nhl10-hwchunk: hardware chunk %08x reserved\n",
+                      n->a[1]);
         return;
     }
     if (val == 0xfb00) {
@@ -1158,11 +1256,26 @@ static void ngage_nos_write(void *opaque, hwaddr addr, uint64_t val, unsigned si
         }
     }
     static uint16_t ncount[128][64];
-    if (slot == 65 || slot == 66 || ngage_log_hot(&ncount[slot & 127][method & 63]))
+    if (slot == 65 || slot == 66 || slot == 70 || slot == 71 || ngage_log_hot(&ncount[slot & 127][method & 63]))
     qemu_log_mask(LOG_UNIMP, "ngage-nos: slot %u method %u (vtbl +0x%x) this=%08x "
                   "r1=%08x r2=%08x r3=%08x sp[0..3]=%08x %08x %08x %08x -> %08x lr=%08x\n",
                   slot, method, method * 4, n->a[1], n->a[2], n->a[3], n->a[4],
                   n->a[5], n->a[6], n->a[7], n->a[8], n->result, ngage_lr());
+    if (slot == 70 && method == 1) {
+        /* Nokia 6600: NOS export 1 = send (object, const TDesC8&, length) [I] */
+        uint8_t f[512];
+        int len = ngage_read_des8(n->a[2], f, sizeof(f));
+        GString *hx = g_string_new(NULL);
+
+        for (int i = 0; i < len; i++) {
+            g_string_append_printf(hx, " %02x", f[i]);
+        }
+        qemu_log_mask(LOG_UNIMP, "ngage-isa: send (r2=%u) %d bytes:%s\n", n->a[3], len, hx->str);
+        g_string_free(hx, true);
+        if (len > 0) {
+            ngage_isi_isa_send(f, len);
+        }
+    }
     if (slot == 65 && method >= 3 && method <= 5) {
         ngage_isi_call(n->a[1], method, n->a[2], n->a[3], n->a[4]);     /* Q50 */
     }
@@ -1187,7 +1300,8 @@ static struct arm_boot_info ngage_binfo;
  * device-width must be set, otherwise CFI01's legacy ID mode packs both ID bytes into one
  * word. Without a drive the contents are erased (0xFF); 'image' fills them from the start.
  */
-static DeviceState *ngage_flash(hwaddr base, const char *name, const void *image, size_t len)
+static DeviceState *ngage_flash(hwaddr base, const char *name, const void *image, size_t len,
+                                unsigned chip)
 {
     DeviceState *fl = qdev_new(TYPE_PFLASH_CFI01);
     uint8_t *p;
@@ -1203,8 +1317,8 @@ static DeviceState *ngage_flash(hwaddr base, const char *name, const void *image
     qdev_prop_set_uint32(fl, "partition-size", NGAGE_FLASH_PARTITION);
     qdev_prop_set_uint8(fl, "width", 2);
     qdev_prop_set_uint8(fl, "device-width", 2);
-    qdev_prop_set_uint16(fl, "id0", NGAGE_FLASH_MANUF);
-    qdev_prop_set_uint16(fl, "id1", NGAGE_FLASH_DEVICE);
+    qdev_prop_set_uint16(fl, "id0", ngm->flash_manuf);
+    qdev_prop_set_uint16(fl, "id1", chip && ngm->flash_device1 ? ngm->flash_device1 : ngm->flash_device);
     qdev_prop_set_string(fl, "name", name);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(fl), &error_fatal);
     sysbus_mmio_map(SYS_BUS_DEVICE(fl), 0, base);
@@ -1258,10 +1372,10 @@ static void ngage_apply_patches(uint8_t *img, size_t len)
  */
 static void ngage_fix_md5_table(uint8_t *img, size_t len)
 {
-    static const size_t entries[] = { 0x8f00, 0x8f18 };
+    static const size_t ngage_entries[] = { 0x8f00, 0x8f18 };
 
-    for (unsigned i = 0; i < ARRAY_SIZE(entries); i++) {
-        size_t e = entries[i];
+    for (unsigned i = 0; i < ARRAY_SIZE(ngage_entries); i++) {
+        size_t e = ngm->md5_entries[i] ? ngm->md5_entries[i] : ngage_entries[i];
         uint32_t start, end;
         uint8_t dg[16];
         gsize dlen = sizeof(dg);
@@ -1309,7 +1423,7 @@ static char *ngage_mmc_file;         /* -M ngage,mmc=FILE: the memory card image
  * stays in effect for the blocks the phone never wrote, and without FILE nothing persists (each
  * boot formats C: and runs the first-boot factory settings again: ~75 s).
  */
-static uint8_t *ngage_flash_chip[2], *ngage_flash_pristine[2];
+static uint8_t *ngage_flash_chip[NGAGE_MAX_CHIPS], *ngage_flash_pristine[NGAGE_MAX_CHIPS];
 static Notifier ngage_flash_exit;
 
 static void ngage_flash_save(Notifier *n, void *data)
@@ -1323,7 +1437,7 @@ static void ngage_flash_save(Notifier *n, void *data)
         return;
     }
     fwrite("NGFL1", 1, 6, f);
-    for (uint32_t c = 0; c < 2; c++) {
+    for (uint32_t c = 0; c < ngm->nchips; c++) {
         for (uint32_t o = 0; o < NGAGE_FLASH_SIZE; o += NGAGE_FLASH_SECTOR) {
             if (memcmp(ngage_flash_chip[c] + o, ngage_flash_pristine[c] + o, NGAGE_FLASH_SECTOR)) {
                 uint32_t hdr[2] = { cpu_to_le32(c), cpu_to_le32(o) };
@@ -1338,15 +1452,13 @@ static void ngage_flash_save(Notifier *n, void *data)
     }
 }
 
-static void ngage_flash_persist(uint8_t *chip0, uint8_t *chip1)
+static void ngage_flash_persist(void)
 {
     g_autofree char *buf = NULL;
     gsize n = 0, pos = 6;
     unsigned blocks = 0;
 
-    ngage_flash_chip[0] = chip0;
-    ngage_flash_chip[1] = chip1;
-    for (int c = 0; c < 2; c++) {
+    for (unsigned c = 0; c < ngm->nchips; c++) {
         ngage_flash_pristine[c] = g_memdup2(ngage_flash_chip[c], NGAGE_FLASH_SIZE);
     }
     if (g_file_get_contents(ngage_flash_file, &buf, &n, NULL)) {
@@ -1357,7 +1469,7 @@ static void ngage_flash_persist(uint8_t *chip0, uint8_t *chip1)
         while (pos + 8 + NGAGE_FLASH_SECTOR <= n) {
             uint32_t c = ldl_le_p(buf + pos), o = ldl_le_p(buf + pos + 4);
 
-            if (c < 2 && o < NGAGE_FLASH_SIZE && !(o % NGAGE_FLASH_SECTOR)) {
+            if (c < ngm->nchips && o < NGAGE_FLASH_SIZE && !(o % NGAGE_FLASH_SECTOR)) {
                 memcpy(ngage_flash_chip[c] + o, buf + pos + 8, NGAGE_FLASH_SECTOR);
                 blocks++;
             }
@@ -1372,8 +1484,10 @@ static void ngage_flash_persist(uint8_t *chip0, uint8_t *chip1)
     qemu_add_exit_notifier(&ngage_flash_exit);
 }
 
-static void ngage_load_segments(uint8_t *img, size_t len, uint8_t *chip0, uint8_t *chip1)
+static void ngage_load_segments(uint8_t *img, size_t len)
 {
+    uint32_t boot_end = ngm->rom_map[0].len;    /* the boot block: in chip 0's ROM range */
+
     GDir *dir;
     const char *name;
 
@@ -1400,15 +1514,18 @@ static void ngage_load_segments(uint8_t *img, size_t len, uint8_t *chip0, uint8_
             error_report("ngage: cannot read %s", path);
             exit(1);
         }
-        if (img && fa + n <= NGAGE_ROM_SPLIT && fa + n <= len) {
+        if (img && fa + n <= boot_end && fa + n <= len) {
             memcpy(img + fa, buf, n);
             info_report("ngage: ppm: %s -> flash %08" PRIx64 " (%zu bytes, boot block)", name, fa, n);
-        } else if (!img && fa >= NGAGE_ROM_SPLIT && fa + n <= NGAGE_FLASH_SIZE) {
-            memcpy(chip0 + fa, buf, n);
-            info_report("ngage: ppm: %s -> flash %08" PRIx64 " (%zu bytes)", name, fa, n);
-        } else if (!img && fa >= NGAGE_FLASH1_BASE && fa + n <= NGAGE_FLASH1_BASE + NGAGE_FLASH_SIZE) {
-            memcpy(chip1 + (fa - NGAGE_FLASH1_BASE), buf, n);
-            info_report("ngage: ppm: %s -> flash %08" PRIx64 " (%zu bytes)", name, fa, n);
+        } else if (!img && !(fa < boot_end && fa + n <= boot_end)) {
+            uint64_t c = fa / NGAGE_FLASH_SIZE, o = fa % NGAGE_FLASH_SIZE;
+
+            if (c < ngm->nchips && o + n <= NGAGE_FLASH_SIZE) {
+                memcpy(ngage_flash_chip[c] + o, buf, n);
+                info_report("ngage: ppm: %s -> flash %08" PRIx64 " (%zu bytes)", name, fa, n);
+            } else {
+                warn_report("ngage: ppm: %s at flash %08" PRIx64 " is outside the chips", name, fa);
+            }
         }
         g_free(buf);
         g_free(path);
@@ -1420,6 +1537,108 @@ static uint8_t *ngage_flash_ptr(DeviceState *fl)
 {
     return memory_region_get_ram_ptr(pflash_cfi01_get_memory(PFLASH_CFI01(fl)));
 }
+
+/* N-Gage QD (RH-29 V 04.10): ROM split at 0xF00000 (Q12), NOS alias 0x51400000 (Q19) */
+static const uint32_t ngage_rh29_nos_exports[][2] = {
+    /* the two NOS functions nosdriver.ldd imports (Q33): jumps into the stub */
+    { 0x514a260c, NGAGE_NOS_SYM_nos_channel_ctor },
+    { 0x514a1c90, NGAGE_NOS_SYM_nos_channel_open },
+};
+
+static const NgageModel ngage_rh29 = {
+    .name = "ngage",
+    .nchips = 2,
+    .rom_map = { { 0, 0x00f00000, 0 }, { 0x00f00000, 0x01100000, 1 } },
+    .nrom_map = 2,
+    .nos_alias = 0x51400000,
+    .stub = ngage_nos_stub, .stub_len = sizeof(ngage_nos_stub), .stub_va = NGAGE_NOS_STUB_VA,
+    .nos_exports = ngage_rh29_nos_exports, .nnos_exports = ARRAY_SIZE(ngage_rh29_nos_exports),
+    .screen_chunk_ptr = 0x800066ec,     /* Q38 */
+    .nos_rx_dfc = 0x8000c578,           /* nos_standin.S RX_DFC / RX_FLAG (Q50, Q56) */
+    .nos_rx_flag = 0x8000c570,
+    .flash_manuf = NGAGE_FLASH_MANUF, .flash_device = NGAGE_FLASH_DEVICE,
+};
+
+/*
+ * Nokia 6600 (NHL-10 V 05.53), docs/devices/nokia-6600-nhl10/bring-up.md: four chips at n << 25
+ * (the bootstrap's chip loop 0x61F4 halts unless all four answer) [V]; ROM.bin 0..8 MB in chip 0,
+ * 0x800000..0xF00000 in chip 2, the rest in chip 3; the PPM (2 MB) and C: in chip 1 (bank table
+ * ROM 0x64C) [V]. NOS entry 0x52882024 = flash 0x82024: alias 0x52800000 [I]. Trace mask bit 30
+ * (kernel debug port) is off in this ROM: H-nhl10-trace sets it.
+ */
+/*
+ * Nokia 7650 (NHL-2NA V 5.06, Symbian 6.1), docs/devices/nokia-7650-nhl2/bring-up.md: the N-Gage's
+ * generation (phonet/nosdriver, the same kernel-data layout: screen chunk word 0x800066EC [V]).
+ * ROM.bin (0xF00000) fills chip 0 up to 0xF00000, the PPM sits at flash 0x00F00000 [V flash file];
+ * NOS entry 0x5148C1C4 (alias 0x51400000 as N-Gage) [V nosstarter]; the stub is nos_standin.S
+ * built with NHL2 (ported kernel addresses).
+ */
+static const uint32_t ngage_nhl2_nos_exports[][2] = {
+    /* the two NOS functions nosdriver.ldd imports (slots 0x50EF92F0 / 0x50EF92E8) [V] */
+    { 0x514903cc, NGAGE_NHL2_NOS_SYM_nos_channel_ctor },
+    { 0x5148fa88, NGAGE_NHL2_NOS_SYM_nos_channel_open },
+};
+
+static const NgageModel ngage_nhl2 = {
+    .name = "nokia7650",
+    .nchips = 2,                        /* [I] as N-Gage; chip 1 erased */
+    .rom_map = { { 0, 0x00f00000, 0 } },
+    .nrom_map = 1,
+    .nos_alias = 0x51400000,
+    .stub = ngage_nhl2_nos_stub, .stub_len = sizeof(ngage_nhl2_nos_stub),
+    .stub_va = NGAGE_NHL2_NOS_STUB_VA,
+    .nos_exports = ngage_nhl2_nos_exports, .nnos_exports = ARRAY_SIZE(ngage_nhl2_nos_exports),
+    .screen_chunk_ptr = 0x800066ec,
+    .nos_rx_dfc = 0x8000b6e4 + 0x200,   /* nos_standin.S RX_DFC / RX_FLAG with NHL2 */
+    .nos_rx_flag = 0x8000b6e4 + 0x1f8,
+    /*
+     * The bootstrap's Intel probe (0x4F64) accepts 0x8872 (type 8) or 0x8876 (type 7); it loads
+     * 0x8874 but never compares it [V]. Any other answer falls through to the AMD-style probes,
+     * whose unlock cycles leave CFI01 out of read-array mode: the CPU then ran the flash's
+     * status words from 0x507C on (undefined instruction at 0x200010). The EMIF set-up 0x51A8
+     * then takes chip 0 type 7 or 12 only (else it spins at 0x51D4) [V]: 0x8876 (type 7).
+     * medint.pdd places C: by chip 1's type: 4/8/9/13 -> 0x02000000, 4 MB (the bootstrap's bank
+     * table maps exactly that), else 0x02600000, 2 MB, which faulted [V 0x5036CBE8]: chip 1 is
+     * 0x8872 (type 8). Two different parts, as on the phone [I].
+     */
+    .flash_manuf = NGAGE_FLASH_MANUF, .flash_device = 0x8876, .flash_device1 = 0x8872,
+    /* bootstrap 0x2A8C checks {start, end, MD5} entries at ROM 0x7FD0 (PPM) / 0x7FE8 (MCU,
+     * 0x50009000-0x50EF9FFF, stored digest wrong as on the N-Gage) and halts at 0x2A84 [V] */
+    .md5_entries = { 0x7fd0, 0x7fe8 },
+};
+
+/* the NOS exports enosdriver.ldd imports (hidden module 0x504128B0, nos_standin_nhl10.S) */
+static const uint32_t ngage_nhl10_nos_exports[][2] = {
+    { 0x528887e8, NGAGE_NHL10_NOS_SYM_nos_export1 },
+    { 0x528887b8, NGAGE_NHL10_NOS_SYM_nos_export2 },
+    { 0x5288877c, NGAGE_NHL10_NOS_SYM_nos_export4 },
+};
+
+static const NgageModel ngage_nhl10 = {
+    .name = "nokia6600",
+    .uem_rtc = true,
+    .nchips = 4,
+    .rom_map = { { 0, 0x00800000, 0 }, { 0x00800000, 0x00700000, 2 }, { 0x00f00000, 0x00800000, 3 } },
+    .nrom_map = 3,
+    .nos_alias = 0x52800000,
+    .stub = ngage_nhl10_nos_stub, .stub_len = sizeof(ngage_nhl10_nos_stub),
+    .stub_va = NGAGE_NHL10_NOS_STUB_VA,
+    /* the screen chunk object (export 65 stores it there, Plat screen info reads +24) [V];
+     * 32-byte header, then RGB565 pixels (white = 0xFFFF) [V] */
+    .screen_chunk_ptr = 0x80001780, .screen_rgb565 = true,
+    .nos_exports = ngage_nhl10_nos_exports, .nnos_exports = ARRAY_SIZE(ngage_nhl10_nos_exports),
+    .trace_mask_or = 0x40000000,
+    .nos_rx_dfc = 0x80006f44,           /* nos_standin_nhl10.S RX_DFC / RX_FLAG */
+    .nos_rx_flag = 0x80006f3c,
+    /*
+     * medint.pdd (switch 0x5036c32c) supports flash types 0, 2, 3, 9, 10, 15 (AMD) and 11, 12
+     * (ST 0x88C0 / 0x88BE), not Intel (type 4: Fault FLASHDD 5) [V]. Its ST driver (0x5036b018..)
+     * uses the Intel command set (0x70, 0x20/0xD0, 0x40, 0x50, 0xFF, 0x60/0xD0, 0x90) [V], which
+     * CFI01 implements. The bootstrap's ID table (ROM 0x74E0) gives type 11 for ST 0x20/0x88C0,
+     * read with the Intel-style query [V]. Which ST part the phone really has: [I].
+     */
+    .flash_manuf = 0x20, .flash_device = 0x88c0,
+};
 
 static void ngage_init(MachineState *machine)
 {
@@ -1439,7 +1658,7 @@ static void ngage_init(MachineState *machine)
     memory_region_add_subregion_overlap(sys, 0, &u->mr, -1000);
 
     if (!machine->firmware) {
-        error_report("ngage: give the phone's core ROM image with -bios ROM.bin");
+        error_report("%s: give the phone's core ROM image with -bios ROM.bin", ngm->name);
         exit(1);
     }
     fn = qemu_find_file(QEMU_FILE_TYPE_BIOS, machine->firmware);
@@ -1447,46 +1666,54 @@ static void ngage_init(MachineState *machine)
         error_report("ngage: cannot read %s: %s", machine->firmware, err ? err->message : "not found");
         exit(1);
     }
-    if (len > NGAGE_FLASH_SIZE) {
-        error_report("ngage: %s is %zu bytes, larger than the %u MiB boot flash", fn, (size_t)len,
-                     (unsigned)(NGAGE_FLASH_SIZE / MiB));
-        exit(1);
-    }
-    ngage_load_segments((uint8_t *)data, len, NULL, NULL);     /* PPM boot block (Q28) */
-    ngage_apply_patches((uint8_t *)data, len);
-    /* H-nos-standin: the stub over the NOS entry (virtual 0x514xxxxx = flash 0x00xxxxxx, Q19) */
-    memcpy(data + (NGAGE_NOS_STUB_VA - 0x51400000), ngage_nos_stub, sizeof(ngage_nos_stub));
-    info_report("ngage: H-nos-standin: NOS entry replaced by the stand-in stub (%zu bytes)",
-                sizeof(ngage_nos_stub));
     {
-        /* the two NOS functions nosdriver.ldd imports (Q33): jumps into the stub */
-        static const uint32_t nos_exports[][2] = {
-            { 0x514a260c, NGAGE_NOS_SYM_nos_channel_ctor },
-            { 0x514a1c90, NGAGE_NOS_SYM_nos_channel_open },
-        };
-        for (unsigned i = 0; i < ARRAY_SIZE(nos_exports); i++) {
-            uint8_t *p = (uint8_t *)data + (nos_exports[i][0] - 0x51400000);
-            stl_le_p(p, 0xe51ff004);                /* ldr pc, [pc, #-4] */
-            stl_le_p(p + 4, nos_exports[i][1]);
+        const NgageRomRange *last = &ngm->rom_map[ngm->nrom_map - 1];
+        if (len > last->rom_off + last->len) {
+            error_report("%s: %s is %zu bytes, more than the ROM ranges hold (0x%x)", ngm->name, fn,
+                         (size_t)len, last->rom_off + last->len);
+            exit(1);
         }
+    }
+    ngage_load_segments((uint8_t *)data, len);     /* PPM boot block (Q28) */
+    ngage_apply_patches((uint8_t *)data, len);
+    /* H-nos-standin: the stub over the NOS entry (virtual nos_alias + flash offset, Q19) */
+    memcpy(data + (ngm->stub_va - ngm->nos_alias), ngm->stub, ngm->stub_len);
+    info_report("%s: H-nos-standin: NOS entry %08x replaced by the stand-in stub (%zu bytes)",
+                ngm->name, ngm->stub_va, ngm->stub_len);
+    for (unsigned i = 0; i < ngm->nnos_exports; i++) {
+        uint8_t *p = (uint8_t *)data + (ngm->nos_exports[i][0] - ngm->nos_alias);
+        stl_le_p(p, 0xe51ff004);                /* ldr pc, [pc, #-4] */
+        stl_le_p(p + 4, ngm->nos_exports[i][1]);
+    }
+    if (ngm->trace_mask_or && len >= 0xdc) {
+        /* H-nhl10-trace: the kernel copies the header's trace mask to the superpage (Q18) */
+        uint32_t m = ldl_le_p(data + 0xd8);
+        stl_le_p(data + 0xd8, m | ngm->trace_mask_or);
+        info_report("%s: trace mask %08x -> %08x (kernel debug port on)", ngm->name, m,
+                    m | ngm->trace_mask_or);
     }
     ngage_fix_md5_table((uint8_t *)data, len);
 
     /*
-     * ROM.bin is the image as the MMU sees it (virtual 0x50000000). On the phone it is split
-     * over the two chips (Q12): offsets 0..0xEFFFFF in chip 0, the rest at the start of chip 1
-     * (flash file token 0xc8 ranges; bootstrap bank table 0x744 ends at 0xF00000).
+     * ROM.bin is the image as the MMU sees it (virtual 0x50000000); on the phone it is split over
+     * the chips (Q12, the bootstrap's bank table): ngm->rom_map.
      */
-    {
-        DeviceState *f0, *f1;
+    for (unsigned c = 0; c < ngm->nchips; c++) {
+        g_autofree char *nm = g_strdup_printf("ngage.flash%u", c);
+        const void *img = NULL;
+        size_t n = 0;
 
-        f0 = ngage_flash(NGAGE_FLASH0_BASE, "ngage.flash0", data, MIN(len, NGAGE_ROM_SPLIT));
-        f1 = ngage_flash(NGAGE_FLASH1_BASE, "ngage.flash1", data + MIN(len, NGAGE_ROM_SPLIT),
-                         len > NGAGE_ROM_SPLIT ? len - NGAGE_ROM_SPLIT : 0);
-        ngage_load_segments(NULL, 0, ngage_flash_ptr(f0), ngage_flash_ptr(f1));   /* Q28 */
-        if (ngage_flash_file) {
-            ngage_flash_persist(ngage_flash_ptr(f0), ngage_flash_ptr(f1));       /* Q55 */
+        for (unsigned r = 0; r < ngm->nrom_map; r++) {
+            if (ngm->rom_map[r].chip == c && len > ngm->rom_map[r].rom_off) {
+                img = data + ngm->rom_map[r].rom_off;
+                n = MIN(len - ngm->rom_map[r].rom_off, ngm->rom_map[r].len);
+            }
         }
+        ngage_flash_chip[c] = ngage_flash_ptr(ngage_flash((hwaddr)c << 25, nm, img, n, c));
+    }
+    ngage_load_segments(NULL, 0);                                         /* Q28 */
+    if (ngage_flash_file) {
+        ngage_flash_persist();                                            /* Q55 */
     }
     g_free(data);
     g_free(fn);
@@ -1516,7 +1743,7 @@ static void ngage_init(MachineState *machine)
             t->t[i].t = timer_new_ns(QEMU_CLOCK_VIRTUAL, ngage_timer_expire, &t->t[i]);
             t->t[i].irq = in[i];                                         /* IrqTimer<i> */
         }
-        ngage_keys_init(sys, in[25]);                       /* keypad, IrqCTSI_IRQ (Q53) */
+        ngage_keys_init(sys, in[25], ngm == &ngage_nhl10 || ngm == &ngage_nhl2);  /* 7650: the 6600's ekeyb (94% same code, same key lists) [V] */                       /* keypad, IrqCTSI_IRQ (Q53) */
         ngage_lprf_setup();                                 /* Bluetooth, CBus dev 5, CTSI 2 */
         ngage_mmc_init(sys, in, ngage_mmc_file);            /* MMC 21-24, DMA channels 6.. [I] */
         memory_region_init_io(&t->mr, NULL, &ngage_timer_ops, t, "ngage.timers",
@@ -1601,6 +1828,24 @@ static void ngage_set_mmc(Object *obj, const char *value, Error **errp)
     ngage_mmc_file = *value ? g_strdup(value) : NULL;
 }
 
+static void ngage_init_rh29(MachineState *machine)
+{
+    ngm = &ngage_rh29;
+    ngage_init(machine);
+}
+
+static void ngage_init_nhl2(MachineState *machine)
+{
+    ngm = &ngage_nhl2;
+    ngage_init(machine);
+}
+
+static void ngage_init_nhl10(MachineState *machine)
+{
+    ngm = &ngage_nhl10;
+    ngage_init(machine);
+}
+
 static void ngage_machine_class_init(ObjectClass *oc, const void *data)
 {
     MachineClass *mc = MACHINE_CLASS(oc);
@@ -1622,7 +1867,7 @@ static void ngage_machine_class_init(ObjectClass *oc, const void *data)
         "directory of extracted PPM flash segments (segment_*_<flash address>.bin)");
 
     mc->desc = "Nokia N-Gage QD (RH-29, DCT4 UPP, EKA1) bring-up board";
-    mc->init = ngage_init;
+    mc->init = ngage_init_rh29;
     mc->ignore_memory_transaction_failures = true;
     mc->default_cpu_type = ARM_CPU_TYPE_NAME("ti925t");
     mc->default_ram_size = 16 * MiB;           /* Q3 */
@@ -1636,9 +1881,45 @@ static const TypeInfo ngage_machine_type = {
     .interfaces = arm_machine_interfaces,
 };
 
+/* Nokia 6600: the same board and options, its own NgageModel */
+static void ngage_nhl10_class_init(ObjectClass *oc, const void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+
+    ngage_machine_class_init(oc, data);
+    mc->desc = "Nokia 6600 (NHL-10, DCT4 UPP, Symbian 7.0s EKA1) bring-up board";
+    mc->init = ngage_init_nhl10;
+}
+
+static const TypeInfo ngage_nhl10_machine_type = {
+    .name = MACHINE_TYPE_NAME("nokia6600"),
+    .parent = TYPE_MACHINE,
+    .class_init = ngage_nhl10_class_init,
+    .interfaces = arm_machine_interfaces,
+};
+
+/* Nokia 7650 */
+static void ngage_nhl2_class_init(ObjectClass *oc, const void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+
+    ngage_machine_class_init(oc, data);
+    mc->desc = "Nokia 7650 (NHL-2NA, DCT4 UPP, Symbian 6.1 EKA1) bring-up board";
+    mc->init = ngage_init_nhl2;
+}
+
+static const TypeInfo ngage_nhl2_machine_type = {
+    .name = MACHINE_TYPE_NAME("nokia7650"),
+    .parent = TYPE_MACHINE,
+    .class_init = ngage_nhl2_class_init,
+    .interfaces = arm_machine_interfaces,
+};
+
 static void ngage_machine_init(void)
 {
     type_register_static(&ngage_machine_type);
+    type_register_static(&ngage_nhl2_machine_type);
+    type_register_static(&ngage_nhl10_machine_type);
 }
 
 type_init(ngage_machine_init)

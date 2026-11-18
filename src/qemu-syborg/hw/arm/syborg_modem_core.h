@@ -87,9 +87,11 @@ typedef struct ModemPort {
     ModemFrame fifo[MODEM_FIFO];
 } ModemPort;
 
+#define MODEM_REPLY_MAX 255         /* data bytes of one table reply (1B 2E -> 2F is 138: n95-isi-encoders.md 6) */
+
 typedef struct ModemReply {
     uint8_t res, req, resp, len;
-    uint8_t data[64];
+    uint8_t data[MODEM_REPLY_MAX];
 } ModemReply;
 
 /* what the core needs from its host */
@@ -106,6 +108,7 @@ typedef struct SybModemHost {
     uint32_t (*snd_pending)(void *ctx, int slot, uint64_t target);
     uint32_t (*snd_ring_size)(void *ctx, int slot);
     void (*snd_beep)(void *ctx, uint32_t hz, uint32_t ms, uint32_t gain);
+    int64_t (*wall_seconds)(void *ctx);                        /* host UTC, seconds since 1970 (RTC 19 0A); may be NULL */
 } SybModemHost;
 
 typedef struct SyborgModemState {

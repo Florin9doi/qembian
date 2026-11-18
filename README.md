@@ -1,8 +1,10 @@
 # qembian
 
-qembian runs the original user side of Nokia S60 phones (Symbian 9.x) on an open-source EKA2
-kernel inside QEMU. The phone's own ROM supplies the applications, servers and libraries. qembian
-supplies the kernel, the board, and replacements for the phone's hardware drivers. The goal is
+qembian runs the original user side of Nokia S60 and Sony Ericsson UIQ 3 phones (Symbian 9.x) on an
+open-source EKA2 kernel inside QEMU, and older Symbian phones (6.1-7.0s, the EKA1 kernel: N-Gage QD, 7650,
+6600, 9500 Communicator, P910i) with their own kernel on QEMU boards built for their chips. The phone's
+own ROM supplies the applications, servers and libraries. qembian supplies the kernel (for the EKA1
+phones: the board), and replacements for the phone's hardware drivers. The goal is
 to develop and debug Symbian applications in the real firmware environment of a given phone,
 with a debugger, symbols and tracing, instead of on a device or in a high-level emulator.
 
@@ -91,9 +93,20 @@ Tested device (the reference) and the phones that work today (2026-11-18; detail
   home screen after the first-boot queries.
 - Profile drafts that reach the first-boot wizard or less: E52, E72, E5-00, N86, N97, N81 8GB,
   E71 (`models/registry.toml`).
-- **N-Gage QD** (Symbian 6.1, EKA1 kernel) runs on a separate QEMU board (`docs/eka1-ngage.md`):
-  start-up, home screen, menu, a memory card image as E: (`eka1/tools/ngage_card.py`). Games start
-  from the card but do not run yet.
+- **EKA1 phones (Symbian 6.1-7.0s).** These run their own, unmodified kernel on a QEMU board per chip
+  (`src/qemu-ngage/`, tools in `eka1/tools/`; one command each: `python3 eka1/tools/ngage_phone.py --model M`;
+  overview in `docs/device-matrix.md` 2.2b):
+  - **N-Gage QD** (RH-29, Symbian 6.1, `--model ngage`): home screen, menu, games from a memory card image as E:
+    (`eka1/tools/ngage_card.py`): Snakes plays, Crash Nitro Kart races (`docs/eka1-ngage.md`).
+  - **Nokia 7650** (NHL-2NA, Symbian 6.1, the first S60 phone, `--model nokia7650`) and **Nokia 6600** (NHL-10,
+    Symbian 7.0s, `--model nokia6600`): start-up, first-boot time/date queries, home screen, keypad and joystick.
+  - **Nokia 9500 Communicator** (RA-2, S80 2nd / Symbian 7.0s, `--model nokia9500`, on QEMU's OMAP1510 model):
+    both screens (the cover's idle screen, the inner 640x200 S80 UI), the lid as a real switch, QWERTY and
+    command buttons, lock code and first-start wizard (`docs/devices/nokia-9500-ra2/bring-up.md`).
+  - **Sony Ericsson P910i** (UIQ 2.1 / Symbian 7.0, `--model p910i`, a Philips PNX4000 board modelled from the
+    phone's own code: no datasheet exists): the UIQ home screen after the set up wizard and the Power menu; the
+    mouse is the pen, the flip is a switch, a fake GSM side (Ericsson OSE protocol) with a SIM and a full battery,
+    no network or sound (`docs/devices/se-p910i/bring-up.md`, `how-it-was-done.md`).
 
 **3D graphics.** OpenGL ES 1.1/2.0, OpenVG and EGL are forwarded to the host GPU (the N95's GLES
 library is replaced; on Symbian^3/Belle the phone's own libraries talk to our host implementation).

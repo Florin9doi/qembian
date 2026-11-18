@@ -3,9 +3,14 @@
 Assessment of 2026-11-07, every claim [I] (inferred from the platform history and from how qembian
 works). **2026-11-13:** two firmwares are now inventoried: P1i (UIQ 3.0) and P910i (UIQ 2.1); formats,
 contents and the next steps are in [semc-firmware.md](semc-firmware.md), which supersedes this page
-where they differ.
+where they differ. Twelve more UIQ 3 sets (P990i, M600i, W950i, W960i, P1i R6G04, G700, G900) were
+extracted from the Emma archive the same day: [semc-emma.md](semc-emma.md). All of them report the
+Symbian 9.1 kernel shape the `sym91` personality already covers.
 
 ## UIQ 2.x (P800, P900, P910, Motorola A920/A1000, BenQ P30): the N-Gage route
+
+2026-11-18: done for the **P910i** (R5B01): the UIQ 2.1 home screen on its own board `-M p910i`
+([devices/se-p910i/bring-up.md](devices/se-p910i/bring-up.md)). The P800/P900 share its platform family [I].
 
 2026-11-13: since the N-Gage QD (EKA1, Symbian 6.1) boots unmodified on its own QEMU board
 ([eka1-ngage.md](eka1-ngage.md)), UIQ 2 is in scope the same way: the phone's own EKA1 kernel on a

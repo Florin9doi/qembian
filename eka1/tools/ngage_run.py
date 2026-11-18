@@ -14,7 +14,72 @@ usage: ngage_run.py [--secs 5] [--name runN] [--rom eka1/output/rom/ROM.bin] [--
 import argparse, collections, os, pathlib, re, socket, subprocess, sys, time
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-QEMU = ROOT / 'build/qemu-ngage/build/qemu-system-arm'
+QEMU = pathlib.Path(os.environ['NGAGE_QEMU']) if os.environ.get('NGAGE_QEMU') else ROOT / 'build/qemu-ngage/build/qemu-system-arm'   # NGAGE_QEMU: another build (A/B runs)
+
+# The phones on the ngage board (src/qemu-ngage/hw/arm/ngage.c NgageModel). Per phone: the QEMU
+# machine, its ROM, PPM segments and ISI table, the extraction root (manifest, user-exports.tsv)
+# and the kernel addresses the tools read. 6600 values marked [I] are unconfirmed.
+MODELS = {
+    'ngage': dict(
+        machine='ngage', root=ROOT / 'eka1',
+        rom=ROOT / 'eka1/output/rom/ROM.bin', ppm=ROOT / 'eka1/extracted/RH2941.026',
+        isi=ROOT / 'src/qemu-ngage/isi-replies.txt',
+        fatal=0x5031e340,                   # ekern's fatal-fault routine
+        cur_thread=0x80006740,              # the kernel's current DThread
+        containers=0x80000398,              # K:: object containers (processes first)
+        code=(0x5031af9c, 0x51170000),      # ROM code range for return-address scans
+        ttb=0x0A074000),
+    'nokia6600': dict(
+        machine='nokia6600', root=ROOT / 'eka1/nhl10',
+        rom=ROOT / 'eka1/nhl10/output/rom/ROM.bin', ppm=ROOT / 'eka1/nhl10/extracted/NHL105530.26',
+        isi=ROOT / 'src/qemu-ngage/isi-replies-nhl10.txt',
+        fatal=0x50312b34,                   # [I] same bytes as the N-Gage's routine
+        cur_thread=0x800017d4,              # ported from N-Gage users of 0x80006740 (3 agree)
+        containers=0x800003b8,              # ported from users of 0x80000398/0x8000039c (5, 9)
+        code=(0x5030ff9c, 0x51600000),
+        ttb=0x0A074000),                    # [I]
+    'nokia7650': dict(
+        machine='nokia7650', root=ROOT / 'eka1/nhl2',
+        rom=ROOT / 'eka1/nhl2/output/rom/ROM.bin', ppm=ROOT / 'eka1/nhl2/extracted/NHL23250.677',
+        isi=ROOT / 'src/qemu-ngage/isi-replies-nhl2.txt',
+        fatal=0x5030b0f4,                   # ported (unique 6-word match)
+        cur_thread=0x80006740,              # as N-Gage (10 ported users agree)
+        containers=0x80000398,              # as N-Gage (12 ported users agree)
+        code=(0x50307f9c, 0x50f00000),
+        ttb=0x0A074000),                    # [I]
+    'nokia9500': dict(
+        machine='nokia9500', root=ROOT / 'eka1/ra2/core',
+        rom=ROOT / 'eka1/ra2/core/ROM.bin', ppm=ROOT / 'eka1/ra2/images',
+        isi=ROOT / 'src/qemu-ngage/isi-replies-ra2.txt',
+        fatal=0x500212c4,                   # Kern::Fault(desc, reason): stores the reason at 0x40000410, restarts via 0x50014090 [V]
+        cur_thread=0x800018c0,              # ported from the 6600 (7 users agree)
+        containers=0x80000430,              # ported from the 6600 (15/16 users agree)
+        code=(0x5000df9c, 0x51200000),
+        vectors=0xffff0000,                 # high vectors (the low catches never hit) [V]
+        panic=0x500d9d48,                   # EUser RThread::Panic(cat, reason): r1 = category [V: IsaApi 4]
+        ttb=0x10000000),                    # [I]
+    'p910i': dict(
+        machine='p910i', root=ROOT / 'eka1/p910i/core',
+        rom=ROOT / 'eka1/p910i/core/ROM.bin', ppm=ROOT / 'eka1/p910i',
+        isi=ROOT / 'src/qemu-ngage/p910i-ose-replies.txt',
+        fatal=0x50026468,                   # Kern::Fault (EKern export 119): the 9500's body [V]
+        cur_thread=0x80001e94,              # ported from the 9500 (242 users agree)
+        containers=0x800000d0,              # ported from the 9500 (73 users agree)
+        code=(0x50012f9c, 0x51b00000),
+        vectors=0xffff0000,                 # high vectors: bootstrap control word 0x627a has V set [V]
+        panic=0x5005bec0,                   # EUser RThread::Panic (ordinal 812, as the N-Gage's EUser) [V: ordinal spacing]
+        sdram=(0xd0000000, 0x02000000),     # RAM for crash dumps (the ngage default is 0x0A000000)
+        ttb=0xd0044000),                    # page directory: maps 0x80000000 and the vector page [V: RAM search]
+}
+M = MODELS[os.environ.get('NGAGE_MODEL', 'ngage')]
+
+
+def use_model(name):
+    """Select the phone for this process (and the daemons it starts: NGAGE_MODEL)."""
+    global M
+    M = MODELS[name]
+    os.environ['NGAGE_MODEL'] = name
+    return M
 
 
 def monitor(path, cmds):
@@ -44,10 +109,12 @@ def monitor(path, cmds):
 
 
 # EKA1 kernel object containers (K:: globals, from the Find/FromHandle exports, Q16 era):
-CONTAINERS = [('processes', 0x80000398), ('threads', 0x8000039c), ('chunks', 0x800003a0),
-              ('semaphores', 0x800003a4), ('mutexes', 0x800003a8), ('ldds', 0x800003ac),
-              ('pdds', 0x800003b0), ('channels', 0x800003b4), ('servers', 0x800003b8),
-              ('sessions', 0x800003bc), ('timers', 0x800003c0), ('libraries', 0x800003c4)]
+CONTAINER_NAMES = ['processes', 'threads', 'chunks', 'semaphores', 'mutexes', 'ldds', 'pdds',
+                   'channels', 'servers', 'sessions', 'timers', 'libraries']
+
+
+def containers():
+    return [(n, M['containers'] + 4 * i) for i, n in enumerate(CONTAINER_NAMES)]
 
 
 def read_words(mon, addr, n):
@@ -77,7 +144,7 @@ def read_name(mon, ptr):
 def print_objects(mon):
     """DObjectCon: +8 count, +16 array of DObject*; DObject: +8 owner, +16 name."""
     names = {}
-    for kind, glob in CONTAINERS:
+    for kind, glob in containers():
         con = read_words(mon, glob, 1)[0]
         hdr = read_words(mon, con, 6)
         count, arr = hdr[2], hdr[4]
@@ -100,7 +167,7 @@ def container(mon, glob):
 
 def rom_namer():
     import bisect, csv, json
-    root = ROOT / 'eka1'
+    root = M['root']
     man = json.loads((root / 'output/rom/manifest.json').read_text())
     files = sorted((f['rom_virtual_address'], f['size'], f['path'].split('/')[-1])
                    for f in man['files'] if f.get('rom_virtual_address'))
@@ -122,32 +189,56 @@ def rom_namer():
 
 def print_stack(mon, tname):
     """$STK chunk (DObject owner = the thread): +0x24 committed top, +0x28 base."""
-    procs = {o: read_name(mon, read_words(mon, o, 5)[4]) for o in container(mon, 0x80000398)}
+    procs = {o: read_name(mon, read_words(mon, o, 5)[4]) for o in container(mon, M['containers'])}
     threads = {}
-    for o in container(mon, 0x8000039c):
+    for o in container(mon, M['containers'] + 4):
         f = read_words(mon, o, 5)
         threads[o] = '%s::%s' % (procs.get(f[2], '?'), read_name(mon, f[4]))
     tid = next((o for o, n in threads.items() if n == tname or n.split('::')[1] == tname), None)
     if tid is None:
         print('stack %s: no such thread (%s)' % (tname, ', '.join(threads.values()))); return
-    for c in container(mon, 0x800003a0):
+    for c in container(mon, M['containers'] + 8):
         f = read_words(mon, c, 11)
         if (f[2] == tid and read_name(mon, f[4]) == '$STK') or (
                 tname == 'Supervisor' and read_name(mon, f[4]) == 'SvStack'):
-            top, base = f[9], f[10]
+            size, top, base = f[8], f[9], f[10]
             break
     else:
         print('stack %s: no $STK chunk' % tname); return
+    run_base = None
     if base > top:
         # moving model: the process is not the running one, so its chunk is at its home
-        # address (base); top is the run address of the committed end (run base 0x00400000)
-        top = base + (top - 0x00400000)
-    words = read_words(mon, base, (top - base) // 4)
+        # address (base); top is the run address of the committed end and +0x20 the committed
+        # size, so the run base is top - size (0x00400000 for a first chunk, 0x00500000 for the
+        # stack after a process's $DAT: Starter's)
+        run_base = top - size
+        top = base + size
+    # read the mapped part only: a stack chunk is committed from its top down, the rest of its
+    # reservation is unmapped ("Cannot access memory"), so read page by page from the top
+    page_top, words = top, []
+    while page_top > base:
+        page = max(base, (page_top - 1) & ~0xfff)
+        try:
+            words = read_words(mon, page, (page_top - page) // 4) + words
+        except ValueError:
+            break
+        page_top = page
+    base = page_top
     name = rom_namer()
-    print('stack %s (%08x-%08x), ROM return-address candidates, deepest first:' % (tname, base, top))
+    # the saved SP (DThread +0x158 [V on both kernels]); in the moving model a run address
+    # (0x004xxxxx) is at the chunk's home base. Words below it are stale.
+    sp = read_words(mon, tid + 0x158, 1)[0]
+    if run_base is not None and 0x00400000 <= sp < 0x00800000 and not (base <= sp < top):
+        sp = base + (sp - run_base)
+    print('stack %s (%08x-%08x), saved SP %08x, ROM return-address candidates, deepest first '
+          '(above the line: stale):' % (tname, base, top, sp))
+    marked = not (base <= sp < top)
     for i, v in enumerate(words):
+        if not marked and base + 4 * i >= sp:
+            print('   ---- saved SP %08x ----' % sp)
+            marked = True
         # ARM return addresses are word aligned; Thumb ones (EFile, EFSRV, ...) have bit 0 set
-        if 0x5031af9c <= v < 0x51170000 and (v & 3 == 0 or v & 1):
+        if M['code'][0] <= v < M['code'][1] and (v & 3 == 0 or v & 1):
             nm = name(v & ~1)
             if nm:
                 print('   %08x: %08x %s%s' % (base + 4 * i, v, 'T ' if v & 1 else '', nm))
@@ -155,14 +246,14 @@ def print_stack(mon, tname):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('--model', default=os.environ.get('NGAGE_MODEL', 'ngage'), choices=sorted(MODELS),
+                    help='the phone (default ngage = N-Gage QD; nokia6600)')
     ap.add_argument('--secs', type=float, default=5)
     ap.add_argument('--name', default='run')
-    ap.add_argument('--rom', default=str(ROOT / 'eka1/output/rom/ROM.bin'))
+    ap.add_argument('--rom', help='default: the model\'s ROM.bin')
     ap.add_argument('--debug', default='unimp,guest_errors,int')
-    ap.add_argument('--ppm', default=str(ROOT / 'eka1/extracted/RH2941.026'),
-                    help='extracted PPM segments (the second flash file); "" = none (Q28)')
-    ap.add_argument('--isi', default=str(ROOT / 'src/qemu-ngage/isi-replies.txt'),
-                    help='ISI reply table for the NOSDRIVER channels (Q50); "" = none')
+    ap.add_argument('--ppm', help='extracted PPM segments (the second flash file); "" = none (Q28)')
+    ap.add_argument('--isi', help='ISI reply table (Q50); "" = none')
     ap.add_argument('--break', dest='brk', action='append', default=[],
                     help='hardware breakpoint (virtual address); gdb prints registers and stack '
                          'at the first hit, then the run ends')
@@ -184,11 +275,15 @@ def main():
     ap.add_argument('--gdb-cmd', action='append', default=[], help='extra gdb command at the hit')
     ap.add_argument('extra', nargs='*')
     a = ap.parse_args()
+    m = use_model(a.model)
+    a.rom = str(m['rom']) if a.rom is None else a.rom
+    a.ppm = str(m['ppm']) if a.ppm is None else a.ppm
+    a.isi = (str(m['isi']) if m['isi'].exists() else '') if a.isi is None else a.isi
     out = ROOT / 'build/ngage'; out.mkdir(parents=True, exist_ok=True)
     log, mon, ser = out / (a.name + '.log'), out / (a.name + '.mon'), out / (a.name + '.serial')
     for p in (log, mon, ser):
         p.unlink(missing_ok=True)
-    mach = 'ngage' + (',ppm=%s' % a.ppm if a.ppm else '') + (',isi=%s' % a.isi if a.isi else '')
+    mach = m['machine'] + (',ppm=%s' % a.ppm if a.ppm else '') + (',isi=%s' % a.isi if a.isi else '')
     cmd = [str(QEMU), '-M', mach, '-bios', a.rom, '-display', 'none', '-serial', 'file:%s' % ser,
            '-monitor', 'unix:%s,server,nowait' % mon, '-d', a.debug, '-D', str(log)] + a.extra
     if a.brk or a.watch or a.trace:

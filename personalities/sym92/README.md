@@ -13,6 +13,13 @@ like the 9.2 kernel to the phone's own binaries.
 Verify a device against it: `tools/personality/check.py --device <id>` (driver vtables from the
 device's own ekern; exit 1 on any difference `kabi.toml` does not allow).
 
+F0A/F0B implement `User::LockedInc/LockedDec`, returning the original value. The N95 does not
+call them, but N81 11.0.045 EUSER does (ARM SWI stubs at 0x8011dc64/0x8011dc6c), including from
+`RCriticalSection::Wait/Signal`. Marking them invalid silently returned zero without updating the
+user counter and deadlocked FbServ. Both use the existing LockedInc91/LockedDec91 shims, also for
+the sym92l91 personality that shares this map. An unused slot on one device is not necessarily an
+unsupported operation on another device with the same OS version.
+
 ## Deriving another personality (sym93 for S60 3rd FP2 / 9.3, sym94 for 5th Edition, ...)
 
 1. Exec numbering: take the device's EUSER from its firmware (`tools/fw` inventory), align its SWI

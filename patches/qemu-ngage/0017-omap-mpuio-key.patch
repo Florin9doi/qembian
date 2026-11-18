@@ -1,0 +1,38 @@
+diff -ru a/hw/arm/omap1.c b/hw/arm/omap1.c
+--- a/hw/arm/omap1.c	2026-11-18 19:15:27.530475647 +0100
++++ b/hw/arm/omap1.c	2026-11-18 19:42:56.494841616 +0100
+@@ -1940,6 +1940,22 @@
+     s->row_latch = ~rows;
+ }
+ 
++/* qembian: press/release a key of the MPUIO keypad matrix (board code; QEMU dropped this API) */
++void omap_mpuio_key(struct omap_mpuio_s *s, int row, int col, int down)
++{
++    if (row < 0 || row > 4 || col < 0 || col > 7) {
++        return;
++    }
++    if (down) {
++        s->buttons[row] |= 1 << col;
++    } else {
++        s->buttons[row] &= ~(1 << col);
++    }
++    omap_mpuio_kbd_update(s);
++    qemu_log_mask(LOG_UNIMP, "omap-mpuio: key r%d c%d %s (cols %02x mask %d clk %d latch %02x)\n",
++                  row, col, down ? "down" : "up", s->cols, s->kbd_mask, s->clk, s->row_latch);
++}
++
+ static uint64_t omap_mpuio_read(void *opaque, hwaddr addr,
+                                 unsigned size)
+ {
+diff -ru a/include/hw/arm/omap.h b/include/hw/arm/omap.h
+--- a/include/hw/arm/omap.h	2026-11-18 19:15:27.531475686 +0100
++++ b/include/hw/arm/omap.h	2026-11-18 19:15:27.555036260 +0100
+@@ -269,6 +269,8 @@
+ 
+ struct omap_mpuio_s;
+ qemu_irq *omap_mpuio_in_get(struct omap_mpuio_s *s);
++/* qembian: press (down != 0) or release a key of the keypad matrix */
++void omap_mpuio_key(struct omap_mpuio_s *s, int row, int col, int down);
+ 
+ struct omap_uwire_s;
+ /* qembian: a device on a Microwire chip select (word = the bits sent, right-aligned) */

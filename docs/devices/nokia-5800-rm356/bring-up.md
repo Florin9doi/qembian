@@ -44,3 +44,69 @@ evidence, static firmware analysis and the implemented reply correction. Rebuilt
 Random UI actions take seconds (e.g. Settings, then any item); suspected: a request to a driver or
 server that completes only on a timeout. The same happens on the N8. First steps: docs/roadmap.md
 "Open issues reported by the owner".
+
+## Fixed 2026-11-13: the menu died on an unaligned halfword load (KERN-EXEC 3, back to the home screen)
+
+Owner's report: "the applications menu does not open, it crashes and kicks us back to the home screen".
+
+Reproduced on the owner's 5800 instance (V31.0.101), first by accident in a normal run and then with a
+catch: `Menu` key, then tapping an icon. `menu3.exe`, `alfredserver.exe`, `alfappservercore.dll` and
+`hitchcock.dll` load, the grid draws, and then — when the ALF redraw timer blits something (a folder
+icon, an entry animation) — thread `ALF::ALF` takes a data abort:
+
+```
+Exc 1 Cpsr=80000010 FAR=44211dbd FSR=00000001        (data abort, FSR 1 = alignment)
+ R2=44211dbc  R6=44211dbd  R8=00000001  R12=0001fffe  R15=789e5930 (hitchcock.dll+45930)
+Thread ALF::ALF Panic KERN-EXEC 3
+Thread Menu::Menu Panic USER 0                        (its server died)
+```
+
+`hitchcock.dll+45930` is `ldrh r4, [r2, r8]` with `r8 = ip>>16 = 1`: [V] disassembly of the shipped
+DLL (`tools/rofs.py --extract sys/bin/HITCHCOCK.dll`, `tools/e32load.py --base 0x789a0000`). The
+function (starts `hitchcock.dll+45a8c8`) fills a span with a gradient whose endpoints it reads *two
+8-bit pixels at a time* out of a byte row (`lsr r7, r6, #8` / `and r6, r6, #0xff` = the two samples of
+one halfword); with an odd x offset the load is deliberately unaligned. The caller
+(`hitchcock.dll+3c684`, the 12-argument blit helper) reaches it from a `switch` on mode `0x100`; the
+chain above is `ALF`'s redraw timer (`CPeriodic::RunL`) -> `alfappservercore.dll` ->
+`hitchcock.dll` -> `CFbsBitGc::BitBlt` (frame scan of `<session>/catches/*.txt`). [V]
+
+Cause: our ARM1136 kernel programmed SCTLR with `MMUCR_A` (alignment check) and without `MMUCR_U`;
+the EPL default for `CFG_CPU_ARM1136` (`kernelhwsrv/kernel/eka/include/kernel/arm/bootcpu.inc`). The
+phones' own kernels do not check alignment, and the ROM is written accordingly (Hitchcock's canvas
+command-buffer reader also casts `Ptr()+offset` to `TUint16*`). QEMU enforces the alignment of normal
+memory only while SCTLR.A is set, so the guest's A bit was the whole difference. Fixed in the
+`syborg` baseport (`InitialMMUCR` = the ARM1136 list without `A`, with `U`; patch
+patches/qemu-baseport/0026, `docs/hacks.md` H-no-align-check). Regression test:
+`tests/device_py_test.py DeviceTest.test_arm1136_kernel_does_not_check_alignment`.
+
+Not the menu's only oddity, and not a 5800-only bug: every ARM1136 device of ours had it. The menu's
+grid also ignores scripted taps (a tap on an icon works once the grid has settled, and the home
+screen's bottom shortcut row ignores taps — see the open list above); the dialler/Clock opened from
+taps, so the digitiser mapping is right (`sydb tap x y` = UI pixels).
+
+### Seen on the way (2026-11-13, not investigated): a game's null dereference leaves the screen black
+
+With the alignment fix in, tapping the Applications folder -> `RT GR` (Raging Thunder GR) launches the
+game, which opens the display driver (`ctl 10/11/31`, then `ctl 44` = `SYBSTUB: ... ignored 0`, the
+one control our `d_display` stand-in does not implement) and immediately takes a *translation* abort:
+`Exc 1 Cpsr=20000010 FAR=0000000c FSR=00000005` (a load from 0xc) in its own thread — a null pointer,
+not our alignment bug. After that the phone keeps running (`status: idle`) but the screen stays black
+and nothing redraws, also not after keys: WSERV seems to hold the display for a client that died.
+Worth its own investigation (does a dead DSA/DSB claimant release the screen? what is ctl 44?).
+
+## Known non-fatal panic: `SosPmmHandler -5` (pre-existing, not modem-related)
+
+Every boot logs, about 1-2 s in:
+```
+1.942 Thread sospmmhandler.exe::Main Panic SosPmmHandler: N -5
+```
+The full category is "No PMM partition found from NAND." (-5 = KErrNotSupported): sospmmhandler.exe looks
+for the product-data (PMM) partition on the NAND, which our flash image does not have. The process dies and
+the boot goes on; the home screen, menu and touch are unaffected. [V] It predates the 2026-11-18 ISI reply
+realignment (docs/research/n95-isi-encoders.md): the same line is in the 5800-v20 instance log of 2026-11-14
+(`1.690 ... Panic SosPmmHandler: N -5`), the 5730/E52/6720 logs of 2026-11-17 and the N79/E72 logs of
+2026-11-14; the full text and call stack are in the N86 catch of 2026-11-10
+(`build/evidence/bringup-2026-11-10/n86-rm484/catches/001-sospmmhandler.exe_Main.txt`, caller
+sospmmhandler.exe+d6). The N8 shows the same panic (docs/devices/nokia-n8-rm596/bring-up.md). The cause is the
+flash layout, not the modem [I] (the message names the NAND partition).
+Not fixed: a PMM partition stand-in would only be needed if a product-data reader turns out to matter.

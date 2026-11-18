@@ -46,6 +46,18 @@ extern uint32_t syborg_gl_presents;
 static uint32_t SeenPresents;
 static uint64_t StPaced;
 
+/* spin-wait hint: x86 pause, arm64 yield - this program also runs on phones (docs/hosted-eka2/pixel-3a.md) */
+static inline void cpu_pause(void)
+{
+#if defined(__x86_64__) || defined(__i386__)
+    __builtin_ia32_pause();
+#elif defined(__aarch64__) || defined(__arm__)
+    asm volatile("yield" ::: "memory");
+#else
+    asm volatile("" ::: "memory");
+#endif
+}
+
 /* poll a word until it equals a value: spin a while (latency under TCG), then sleep in small steps */
 static int wait_eq(int i, uint32_t v, int64_t timeout_ns)
 {
@@ -55,7 +67,7 @@ static int wait_eq(int i, uint32_t v, int64_t timeout_ns)
             return 0;
         }
         if (n < 4000) {
-            __builtin_ia32_pause();
+            cpu_pause();
             continue;
         }
         struct timespec d = { 0, 20000 };
@@ -348,7 +360,7 @@ int main(int argc, char **argv)
                 run_timers();
             }
             if (++idle < 4000) {
-                __builtin_ia32_pause();
+                cpu_pause();
             } else {
                 struct timespec d = { 0, idle < 100000 ? 20000 : 1000000 };
                 nanosleep(&d, NULL);

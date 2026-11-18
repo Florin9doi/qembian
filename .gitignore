@@ -22,6 +22,16 @@ src/standins/_shared/isireplies.h
 !/eka1/analysis/kernel-api-map.tsv
 /eka1/tmp/
 /eka1/references/
+# Nokia 6600 (NHL-10, EKA1): flash files and extractions
+/eka1/nhl10_rom/
+/eka1/nhl10/
+# Nokia 7650 (NHL-2NA, EKA1)
+/eka1/nhl2_rom/
+/eka1/nhl2/
+# Nokia 9500 Communicator (RA-2)
+/eka1/ra2_rom/
+/eka1/ra2/
+/eka1/p910i/
 tools/probes/*/libs/
 # Android native build outputs (android/native/build.sh)
 build/android/

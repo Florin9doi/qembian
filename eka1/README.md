@@ -16,6 +16,7 @@ phone's flash files into the inputs the `ngage` QEMU board and the analysis need
 | `analysis/` (the rest) | no | generated reports and tables (commands below) |
 | `tmp/` | no | the Ghidra project (`tmp/ghidra`) |
 | `references/` | no | third-party sources (TriX, EKA2L1, dumprom): naming references only, no code is copied |
+| `nhl10_rom/`, `nhl10/` | no | Nokia 6600 (NHL-10) flash files and their extraction ([docs/devices/nokia-6600-nhl10/bring-up.md](../docs/devices/nokia-6600-nhl10/bring-up.md)) |
 
 Firmware bytes, extractions and screenshots are never committed (CLAUDE.md).
 
@@ -41,7 +42,8 @@ python3 tools/ekern_align.py <Series 60 0.9 SDK WINS EKERN.DLL>     # -> analysi
 `output/rom/manifest.json` and `analysis/user-exports.tsv`, so run steps 1 and 3 first.
 The SDKs are in the owner's archive (docs/eka1-ngage-roadmap.md, P0).
 
-`python3 -m unittest -v test_dct4_extract` tests the container extractor on synthetic data.
+`python3 -m unittest -v test_dct4_extract test_eka1_extract_report` tests the container extractor and
+the report helpers on synthetic data.
 
 ## Verified facts about the image
 

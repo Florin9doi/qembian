@@ -71,7 +71,7 @@ a stack struct of 32-bit words. Cancels go through `DoCancel(n)`, which reaches 
 | #22 Send(TRequestStatus&, const TDesC8&) | **2** | `{TRequestStatus*, const TDesC8*}` | send; complete `KErrNone` |
 | #28 DataSend(const TDesC8&) | **14** | `{const TDesC8*}` | return 0 (drop) |
 | #27 DataSend(TRequestStatus&, const TDesC8&) | **4** | `{TRequestStatus*, const TDesC8*}` | complete `KErrNone` |
-| #26 Receive(TRequestStatus&, TDes8& buf, TUint16& needed) | **3** | `{TRequestStatus*, TDes8* buf, TUint16* needed}` | as ISC ctl 4: write the whole frame, complete `KErrNone`. If it is longer than `buf.MaxLength()`, write the length to `*needed` **raw (2 bytes, not a TPtr8 as on the N95)**, complete `KErrOverflow` and keep the frame. One Receive per channel. |
+| #26 Receive(TRequestStatus&, TDes8& buf, TUint16& needed) | **3** | `{TRequestStatus*, TDes8* buf, TUint16* needed}` | as ISC ctl 4: write the whole frame, complete `KErrNone`. If it is longer than `buf.MaxLength()`, write the length to `*needed` **raw (2 bytes, not a TPtr8 as on the N95)**, complete `KErrNoMemory` (-4) and keep the frame (the clients grow their buffer on -4 only: N8 saiscservice 0x80d78626 [V]; docs/hacks.md H-isc-rx-overflow; was KErrOverflow until 2026-11-18). One Receive per channel. |
 | #3 DataReceive | **5** | same layout | park |
 | #17 NotifyConnectionStatus(TRequestStatus&, TInt&) | **6** | `{TRequestStatus*, TInt*}` (raw pointer) | park (link never changes) |
 | #15 NotifyFlowControlStatus(TRequestStatus&, TInt&) | **7** | `{TRequestStatus*, TInt*}` | park |

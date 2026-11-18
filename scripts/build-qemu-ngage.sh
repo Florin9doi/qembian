@@ -15,7 +15,7 @@ if [ "${1:-}" = clean ] || [ ! -d "$SRC" ]; then
   rm -rf "$SRC" "$B/build"
   tar -C "$B" -xJf "downloads/qemu-$VER.tar.xz"
 fi
-cp src/qemu-ngage/hw/arm/ngage*.[ch] "$SRC/hw/arm/"
+cp src/qemu-ngage/hw/arm/ngage*.[ch] src/qemu-ngage/hw/arm/nokia9500*.[ch] src/qemu-ngage/hw/arm/p910i*.[ch] "$SRC/hw/arm/"
 # ngage-only QEMU changes (patches/qemu-ngage/*.patch); each is applied once per tree
 for p in patches/qemu-ngage/*.patch; do
   [ -e "$p" ] || continue
@@ -30,9 +30,10 @@ config NGAGE
     default y
     depends on TCG && ARM
     select PFLASH_CFI01
+    select OMAP
 K
 sed -i "/CONFIG_NGAGE/d" "$SRC/hw/arm/meson.build"
-FILES=$(cd src/qemu-ngage/hw/arm && ls ngage*.c | sed "s/.*/'&'/" | paste -sd, -)
+FILES=$(cd src/qemu-ngage/hw/arm && ls ngage*.c nokia9500*.c p910i*.c | sed "s/.*/'&'/" | paste -sd, -)
 sed -i "1a arm_common_ss.add(when: 'CONFIG_NGAGE', if_true: files($FILES))" "$SRC/hw/arm/meson.build"
 mkdir -p "$B/build"; cd "$B/build"
 if [ ! -f build.ninja ]; then

@@ -8,6 +8,16 @@ The original Nokia N-Gage QD firmware (RH-29 V 04.10, Symbian 6.1, EKA1 kernel, 
 - how to debug;
 - what to do next.
 
+The same board also runs the **Nokia 7650** (NHL-2NA, Symbian 6.1) as `-M nokia7650`
+([devices/nokia-7650-nhl2/bring-up.md](devices/nokia-7650-nhl2/bring-up.md)) and the **Nokia 6600** (NHL-10, Symbian 7.0s) as `-M nokia6600`: per-phone
+values are an `NgageModel` in `ngage.c`; the tools take `--model nokia6600`. Its notes:
+[devices/nokia-6600-nhl10/bring-up.md](devices/nokia-6600-nhl10/bring-up.md). Run
+`python3 tests/ngage-boot-check.py [--model nokia6600]` after every board change.
+The EKA1 tree also holds boards of their own: the **Nokia 9500 Communicator** (`-M nokia9500`, QEMU's
+OMAP1510: [devices/nokia-9500-ra2/bring-up.md](devices/nokia-9500-ra2/bring-up.md)) and the **Sony Ericsson
+P910i** (`-M p910i`, a PNX4000 board modelled from the phone's code, UIQ 2.1 home screen:
+[devices/se-p910i/bring-up.md](devices/se-p910i/bring-up.md)). All five phones: `docs/device-matrix.md` 2.2b.
+
 Related documents:
 
 | Document | Contents |
@@ -17,7 +27,6 @@ Related documents:
 | [eka1-ngage-roadmap.md](eka1-ngage-roadmap.md) | the original plan (phases P0-P6), with status |
 | [../eka1/README.md](../eka1/README.md) | the firmware files, extraction and analysis tools |
 | [research/eka1-ngage-feasibility.md](research/eka1-ngage-feasibility.md) | the first feasibility study |
-| [eka1-ngage-handoff.md](eka1-ngage-handoff.md) | a historical hand-off prompt (2026-11-10) |
 
 ## State (2026-11-11)
 

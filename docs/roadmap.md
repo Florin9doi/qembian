@@ -215,6 +215,87 @@ the IPC trace build to find who waits on whom).
 | N95 (oracle, 2026-11-08) | the real phone boots with no abnormal thread exits; qembian has 9 (central repository restart, SplashScreen E32USER-CBase 46, WLAN, USB, Bluetooth SDP/FaxModem, lbdtracker, MobileCrash servers) | docs/real-phone-tracing.md "First real recording": fix them one by one, re-run `tools/oracle.py diff` |
 | 5800, N8 (all S60 5th / Symbian^3 phones) | random UI actions take seconds, e.g. Settings, then any item | likely a request to a driver or server that only completes on a timeout: time the action with the IPC trace, look for requests completing after ~1-3 s or with errors, and for unanswered ISI requests sent at that moment (the 3 s haptics stall, H-haptics-fail, was this kind) |
 
+## Nokia 9500 Communicator (RA-2, S80, EKA1): both screens live (2026-11-18)
+
+State (commit 320ed9e): boots on `-M nokia9500` to 58 stable processes. Cover: idle screen (wallpaper, clock,
+indicators, softkeys), keypad works with the lid closed. Inner: S80 UI, lock code 12345 accepted, first-start
+wizard (language, time/date, contact card); Desk runs. QEMU OMAP1 fixes 0009-0017, audio without a DSP,
+stalls 20-38 in docs/devices/nokia-9500-ra2/bring-up.md. Window: `python3 eka1/tools/ngage_phone.py --model
+nokia9500`. Open: finish the wizard (F9 = command button 1 = OK, untested), Desk home screen, cover scroll keys
+unconfirmed and a cover-UI freeze after some of them / Select->Save ("Contacts not ready"), no flash
+persistence (the wizard returns every boot), isolation checks not re-run after 0015-0017 (OMAP only).
+
+### Original plan (owner, 2026-11-18)
+
+Firmware RA-002 v.06.27 (extracted to eka1/ra2_rom/, git-ignored). Two displays (cover and
+the inner 640x200 one) and the cover open/close: **model them properly, as the E90 (H-e90-two-panels): both
+panels on the board, the cover as a real switch input read by the phone's own drivers, no hacks** (owner).
+QEMU's own OMAP1 models (`-M sx1`, hw/arm/omap1.c, omap_sx1.c: OMAP310) are the starting point if the 9500 is
+OMAP1510 [I]. Flash format: Phoenix A2 with 0x28 records; the core is one raw-deflate stream (offset 0x61,
+0x1122000 bytes, an EKA1 ROM: rom_base 0x50000000, size 0x1200000) followed by ROFS images [V].
+
+## Nokia 7650 (NHL-2NA, EKA1): boots to the home screen (2026-11-18), same level as the 6600
+
+Same list as the 6600 below (ISI after idle, starting with the self-test `59 02`; menu and apps; time asked
+every boot; first-boot hint; camera, IrDA, Bluetooth, sound). docs/devices/nokia-7650-nhl2/bring-up.md.
+
+## Nokia 6600 (NHL-10, EKA1): boots, not really working yet (owner, 2026-11-18)
+
+It reaches the home screen on `-M nokia6600` (docs/devices/nokia-6600-nhl10/bring-up.md), but the owner's
+verdict is "it does boot but that's mostly it". Parked for the 7650; to make it really work:
+1. Answer the unanswered ISI requests after idle (TSY 5A 00, SIM 09 09/29/23, SMS 02 1E/16, DSY 0B 11 {01 00})
+   and give the phone a network state (MTC/NET replies), as the N-Gage table does.
+2. The menu and the main apps (Phone, Messaging, Camera, Gallery), each until it opens without a stall.
+3. Time and date: no longer asked on a restart (H-nhl10-rtc); the clock still starts at rtc.dll's default date.
+4. A first-boot hint in the phone window: the screen is white for ~60 s while C: is formatted.
+5. Memory card (mmc.pdd, new driver), power key (UEM), sound, camera, IrDA, Bluetooth.
+6. Fixed 2026-11-18: the restart hang (owner: hangs on the home screen when not --fresh). Phone.app was killed by
+   the view server (ViewSrv 11) while blocked in GetALSLine (SIM 09 29, unanswered); not a regression (8be36d8
+   does the same). Replies 09 29 / 09 23 and H-nhl10-rtc (no time query on restart). Details:
+   docs/devices/nokia-6600-nhl10/bring-up.md "State".
+
+## Fake BB5 modem realigned to the N95 modem firmware (2026-11-18)
+
+The shared reply table (`platform/isi/replies-bb5.txt`), the N95's no-SIM `0A 00` line and the modem core
+(`syborg_modem_core.c`) now send what the N95 8GB's own modem firmware encodes (docs/research/n95-isi-encoders.md
+10, 11.5): MTC RF status `79 {00 01}` in NORMAL (from the MTC state), INFO `1B 2F` (real layout, see below), EM `17 01/0B/09` built
+from the request mask, SEC `12 {05 16 00 00 00 00}`, NET 8-byte sub-blocks 00 and 2C (`0A 01/02/37`), `0A 40` -> F0
+not supported (the S60 3.2/5th phones keep `41` in their own tables), SIM `1A {2F FB}` without and `{2F 24 00 00 00 00}`
+with a SIM, SIM_STATUS `C1` 6-byte forms, RTC `19 0B` with a date/time sub-block from the host clock. Host tests (`tests/isi_replies_test.py`, `tests/modem_unit_test.py`).
+
+Same evening regression (owner: N95 8GB no boot, logo ~15 s late; 5230/5800/E52 black screen; 808 and N8 fine): the
+138-byte `1B 2F` (148-byte message) reached SAServer's 128-byte ISC channel-35 receive; ISCPEER completed
+KErrOverflow, SAServer re-posted the same buffer at once, 1.5 million times, and start-up starved. Closed the same
+night (docs/research/n95-isi-encoders.md 6, 12):
+- **ISC overflow handling** [V]: the N95's NokiaISCDriver.ldd answers a too-small receive with KErrNoMemory (-4) +
+  the needed length and keeps the message; SAServer (N95 and E52) and NokiaDSY grow their buffer on -4 only. Our
+  stand-in now does the same (`src/standins/_shared/iscrx.h`, `iscpeer.inl`, ISC and ISA, Receive and DataReceive),
+  logs the first refusal once per channel, and drops a message a client refuses more than 3 times in a row so nothing
+  can spin (docs/hacks.md H-isc-rx-overflow). Test `tests/iscpeer_overflow_test.py`. Verified: N95 session with the
+  138-byte form forced in its own table: idle at 15.3 s, one `KErrNoMemory` line, `deliver (148)`.
+- **The real `2F`** [V]: the modem sends all 138 data bytes (`00 01 F0 00 88 00`, flags u32, 128-byte PP block);
+  the phone (SAFeatureInfoService) reads the F000 sub-block (id16, len8) up to byte 27. Table: `len=18 00 01 F0 00 10
+  00` (the real layout cut to the 16-byte sub-block, flags 0; the old 16-byte form had the length in the filler).
+  Tests `SAServerSpinsOnLongProductProfile` (118-byte cap kept), `test_product_profile_bits_fits_saserver_buffer`.
+- **Seeds**: `build/seeds/nokia-5800-rm356` was a broken link to `../runs/5800-seed` (build/runs is gone); recreated
+  as drives of a fresh boot past the region/date/time queries and the welcome note (idle from it at 8.0 s). New
+  `build/seeds/nokia-e52-rm469` the same way (region, date, time, Phone setup skipped). The 5730 and N79 seeds (also
+  broken links to build/runs) recreated the same way: 5730 region (emergency-call note OK'd), date, time, Phone setup
+  skipped; N79 region, date, time, emergency-call note OK'd, welcome note declined. Booted from the new seeds on
+  sessions: 5730 idle at 15.5 s, N79 idle at 15.0 s, home screens drawn.
+- Smoke after the change: N95 8GB PASS (idle 15.8 s, Carousel, Switch off), 5800 PASS (idle 7.8 s), E52 PASS (idle
+  8.0 s; Switch off now declared `smoke_skip`: no power menu from F4 or a held End key [V]).
+  5730 PASS (idle 15.6 s), N79 PASS (idle 15.3 s); both have no GL (no Carousel check) and keep their existing
+  Switch off `smoke_skip` (no power menu).
+- **`SosPmmHandler -5` is pre-existing, not from this change** [V]: `Thread sospmmhandler.exe::Main Panic
+  SosPmmHandler: N -5` ("No PMM partition found from NAND.", the product-data partition our flash lacks) is in the
+  5800-v20 instance log of 2026-11-14, the N79/E72 logs of 2026-11-14, the 5730/E52/6720 logs of 2026-11-17 and the N86
+  catch of 2026-11-10 (build/evidence/bringup-2026-11-10/n86-rm484/catches/001-sospmmhandler.exe_Main.txt), all before
+  the realignment. Non-fatal (the boot goes on); recorded in docs/devices/nokia-5800-rm356/bring-up.md. Like
+  `mc_useragent KERN-EXEC 0` (docs/build-log.md), it is a known start-up panic on the BB5 S60 phones checked (and the N8).
+- Host tests after the seeds and smoke runs: `tests/isi_replies_test.py` (22), `tests/modem_unit_test.py` (33),
+  `tests/iscpeer_overflow_test.py` (5) OK; `tools/isi.py lint` ok. No open items left from this change.
+
 ## Check later: display panel model (d_display.panel) on the phones not yet confirmed
 
 2026-11-13: the display stand-in can keep a panel buffer filled only by WSERV's posted updates (ctl 9/8), as the

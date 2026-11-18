@@ -284,7 +284,7 @@ def build():
     if nk:
         khdrs = hdrs + glob.glob(os.path.join(NKLINUX, '*.h')) + glob.glob(os.path.join(SRC, 'kernel/linux/*.h')) + \
             glob.glob(os.path.join(SRC, 'memmodel/linux/*.h')) + glob.glob(os.path.join(SRC, 'include/*.h')) + \
-            glob.glob(os.path.join(SRC, 'include/board/*.h')) + [os.path.join(ROOT, 'src/standins/_shared/iscpeer.inl'), os.path.join(ROOT, 'src/qemu-syborg/hw/arm/syborg_modem_core.h'), os.path.join(ROOT, 'src/qemu-syborg/hw/arm/syborg_ccpu.h')]
+            glob.glob(os.path.join(SRC, 'include/board/*.h')) + [os.path.join(ROOT, 'src/standins/_shared/iscpeer.inl'), os.path.join(ROOT, 'src/standins/_shared/iscrx.h'), os.path.join(ROOT, 'src/qemu-syborg/hw/arm/syborg_modem_core.h'), os.path.join(ROOT, 'src/qemu-syborg/hw/arm/syborg_ccpu.h')]
         ksrcs = [os.path.join(EKA, n + '.cpp') for n in KERNEL_GENERIC] + \
             sorted(glob.glob(os.path.join(SRC, 'memmodel/linux/*.cpp'))) + \
             sorted(glob.glob(os.path.join(SRC, 'kernel/linux/*.cpp'))) + \

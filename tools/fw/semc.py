@@ -110,7 +110,23 @@ def eka2_header(d):
         return None
     if r.base & 0xFFF or not r.base <= r.rootlist < r.base + r.size or r.hdrsize not in (0x200, 0x100):
         return None
+    try:
+        r.roots()                       # the root list is what tells a ROM from a look-alike
+    except romimg.RomError:
+        return None
     return r
+
+
+ARM_BRANCH = 0xEA000000            # 'b #imm' with condition AL in the low 24 bits' opcode field
+ARM_BRANCH_L = 0xEB000000          # 'bl #imm'
+
+
+def arm_image(d):
+    """True for an ARM code image with a branch table at 0 and no E32/ROM header: Sony Ericsson's
+    ACPU boot ROM (the "EROM CXC1620xx" files of the Emma database) and the flash loaders before
+    them. The content is not readable (no string table, no Symbian header) [verified: 3 EROMs of
+    0.9 MB, 1282..1363 accidental strings, none of them a name]; not parsed, kept as it is."""
+    return len(d) >= 0x400 and struct.unpack_from('<I', d, 0)[0] & 0xFF000000 in (ARM_BRANCH, ARM_BRANCH_L)
 
 
 def fat_boot(b):
@@ -261,6 +277,8 @@ def classify(path):
     if r and r.size >= len(d) // 2:
         facts.update(rom_base=r.base, rom_size=r.size, kern_data=r.kerndata, kern_limit=r.kernlimit)
         return 'core', facts
+    if arm_image(d):
+        return 'semc-armimg', facts
     pre = prefixed(d)
     if pre:
         hlen, addr, body = pre
@@ -415,7 +433,7 @@ def merge_z(out, layers):
     return len(final), winners
 
 
-VERSION_RE = re.compile(r'(CXC\d+)\s*(R\w+)')
+VERSION_RE = re.compile(r'(CXC\d+|\d{4}-\d{4})\s*(R\w+)')     # 1202-7347 on the UIQ 3.3 phones
 CDA_RE = re.compile(r'(CDA[\d/]+)\s*(R\w+)')
 
 
@@ -646,6 +664,12 @@ def extract(paths, out):
             entry['image'] = os.path.relpath(img, out)
             if not entry['fat'].get('complete', True):
                 manifest['problems'].append('%s: the FAT marks clusters past the end of the file' % facts['name'])
+        elif kind == 'semc-armimg':                       # boot ROM / loader: kept byte for byte
+            fn = os.path.join(out, 'armimg', stem + '.bin')
+            os.makedirs(os.path.dirname(fn), exist_ok=True)
+            with open(fn, 'wb') as f:
+                f.write(d)
+            entry['image'] = os.path.relpath(fn, out)
         elif kind == 'srec':
             lo, img = flatten(srecords(d)[0])
             fn = os.path.join(out, 'modem', '%s.0x%x.bin' % (stem, lo))
@@ -700,6 +724,8 @@ def describe(kind, f):
         return 'payload 0x%x bytes at 0x%x' % (f['payload_size'], f['payload_offset'])
     if kind == 'e32image':
         return 'uid3 ' + f['uid3']
+    if kind == 'semc-armimg':
+        return 'ARM code image, no E32/ROM header (boot ROM or flash loader), not parsed'
     if kind in ('emma', 'gdfs'):
         extra = ' '.join('%s=%s' % kv for kv in f.get('versions', {}).items())
         return '%d writes %s %s' % (f['writes'], f.get('product', ''), extra)

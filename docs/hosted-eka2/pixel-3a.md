@@ -38,8 +38,10 @@ Nothing of Android is used. The phone boots postmarketOS (pmOS), a normal Linux;
 # the phone bundle (firmware + drives: keep it private)
 python3 tools/hosted/device-bundle.py --rom nokia-808-rm807 --tar /tmp/q808.tar      # or nokia-n95-8gb-rm320
 pmbootstrap init         # vendor: google, device: sargo, UI: phosh (or plasma-mobile), user: your name
-                         # "extra packages": python3 py3-qt6 gcc musl-dev glib-dev libepoxy-dev mesa-dev
-                         #                   mesa-egl mesa-gles linux-tools util-linux file openssh
+                         # "extra packages" (Alpine names, 2026-11-14 - build-gl on the device failed without
+                         # patch/g++/pkgconf): python3 py3-qt6 gcc g++ musl-dev binutils patch pkgconf
+                         #                   glib-dev libepoxy-dev mesa-dev mesa-egl mesa-gles
+                         #                   linux-tools util-linux file openssh
 pmbootstrap install      # builds the image (on netboot: the rootfs that is served over USB)
 ```
 Size: the 808 bundle carries an 8 GB E: drive image that is mostly holes (`tar --sparse` keeps it small:
@@ -81,6 +83,7 @@ scp /tmp/q808.tar user@172.16.42.1:
 ssh user@172.16.42.1
 tar --sparse -xf q808.tar && cd nokia-808-rm807
 sudo ./run.sh check        # 32-bit support, seccomp, kernel options (see the table below)
+apk add patch g++ pkgconf # the GL build needs these (bash is required by the build scripts too)
 sudo ./run.sh build-gl     # once: the GL server against the phone's Mesa (808: needed; N95: for its GL apps)
 sudo ./run.sh              # the phone starts; log: /tmp/qembian/phone.log  (GL=0 sudo ./run.sh: no GL server)
 # in the phone's graphical session (a terminal on the phone, or ssh -X / WAYLAND_DISPLAY set):

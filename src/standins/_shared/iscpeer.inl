@@ -12,7 +12,8 @@
 // Protocol: docs/devices/nokia-n95-8gb-rm320/n95-isc-isi-protocol.md and -2.md (IscApi controls, ISI framing, boot replies).
 //   ctl 0  {status*}                     modem link init          -> complete KErrNone
 //   ctl 1  {status*, channel, TDesC8*}   open channel             -> complete KErrNone
-//   ctl 4  {status*, TDes8*, TPtr8*}     receive next message     -> deliver or park
+//   ctl 4  {status*, TDes8*, TPtr8*}     receive next message     -> deliver or park; a message longer than the
+//                                        buffer: needed length -> TPtr8, KErrNoMemory, message kept (iscrx.h)
 //   ctl 7  {status*, TPtr8*}             notify connection status -> park
 //   ctl 14 {status*}                     async close              -> complete KErrNone
 //   ctl 17 {TDesC8*}                     send ISI message         -> answer per reply table
@@ -26,6 +27,7 @@
 
 #include <kernel/kernel.h>
 #include "syborg.h"
+#include "iscrx.h"
 
 #ifndef ISC_CHANNEL_BASE
 #define ISC_CHANNEL_BASE 0
@@ -162,6 +164,7 @@ private:
 	SData* iDQ;							// received packets (KDataQueue), allocated on first use
 	TInt iDQHead, iDQCount;
 	TInt iDataLog;						// the first data operations are logged (framing, arguments)
+	TIscRxGuard iRxGuard, iDataRxGuard;	// buffer-too-small refusals (iscrx.h)
 public:
 	void QueueData(const TUint8* aData, TInt aLen);
 	void TryDeliverData();
@@ -598,32 +601,50 @@ void DIscPeerFactory::RxDfcFn(TAny* aPtr)	// DfcThread1: the factory mutex as Re
 
 void DIscPeerChannel::TryDeliver()
 	{
-	if (!iRxStatus || !iQCount)
-		return;
-	SMsg& q = iQ[iQHead];
-	TInt max = Kern::ThreadGetDesMaxLength(iClient, iRxBuf);
-	if (q.iLen > max)
+	while (iRxStatus && iQCount)
 		{
-		TUint16 need = (TUint16)q.iLen;
-		if (iNeededRaw)
-			Kern::ThreadRawWrite(iClient, iRxNeeded, &need, 2);		// ISA: a TUint16*
-		else
+		SMsg& q = iQ[iQHead];
+		TInt max = Kern::ThreadGetDesMaxLength(iClient, iRxBuf);
+		TIscRxAction a = IscRxDecide(iRxGuard, q.iLen, max);
+		if (a == EIscRxDrop)
 			{
-			TPtrC8 n((const TUint8*)&need, 2);
-			Kern::ThreadDesWrite(iClient, iRxNeeded, n, 0);		// ISC: a TPtr8* over 2 bytes
+			Kern::Printf("ISCPEER: ch %d message %d dropped: the client re-posted a %d-byte buffer %d times (H-isc-rx-overflow)",
+				iChannel, q.iLen, max, KIscRxMaxRefusals);
+			Log("drop", q.iData, q.iLen);
+			iQHead = (iQHead + 1) % KQueueLen;
+			--iQCount;
+			continue;
 			}
-		Kern::Printf("ISCPEER: ch %d message %d > buffer %d, KErrOverflow", iChannel, q.iLen, max);
-		Kern::RequestComplete(iClient, iRxStatus, KErrOverflow);
+		if (a == EIscRxTooSmall)
+			{
+			// the N95's NokiaISCDriver: needed length to the client, KErrNoMemory, message kept (iscrx.h)
+			TUint16 need = (TUint16)q.iLen;
+			if (iNeededRaw)
+				Kern::ThreadRawWrite(iClient, iRxNeeded, &need, 2);		// ISA: a TUint16*
+			else
+				{
+				TPtrC8 n((const TUint8*)&need, 2);
+				Kern::ThreadDesWrite(iClient, iRxNeeded, n, 0);		// ISC: a TPtr8* over 2 bytes
+				}
+			if (!iRxGuard.iWarned)
+				{
+				iRxGuard.iWarned = 1;
+				Kern::Printf("ISCPEER: ch %d message %d > buffer %d, KErrNoMemory (needed length given; logged once per channel)",
+					iChannel, q.iLen, max);
+				}
+			Kern::RequestComplete(iClient, iRxStatus, KErrNoMemory);
+			iRxStatus = NULL;
+			return;
+			}
+		TPtrC8 msg(q.iData, q.iLen);
+		TInt r = Kern::ThreadDesWrite(iClient, iRxBuf, msg, 0);
+		Log("deliver", q.iData, q.iLen);
+		iQHead = (iQHead + 1) % KQueueLen;
+		--iQCount;
+		Kern::RequestComplete(iClient, iRxStatus, r);
 		iRxStatus = NULL;
 		return;
 		}
-	TPtrC8 msg(q.iData, q.iLen);
-	TInt r = Kern::ThreadDesWrite(iClient, iRxBuf, msg, 0);
-	Log("deliver", q.iData, q.iLen);
-	iQHead = (iQHead + 1) % KQueueLen;
-	--iQCount;
-	Kern::RequestComplete(iClient, iRxStatus, r);
-	iRxStatus = NULL;
 	}
 
 // a packet from the client's DataSend to the modem (caller holds iLock)
@@ -666,26 +687,42 @@ void DIscPeerChannel::QueueData(const TUint8* aData, TInt aLen)
 
 void DIscPeerChannel::TryDeliverData()
 	{
-	if (!iDataRxStatus || !iDQCount)
-		return;
-	SData& q = iDQ[iDQHead];
-	TInt max = Kern::ThreadGetDesMaxLength(iClient, iDataRxBuf);
-	if (q.iLen > max)
+	while (iDataRxStatus && iDQCount)
 		{
-		TUint16 need = (TUint16)q.iLen;
-		if (iDataRxNeeded)
-			Kern::ThreadRawWrite(iClient, iDataRxNeeded, &need, 2);
-		Kern::Printf("ISCPEER: ch %d packet %d > buffer %d, KErrOverflow", iChannel, q.iLen, max);
-		Kern::RequestComplete(iClient, iDataRxStatus, KErrOverflow);
+		SData& q = iDQ[iDQHead];
+		TInt max = Kern::ThreadGetDesMaxLength(iClient, iDataRxBuf);
+		TIscRxAction a = IscRxDecide(iDataRxGuard, q.iLen, max);
+		if (a == EIscRxDrop)
+			{
+			Kern::Printf("ISCPEER: ch %d packet %d dropped: the client re-posted a %d-byte buffer %d times (H-isc-rx-overflow)",
+				iChannel, q.iLen, max, KIscRxMaxRefusals);
+			iDQHead = (iDQHead + 1) % KDataQueue;
+			--iDQCount;
+			continue;
+			}
+		if (a == EIscRxTooSmall)
+			{
+			TUint16 need = (TUint16)q.iLen;
+			if (iDataRxNeeded)
+				Kern::ThreadRawWrite(iClient, iDataRxNeeded, &need, 2);
+			if (!iDataRxGuard.iWarned)
+				{
+				iDataRxGuard.iWarned = 1;
+				Kern::Printf("ISCPEER: ch %d packet %d > buffer %d, KErrNoMemory (needed length given; logged once per channel)",
+					iChannel, q.iLen, max);
+				}
+			Kern::RequestComplete(iClient, iDataRxStatus, KErrNoMemory);
+			iDataRxStatus = NULL;
+			return;
+			}
+		TPtrC8 d(q.iData, q.iLen);
+		TInt r = Kern::ThreadDesWrite(iClient, iDataRxBuf, d, 0);
+		iDQHead = (iDQHead + 1) % KDataQueue;
+		--iDQCount;
+		Kern::RequestComplete(iClient, iDataRxStatus, r);
 		iDataRxStatus = NULL;
 		return;
 		}
-	TPtrC8 d(q.iData, q.iLen);
-	TInt r = Kern::ThreadDesWrite(iClient, iDataRxBuf, d, 0);
-	iDQHead = (iDQHead + 1) % KDataQueue;
-	--iDQCount;
-	Kern::RequestComplete(iClient, iDataRxStatus, r);
-	iDataRxStatus = NULL;
 	}
 
 DECLARE_STANDARD_LDD()

@@ -9,6 +9,38 @@ schema = 1
 default = "nokia-n95-8gb-rm320"         # the device a bare tools/device.py, sydb or script uses when no SYBORG_DEVICE / instance names one
 
 [[types]]
+code = "RH-29"
+name = "N-Gage QD"
+platform = "s60-1.2"                          # Symbian 6.1, EKA1
+soc = "upp-wd2"                               # DCT4 UPP [V bootstrap]
+model = ""                                    # not a device-model profile: QEMU board -M ngage (src/qemu-ngage)
+status = "known"                              # V 04.10 boots to the home screen, games run from a card (2026-11-12); docs/eka1-ngage.md
+
+[[types]]
+code = "RA-2"
+name = "9500 Communicator"
+platform = "s80-2.0"                          # Symbian 7.0s, EKA1
+soc = "omap1510"                              # [V bootstrap: OMAP1510 map]
+model = ""                                    # not a device-model profile: QEMU board -M nokia9500 (src/qemu-ngage/hw/arm/nokia9500.c)
+status = "known"                              # v06.27 both screens, wizard, Desk (2026-11-18); docs/devices/nokia-9500-ra2/bring-up.md
+
+[[types]]
+code = "NHL-2NA"
+name = "7650"
+platform = "s60-1.0"                          # Symbian 6.1, EKA1; the first S60 phone
+soc = "upp-wd2"                               # DCT4 UPP, as the N-Gage QD [V bootstrap]
+model = ""                                    # not a device-model profile: QEMU board -M nokia7650 (src/qemu-ngage)
+status = "known"                              # V 5.06 boots to the home screen on -M nokia7650 (2026-11-18); docs/devices/nokia-7650-nhl2/bring-up.md
+
+[[types]]
+code = "NHL-10"
+name = "6600"
+platform = "s60-2.0"                          # Symbian 7.0s, EKA1
+soc = "upp-wd2"                               # DCT4 UPP, as the N-Gage QD [V bootstrap]
+model = ""                                    # not a device-model profile: QEMU board -M nokia6600 (src/qemu-ngage)
+status = "known"                              # V 05.53 boots to the home screen on -M nokia6600 (2026-11-18); docs/devices/nokia-6600-nhl10/bring-up.md
+
+[[types]]
 code = "RM-89"
 name = "E61"
 platform = "s60-3.0"
@@ -265,8 +297,8 @@ code = "SE-P910i"
 name = "P910i"
 platform = "uiq-2.1"                         # Symbian 7.0, EKA1 (rom_base 0x50000000)
 soc = "pnx4000"                              # Philips Nexperia, ARM9 156 MHz [I: from specs]
-model = ""
-status = "known"                             # R5B01 held (se_roms/P910)
+model = ""                                   # not a device-model profile: QEMU board -M p910i (src/qemu-ngage)
+status = "known"                             # R5B01 boots to the UIQ home screen on -M p910i (2026-11-18); docs/devices/se-p910i/bring-up.md
 
 [[types]]
 code = "RA-6"

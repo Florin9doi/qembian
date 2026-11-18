@@ -1,0 +1,39 @@
+diff -ru a/hw/dma/omap_dma.c b/hw/dma/omap_dma.c
+--- a/hw/dma/omap_dma.c	2026-11-18 16:24:56.864891719 +0100
++++ b/hw/dma/omap_dma.c	2026-11-18 16:25:04.179301032 +0100
+@@ -312,6 +312,20 @@
+     }
+ }
+ 
++int omap_dma_sync_state(struct soc_dma_s *dma, int sync)
++{
++    struct omap_dma_s *s = dma->opaque;
++    int r = (dma->drqbmp >> sync) & 1 ? 8 : 0;
++
++    for (int i = 0; i < s->chans; i++) {
++        if (s->ch[i].sync == sync) {
++            r |= (s->ch[i].enable ? 1 : 0) | (s->ch[i].active ? 2 : 0) |
++                 (s->ch[i].pending_request ? 4 : 0);
++        }
++    }
++    return r;
++}
++
+ static void omap_dma_process_request(struct omap_dma_s *s, int request)
+ {
+     int channel;
+diff -ru a/include/hw/arm/omap.h b/include/hw/arm/omap.h
+--- a/include/hw/arm/omap.h	2026-11-18 16:24:56.865891759 +0100
++++ b/include/hw/arm/omap.h	2026-11-18 16:25:04.177650154 +0100
+@@ -173,6 +173,11 @@
+ 
+ /* omap_dma.c */
+ struct soc_dma_s;
++/*
++ * qembian: the channels synchronised to DMA request `sync`, for board diagnostics: bit 0 some channel
++ * enabled, bit 1 active, bit 2 a request pending, bit 3 the request line high (drqbmp).
++ */
++int omap_dma_sync_state(struct soc_dma_s *dma, int sync);
+ struct soc_dma_s *omap_dma_init(hwaddr base, qemu_irq *irqs,
+                                 MemoryRegion *sysmem,
+                                 qemu_irq lcd_irq,

@@ -17,19 +17,37 @@
 @ Build: src/qemu-ngage/nos-standin/build.sh (writes ../hw/arm/ngage_nos_stub.h).
 
         .equ    DEV,            0x581f0000
+        .ifdef  NHL2
+@ Nokia 7650 (NHL-2NA V 5.06, -M nokia7650): the same stub, its kernel's addresses (ported from
+@ the N-Gage's by code match, eka1/tools/port_addr.py; unique full-score hits) and variant layout
+@ (docs/devices/nokia-7650-nhl2/bring-up.md).
+        .equ    KERN_VARIANT,   0x5031b3b8      @ export 464
+        .equ    SET_POWER_MODEL,0x503235fc      @ export 389
+        .equ    POWER_MODEL_CTOR,0x50323288     @ export 488
+        .equ    KERN_ADD_DFC,   0x5032bef8      @ export 7
+        .equ    RAM,            0x8000b6e4      @ the NOS's bss (nosstarter: 0x8000B6E4 + 0xBE60C)
+        .equ    THREAD_WRITE,   0x50328918      @ export 475 (code order as N-Gage 479)
+        .equ    CHANNEL_COMPLETE,0x5031bcd0     @ export 63
+        .equ    VT_STATUS_SET,  0x120           @ variant: str r1, [r0, #0x90] [V]
+        .equ    HWCHUNK_CTOR,   0x50316bf0      @ export 491: DPlatChunkHw::DPlatChunkHw() (6600 port)
+        .equ    HWCHUNK_CREATE, 0x50316c64      @ export 102: create(this, phys, size, attribs)
+        .else
         .equ    KERN_VARIANT,   0x5032e7ac      @ ekern export 469: Kern::Variant()
         .equ    SET_POWER_MODEL,0x50336a08      @ ekern export 394: Power::SetPowerModel()
         .equ    POWER_MODEL_CTOR,0x50336694     @ ekern export 493: DPowerModel::DPowerModel()
         .equ    KERN_ADD_DFC,   0x5033f304      @ ekern export 7: Kern::Add(TDfc&)
         .equ    RAM,            0x8000c378      @ the NOS's bss (zeroed by nosstarter): free
-        .equ    PM_OBJ,         RAM + 0x100     @ the power model object (data at +4: writable)
-        .equ    RTC_DONE,       RAM + 0x1f0     @ the RTC hand-over was made (Q49)
-        .equ    RX_DFC,         RAM + 0x200     @ ISI delivery TDfc (board: NGAGE_NOS_RX_DFC, Q50)
-        .equ    RX_FLAG,        RAM + 0x1f8     @ board: an ISI delivery waits (NGAGE_NOS_RX_FLAG, Q56)
-        .equ    RX_DES,         RAM + 0x220     @ TPtrC8 over RX_BUF
-        .equ    RX_BUF,         RAM + 0x240     @ the frame being delivered (512 bytes)
         .equ    THREAD_WRITE,   0x5033bba0      @ ekern export 479: DThread::Write(const TAny*, const TDesC8&)
         .equ    CHANNEL_COMPLETE,0x5032f0c4     @ ekern export 64: DLogicalChannel::Complete(reqNo, reason) [V]
+        .equ    VT_STATUS_SET,  0x128
+        .endif
+        .equ    PM_OBJ,         RAM + 0x100
+        .equ    RTC_DONE,       RAM + 0x1f0
+        .equ    RX_DFC,         RAM + 0x200
+        .equ    RX_FLAG,        RAM + 0x1f8
+        .equ    RX_DES,         RAM + 0x220
+        .equ    RX_BUF,         RAM + 0x240
+
         .equ    NMETHODS,       64
 
 @ Interface ids (the device's "slot" field): 0..8 = variant slots, 0x40 = power model.
@@ -42,6 +60,28 @@ _start:                                         @ called by nosstarter.ext, r0 =
         ldr     r4, =DEV
         mov     r0, #0xff00                     @ event: stand-in entered
         str     r0, [r4]
+
+        .ifdef  NHL2
+        @ H-nhl10-hwchunk on the 7650: ecust (0x50330BD4) requires the screen chunk (physical
+        @ 0x0A0A5000) at 0x5A0E9000 and faults VARIANT 13 otherwise; ours landed at 0x5A0D7000,
+        @ 0x12000 short (one screen buffer the NOS maps [I]). Reserve it (placeholder physical
+        @ address and attributes, never accessed), as the 6600 stub does.
+        ldr     r0, =RAM + 0x500
+        ldr     ip, =HWCHUNK_CTOR
+        mov     lr, pc
+        bx      ip
+        ldr     r0, =RAM + 0x500
+        mov     r1, #0x0c000000
+        mov     r2, #0x12000
+        mov     r3, #0x13
+        ldr     ip, =HWCHUNK_CREATE
+        mov     lr, pc
+        bx      ip
+        ldr     r0, =RAM + 0x500
+        str     r0, [r4, #4]
+        ldr     r1, =0xfa00
+        str     r1, [r4]                        @ event: hardware chunk reserved
+        .endif
 
         @ the ISI delivery DFC (Q50): TDfc = {0, 0, callback, argument} (export 504's layout)
         ldr     r0, =RX_DFC
@@ -88,7 +128,7 @@ _start:                                         @ called by nosstarter.ext, r0 =
         ldr     r3, [r0]
         mov     r1, #3
         mov     lr, pc
-        ldr     pc, [r3, #0x128]
+        ldr     pc, [r3, #VT_STATUS_SET]
         mov     r0, #3
         str     r0, [r4, #4]
         ldr     r1, =0xfd00

@@ -1,0 +1,44 @@
+diff -ru a/hw/i2c/omap_i2c.c b/hw/i2c/omap_i2c.c
+--- a/hw/i2c/omap_i2c.c	2026-11-18 18:44:07.397074872 +0100
++++ b/hw/i2c/omap_i2c.c	2026-11-18 18:46:25.967866752 +0100
+@@ -170,7 +170,16 @@
+         return s->mask;
+ 
+     case 0x08:  /* I2C_STAT */
+-        return s->stat | (i2c_bus_busy(s->bus) << 12);
++        {
++            static uint16_t last = 0xffff;      /* qembian: log changes, for bring-up */
++            uint16_t v = s->stat | (i2c_bus_busy(s->bus) << 12);
++
++            if (v != last) {
++                last = v;
++                qemu_log_mask(LOG_UNIMP, "omap-i2c: stat %04x (con %04x)\n", v, s->control);
++            }
++            return v;
++        }
+ 
+     case 0x0c:  /* I2C_IV */
+         if (s->revision >= OMAP2_INTR_REV)
+@@ -195,6 +204,7 @@
+         return s->count_cur;    /* DCOUNT */
+ 
+     case 0x1c:  /* I2C_DATA */
++        qemu_log_mask(LOG_UNIMP, "omap-i2c: data read (rx %d)\n", s->rxlen);
+         ret = 0;
+         if (s->control & (1 << 14)) {   /* BE */
+             ret |= ((s->fifo >> 0) & 0xff) << 8;
+@@ -265,6 +275,14 @@
+     OMAPI2CState *s = opaque;
+     int offset = addr & OMAP_MPUI_REG_MASK;
+     int nack;
++    static unsigned logged;
++
++    if (logged < 2000) {                /* qembian: the first register writes, for bring-up */
++        logged++;
++        qemu_log_mask(LOG_UNIMP, "omap-i2c: write %02x = %04x (stat %04x con %04x cnt %d rx %d busy %d)\n",
++                      offset, value, s->stat, s->control, s->count_cur, s->rxlen,
++                      i2c_bus_busy(s->bus));
++    }
+ 
+     switch (offset) {
+     case 0x00:  /* I2C_REV */

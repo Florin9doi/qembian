@@ -1,0 +1,21 @@
+diff -ru a/hw/arm/omap1.c b/hw/arm/omap1.c
+--- a/hw/arm/omap1.c	2026-11-18 17:08:32.624150903 +0100
++++ b/hw/arm/omap1.c	2026-11-18 17:08:32.662552817 +0100
+@@ -3271,6 +3271,17 @@
+             return;
+         /* Fall through.  */
+     case 0x06:  /* DXR1 */
++        if (s->spcr[0] & 0x1800) {                  /* CLKSTP: SPI master mode */
++            /*
++             * qembian: in clock-stop (SPI) mode the word is shifted out at once: transmitter
++             * ready, shift register empty (XEMPTY is active low), a word received (DRR reads 0).
++             * The model only knew audio streams; the Nokia 9500's Espi.dll polled SPCR2 for
++             * XRDY && !XEMPTY after each write for ever (LM4855 amplifier, DeviceManagementServer).
++             */
++            s->spcr[1] = (s->spcr[1] | 2) & ~4;     /* XRDY, XEMPTY low */
++            s->spcr[0] |= 2;                        /* RRDY */
++            return;
++        }
+         if (s->tx_req > 1) {
+             s->tx_req -= 2;
+             if (s->codec && s->codec->cts) {

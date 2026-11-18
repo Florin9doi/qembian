@@ -5,20 +5,30 @@
 # the same (resource, request) needing different bytes on different phones (none today).
 # `tools/isi.py lint` checks the layering.
 # Format and names: platform/isi/names.txt, tools/isi.py.
-reply 1B 2E 2F len=16 00 01 F0 00 00 10                   # PP: product profile bits (nsb>=1)
+# 1B 2E -> 2F (PP, product profile bits) [V both sides, docs/research/n95-isi-encoders.md 6]: the N95 modem sends
+# 138 data bytes, `00 01 F0 00 88 00` (status, 1 sub-block: id16 F000, len8 0x88 = 136, filler) + u32 BE flags + the
+# 128-byte PP block. The phone (SAFeatureInfoService FUN_8092313e, ISIMESSAGE type 3 = id16/len8) reads only [10]
+# status, [11] nsb, the F000 sub-block, flags [16..19] (0 here), words [20..23] (flag bit 0) and [24..27] (bit 1):
+# 18 data bytes, a whole 16-byte sub-block. The 2026-11-18 hang with the full form was our ISC stand-in answering
+# KErrOverflow instead of the real driver's KErrNoMemory (fixed: iscrx.h, H-isc-rx-overflow); the short form keeps
+# every reply within 118 data bytes. The old 16-byte form had the length in the filler byte (`00 10`).
+reply 1B 2E 2F len=18 00 01 F0 00 10 00                   # PP: product profile bits, sb F000 len 16, flags 0 (features 3/4 off) [V layout, I values]
 reply 0A 0B 0C 00 01 04 04 00 00                          # NET_RSSI_GET
-reply 0A 36 37 00 01 2C 04 01 00                          # NET_RAT
+reply 0A 36 37 00 01 2C 08 01 01 00 00 00 00              # NET_RAT: OK, 1 sb NET_RAT_INFO 2C, 8 bytes, GSM `2C 08 01 01 00 00 00 00` (UMTS `2C 08 02 00 ..`; with a SIM the modem core answers from sim.rat) [V 0xF01EF8BA] docs/research/n95-isi-encoders.md 4.1, 11.5 item 7 (was `2C 04 01 00`)
 reply C8 36 37 00 01 2C 04 01 00                          # NET_RAT on PN_MODEM_NETWORK (Symbian^3 TSY): unanswered, Anna's connection monitor waited on its ETel request forever and the home screen on it
 reply C8 00 01 00 01 00 04 06 00                          # NET_MODEM_REG_STATUS_GET on PN_MODEM_NETWORK: OK, NET_REG_INFO_COMMON, NOSERV_NOSIM (6), as 0A 00 (docs/devices/nokia-n95-8gb-rm320/n95-isc-isi-protocol-2.md 3.1.7)
-reply 17 00 01 01 01 00 04 02 00                          # GSS (old id) op 0
-# 17 0A: SAEmService op 1 = battery bars (sb 0x16: [2]=7 max, [3]=1..7), op 2 = charger (sb 0x15:
-# [2]=1 not charging); NOKIATSY reads sb 0x16 too. Both sent (hack H-em).
-reply 17 0A 0B 01 02 16 04 07 07 15 04 01 00
+# 17 00/08/0A (EM server em_srv.c, resource 0x17): the modem core builds the answer from the request's mask: one 4-byte
+# sub-block per set bit, in bit order, {02 00} for mask 0 or an unknown bit [V] docs/research/n95-isi-encoders.md 5. These lines are the value pool
+# (looked up by sub-block id); 17 00 as written is the answer to the N95 TSY's mask 03 (its 17 0A {02} gets sb 16 only).
+reply 17 00 01 01 02 00 04 02 00 01 04 00 00              # EM op 0: mask 03 -> sb 00 {02} and sb 01 {00} [V shape; I values] (was sb 00 only)
+# 17 0A: battery bars (sb 0x16, mask bit 1: [2]=7 max, [3]=1..7) and charger (sb 0x15, mask bit 0: [2]=1 not
+# charging); NOKIATSY reads sb 0x16 too (hack H-em: full battery, no charger). Order by mask bit: 15 before 16 [V] docs/research/n95-isi-encoders.md 5
+reply 17 0A 0B 01 02 15 04 01 00 16 04 07 07
 reply 17 08 09 01 01 13 04 01 00                          # SAEm op 0x08 (sb 0x13)
-reply 15 16 79 00 00                                      # MTC RF status: normal
-reply 31 11 12 01                                         # GSS 0x11 {00 FF FF 00 00 00} -> 12 {01}; unanswered, N8 Belle and 701/808 retried it every 10 s and reached NormalRfOff ~80 s late (on: real N8 Delight, no SIM, phonet 2026-11-11)
+# 15 16 -> 79 (MTC RF status): answered by the modem core from the MTC state, `00 01` in NORMAL [V rule] docs/research/n95-isi-encoders.md 2 (was `00 00` here)
+reply 31 11 12 01                                         # N8-verified GSS-as-0x31 line; unverifiable on the N95 modem, where 0x31 is GPDS and GSS is 0x32 (docs/research/n95-isi-encoders.md 11.2), inert there. GSS 0x11 {00 FF FF 00 00 00} -> 12 {01}; unanswered, N8 Belle and 701/808 retried it every 10 s and reached NormalRfOff ~80 s late (on: real N8 Delight, no SIM, phonet 2026-11-11)
 reply 31 19 1A 00 00 00 00 00 00 00 00 00 00 00 03          # GSS 0x19 (on: real N8 Delight, no SIM, phonet 2026-11-11)
-reply 31 30 31 00 00 01 00 55 55                         # GSS 0x30 (on: real N8 Delight, phonet)
+reply 31 30 31 00 00 01 00 55 55                         # GSS 0x30 (on: real N8 Delight, phonet); N8-verified GSS-as-0x31 line; unverifiable on the N95 modem, where 0x31 is GPDS and GSS is 0x32 (docs/research/n95-isi-encoders.md 11.2)
 reply 54 0D 0E 01 00                                      # res 0x54 msg 0x0D (on: real N8 Delight, phonet)
 reply 54 73 74 00 00                                      # res 0x54 msg 0x73 (on: real N8 Delight, phonet)
 reply 54 78 79 00 01 11 00 00 08 01 00 00 00              # res 0x54 msg 0x78 (on: real N8 Delight, phonet)
@@ -27,7 +37,7 @@ reply C8 40 41 01 00 00                                   # PN_MODEM_NETWORK 0x4
 reply C8 0B F0 01 0B 00 00 00 00                          # PN_MODEM_NETWORK 0x0B: the real modem answers F0 {01 0B ...} (message not supported) (on: real N8 Delight, phonet)
 reply DB 01 02 00 01 00 01 00 00 00 00 00 31 00 33 00 00  # PNS_NAME_QUERY (GPDS)
 reply 01 28 29 00 00                                      # PN_CALL CALL_EMERGENCY_NBR_CHECK_REQ -> RESP: status 00 = not an emergency number [I: shape, TSY parser not read; V: A/B on the N95 2026-11-12, unlock at once, no panic]; unanswered, the TSY waited ~10 s per key while the keypad is locked (keyguard checks every typed key), so unlock took 10-20 s
-reply 09 19 1A 2F 24                                      # SIM read: data not available
+reply 09 19 1A 2F FB                                      # SIM read service 2F, no SIM: the N95 modem refuses it in the no-card state, `{2F FB}` [V refusal, I state] docs/research/n95-isi-encoders.md 9.1, 11.5 item 10 (was `2F 24`; the TSY retries FB once); with a SIM the modem core answers `2F 24 00 00 00 00`
 reply 23 04 05 len=18 00 01 01 10                         # PN_PERMANENT_DATA read
 reply 47 06 07 00 00                                      # light control set: status OK (SysAp->HWRM->SAServer waited on this)
 reply 35 02 03 00 00                                      # self-test steps 1/3: status 0 = passed (NokiaDSY 0x808bc3e2/0x808bc3a4 accept 0,10,11)
@@ -38,7 +48,7 @@ reply 0B 14 15 00 00                                      # audio setup (Aamm di
 reply 0B 19 1A 00 00                                      # audio setup (resp 1A -> observer OK)
 reply 77 01 09 00 00                                      # audio route ready: without it every play hangs (first) or gets KErrInUse (docs/nokia-dsp-playback.md)
 reply 08 01 02 00 00                                      # lock code state: [10]=0 -> lock status unlocked, setting disabled (NOKIATSY 0x808c8b7c); unanswered -> Autolock 'operation time-out'
-reply 19 0A 0B 01 01 04 04 01 00                          # RTC status (DosServer 0x130 via NokiaDSY ch 24; 0x808bbaa8: [10]==1, sb 04 (type 1), sb+2 1/3 = valid, 2 = invalid); unanswered -> CommonDSY timeout -2 -> Startup asks date/time every boot
+reply 19 0A 0B 01 02 01 0C 01 00 07 EA 0B 12 0C 00 00 00 04 04 01 00  # RTC status: OK, 2 sb: 01 date/time `01 0C 01 v2 YYYY MM DD hh mm ss x` (12 bytes; fixed 2026-11-18 12:00:00 here, the modem core puts the host's UTC in) and 04 `04 04 v 00` [V layout, I v2/x = 00] docs/research/n95-isi-encoders.md 11.1 (was nsb 1, sb 04 only). Earlier note: (DosServer 0x130 via NokiaDSY ch 24; 0x808bbaa8: [10]==1, sb 04 (type 1), sb+2 1/3 = valid, 2 = invalid); unanswered -> CommonDSY timeout -2 -> Startup asks date/time every boot
 
 # ---- S60 3rd Edition 9.1 (N73): older message numbering ----
 # N73 (NokiaDSY SIM start-up, DOS request 806): PN_SIM 0x3B "FA 00" = IMSI-equal query; resp 0x3C
@@ -149,4 +159,4 @@ reply 8C 21 22 F7 00 00 00 00 01 00 2A 00 08 00 00 00 00   # on: 808 (701 parser
 # the pending request completes KErrNone; with one, [sb+2]/[sb+3] cause type/cause map to an error.
 reply C9 24 25 00 00   # on: n8 701 808
 reply 0A E0 E1 00 02 00 04 06 02 09 18 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # NET_REG_STATUS_GET (the 9.3 TSY's form of 0A 00, same tid 4: E52/E72/E5-00): the same no-SIM payload in RESP E1 [I layout as 01]; unanswered, Messaging hung in RConnectionMonitor::ConnectL (2026-11-17, verified E52)
-reply 0A 40 41 01 00 00                                   # PN_NETWORK 0x40 (S60 3.2/5th TSYs): as the real N8 Delight answers C8 40 (phonet) [I same meaning on PN_NETWORK]
+reply 0A 40 F0 01 40 00 00 00 00                          # PN_NETWORK 0x40: the N95 modem's NET relay has no 0x40 handler and answers COMMON_MESSAGE F0 {01 40 00 00 00 00} (not supported) [V builder 0xF01F2988, I state coverage] docs/research/n95-isi-encoders.md 4.1, 11.5 item 9. The S60 3.2/5th phones that send it keep `41 {01 00 00}` in their own tables (2026-11-17 Messaging fix)

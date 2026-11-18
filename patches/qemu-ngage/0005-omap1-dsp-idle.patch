@@ -1,0 +1,15 @@
+--- a/hw/arm/omap1.c	2026-11-18 11:36:22.366274889 +0100
++++ b/hw/arm/omap1.c	2026-11-18 11:36:22.389893114 +0100
+@@ -1470,7 +1470,11 @@
+         return s->clkm.arm_rstct2;
+ 
+     case 0x18:  /* ARM_SYSST */
+-        return (s->clkm.clocking_scheme << 11) | s->clkm.cold_start;
++        /*
++         * qembian: bit 6 IDLE_DSP. The DSP is not emulated, so it is always idle; the Nokia 9500's
++         * kernel releases the DSP and waits for this bit (0x5003F38C) before going on.
++         */
++        return (s->clkm.clocking_scheme << 11) | (1 << 6) | s->clkm.cold_start;
+ 
+     case 0x1c:  /* ARM_CKOUT1 */
+         return s->clkm.arm_ckout1;

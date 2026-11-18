@@ -9,26 +9,27 @@ machine, without another boot.
   ngage_sess.py [-s NAME] start [--catch fatal,pabt,dabt,VA=LABEL] [--debug unimp,guest_errors]
   ngage_sess.py [-s NAME] wait [SECS]        until a catch freezes the machine (prints the summary)
   ngage_sess.py [-s NAME] status | regs | x VA [N] | objects | stack THREAD | shot FILE.png
-  ngage_sess.py [-s NAME] break VA[=LABEL] | del VA | cont | pause | mon 'MONITOR COMMAND'
+  ngage_sess.py [-s NAME] break VA[=LABEL][?EXPR] | del VA | cont | pause | mon 'MONITOR COMMAND'
   ngage_sess.py [-s NAME] dump [DIR]         SDRAM + registers to files (done by itself on a catch)
   ngage_sess.py [-s NAME] stop
 
 Catch names: fatal = the kernel fatal-fault routine (0x5031e340), pabt / dabt / undef = the
-exception vectors (low vectors, VA 0x0c / 0x10 / 0x04). Any VA also works. Session files are in
-build/ngage/sess-NAME/ (qemu.log, serial, crash-N/). Offline: `ngage_sess.py dumpx DIR VA [N]`
+exception vectors (VA 0x0c / 0x10 / 0x04, +0xffff0000 on a high-vector kernel), panic = RThread::Panic
+(models that know it). Any VA also works; VA=w:LABEL is a write watchpoint on that word. Session files are in
+build/ngage/sess-NAME/ (qemu.log, serial/serial2/serial3 = UART1..3, crash-N/). Offline: `ngage_sess.py dumpx DIR VA [N]`
 reads a crash dump's RAM through its page tables, with no machine running.
 """
-import argparse, json, os, pathlib, select, signal, socket, struct, subprocess, sys, time
+import argparse, json, os, re, pathlib, select, signal, socket, struct, subprocess, sys, time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import ngage_run as nr  # noqa: E402
 
 ROOT = nr.ROOT
 SDRAM, SDRAM_SIZE = 0x0A000000, 0x01000000
-CATCHES = {'fatal': 0x5031e340, 'pabt': 0x0c, 'dabt': 0x10, 'undef': 0x04}
-CUR_THREAD = 0x80006740        # the kernel's current DThread
+CATCHES = {'fatal': nr.M['fatal'], 'pabt': 0x0c, 'dabt': 0x10, 'undef': 0x04}
+CUR_THREAD = nr.M['cur_thread']  # the kernel's current DThread
 FAULT_WORDS = 0x0C0047F0       # the fatal routine writes {address, pc, code} here (internal SRAM)
-TTB = 0x0A074000               # EKA1's one page directory (TTBR0 seen in every run)
+TTB = nr.M['ttb']               # EKA1's one page directory (TTBR0 seen in every run)
 REGNAMES = ['r%d' % i for i in range(13)] + ['sp', 'lr', 'pc']
 
 
@@ -119,12 +120,15 @@ class Daemon:
     def run(self):
         a, d = self.a, self.d
         s_ = socket.socket(); s_.bind(('127.0.0.1', 0)); port = s_.getsockname()[1]; s_.close()
-        mach = 'ngage' + (',ppm=%s' % a.ppm if a.ppm else '') + (',isi=%s' % a.isi if a.isi else '') \
+        mach = nr.M['machine'] + (',ppm=%s' % a.ppm if a.ppm else '') + (',isi=%s' % a.isi if a.isi else '') \
             + (',flash=%s' % a.flash if a.flash else '') + (',mmc=%s' % a.mmc if a.mmc else '')
         cmd = [str(nr.QEMU), '-M', mach, '-bios', a.rom, '-display', 'none',
-               '-serial', 'file:%s' % (d / 'serial'), '-monitor', 'unix:%s,server,nowait' % (d / 'mon'),
+               '-serial', 'file:%s' % (d / 'serial'),
+               '-serial', 'file:%s' % (d / 'serial2'), '-serial', 'file:%s' % (d / 'serial3'),
+               '-monitor', 'unix:%s,server,nowait' % (d / 'mon'),
                '-qmp', 'unix:%s,server,nowait' % (d / 'qmp'),
-               '-d', a.debug, '-D', str(d / 'qemu.log'), '-gdb', 'tcp:127.0.0.1:%d' % port, '-S']
+               '-d', a.debug, '-D', str(d / 'qemu.log'), '-gdb', 'tcp:127.0.0.1:%d' % port, '-S'] \
+            + (['-dfilter', a.dfilter] if a.dfilter else [])
         self.q = subprocess.Popen(cmd, stdout=open(d / 'qemu.out', 'w'), stderr=subprocess.STDOUT)
         (d / 'qemu.pid').write_text(str(self.q.pid))
         for _ in range(100):
@@ -167,7 +171,8 @@ class Daemon:
             self.q.kill()
 
     def set_bp(self, va, label):
-        r = self.rsp.cmd('Z1,%x,4' % va)
+        # 'w:LABEL' = a write watchpoint on the word at VA (the machine stops just after the store)
+        r = self.rsp.cmd('Z%d,%x,4' % (2 if label.startswith('w:') else 1, va))
         if r != 'OK':
             raise ValueError('breakpoint %08x: %s' % (va, r))
         self.bps[va] = label
@@ -207,11 +212,15 @@ class Daemon:
                 self.cont()
                 return
         label = self.bps.get(regs['pc'], 'stopped')
-        self.state = 'frozen' if regs['pc'] in self.bps else 'paused'
+        m = re.search(r'watch:([0-9a-f]+)', p)
+        if m and int(m.group(1), 16) in self.bps:      # a watchpoint fired
+            label = self.bps[int(m.group(1), 16)]
+        self.state = 'frozen' if regs['pc'] in self.bps or m else 'paused'
         self.hit = {'label': label, 'pc': regs['pc'], 'at_secs': round(time.time() - self.t0, 1)}
         self.log('stop', label, '%08x' % regs['pc'])
         if self.state == 'frozen' and regs['pc'] in (CATCHES['fatal'], CATCHES['pabt'],
-                                                     CATCHES['dabt'], CATCHES['undef']):
+                                                     CATCHES['dabt'], CATCHES['undef'],
+                                                     CATCHES.get('panic')):
             self.crashes += 1                   # crash catches only: a dump is 16 MB
             self.hit['dump'] = str(self.dump(self.d / ('crash-%d' % self.crashes), label))
 
@@ -261,7 +270,7 @@ class Daemon:
         try:
             words = struct.unpack('<64I', self.rsp.mem(regs['sp'], 256))
             for i, v in enumerate(words):
-                if 0x5031af9c <= v < 0x51170000:
+                if nr.M['code'][0] <= v < nr.M['code'][1]:
                     st.append('sp+%03x %08x %s' % (4 * i, v, name(v & ~1) or ''))
         except Exception as e:
             st.append(str(e))
@@ -308,8 +317,12 @@ class Daemon:
                 self.rsp.s.sendall(b'\x03'); self.rsp.packet(5)
             if op == 'break':
                 self.set_bp(req['va'], req.get('label') or 'bp')
+                if req.get('cond'):                 # break VA[=LABEL][?EXPR], as the --catch syntax
+                    self.conds[req['va']] = req['cond']
             else:
-                self.rsp.cmd('z1,%x,4' % req['va']); self.bps.pop(req['va'], None)
+                kind = 2 if self.bps.get(req['va'], '').startswith('w:') else 1
+                self.rsp.cmd('z%d,%x,4' % (kind, req['va'])); self.bps.pop(req['va'], None)
+                self.conds.pop(req['va'], None)
             if was:
                 self.cont()
             return {'bps': {'%08x' % k: v for k, v in self.bps.items()}}
@@ -371,7 +384,7 @@ def dump_reader(dirp):
     ram = (dirp / 'sdram.bin').read_bytes()
     st = json.loads((dirp / 'state.json').read_text())
     ttb = TTB
-    rom = (ROOT / 'eka1/output/rom/ROM.bin').read_bytes()
+    rom = nr.M['rom'].read_bytes()
 
     def phys(pa, n):
         if SDRAM <= pa < SDRAM + SDRAM_SIZE:
@@ -413,14 +426,30 @@ def main():
     ap.add_argument('args', nargs='*')
     ap.add_argument('--catch', default='fatal,pabt,dabt')
     ap.add_argument('--debug', default='unimp,guest_errors')
-    ap.add_argument('--rom', default=str(ROOT / 'eka1/output/rom/ROM.bin'))
-    ap.add_argument('--ppm', default=str(ROOT / 'eka1/extracted/RH2941.026'))
+    ap.add_argument('--dfilter', default='', help="QEMU -dfilter (e.g. '0x0..0xfffff,0x50014f00+0x200' with --debug exec,nochain)")
+    ap.add_argument('--model', default=os.environ.get('NGAGE_MODEL', 'ngage'), choices=sorted(nr.MODELS),
+                    help='the phone (default ngage = N-Gage QD; nokia6600); start only, later '
+                         'commands read it from the session')
+    ap.add_argument('--rom', help="default: the model's ROM.bin")
+    ap.add_argument('--ppm', help="default: the model's PPM segments")
     ap.add_argument('--flash', default='', help="the phone's flash file (kept across boots, Q55); default none")
     ap.add_argument('--mmc', default='', help='memory card image (E:), eka1/tools/ngage_card.py; default none')
-    ap.add_argument('--isi', default=str(ROOT / 'src/qemu-ngage/isi-replies.txt'),
-                    help='ISI reply table (Q50); "" = none')
+    ap.add_argument('--isi', help='ISI reply table (Q50); "" = none; default: the model\'s')
     a = ap.parse_args()
     d = sdir(a.session)
+    if a.op != 'start' and (d / 'model').exists():
+        a.model = (d / 'model').read_text().strip()
+    m = nr.use_model(a.model)
+    global CUR_THREAD, TTB, SDRAM, SDRAM_SIZE
+    SDRAM, SDRAM_SIZE = m.get('sdram', (SDRAM, SDRAM_SIZE))   # the board's RAM (p910i: 0xD0000000)
+    CATCHES['fatal'], CUR_THREAD, TTB = m['fatal'], m['cur_thread'], m['ttb']
+    vec = m.get('vectors', 0)                   # 0xffff0000 on a kernel with high vectors (9500)
+    CATCHES.update(pabt=vec + 0x0c, dabt=vec + 0x10, undef=vec + 0x04)
+    if m.get('panic'):
+        CATCHES['panic'] = m['panic']           # EUser RThread::Panic (thread panics, not kernel faults)
+    a.rom = str(m['rom']) if a.rom is None else a.rom
+    a.ppm = str(m['ppm']) if a.ppm is None else a.ppm
+    a.isi = (str(m['isi']) if m['isi'].exists() else '') if a.isi is None else a.isi
     if a.op == '_daemon':
         dm = Daemon(a)
         try:
@@ -441,8 +470,9 @@ def main():
         for f in d.glob('*'):
             if f.is_file() or f.is_socket():
                 f.unlink()
-        args = [sys.executable, __file__, '-s', a.session, '_daemon', '--catch', a.catch,
-                '--debug', a.debug, '--rom', a.rom, '--ppm', a.ppm, '--isi', a.isi,
+        (d / 'model').write_text(a.model)
+        args = [sys.executable, __file__, '-s', a.session, '_daemon', '--model', a.model, '--catch', a.catch,
+                '--debug', a.debug, '--dfilter', a.dfilter, '--rom', a.rom, '--ppm', a.ppm, '--isi', a.isi,
                 '--flash', os.path.abspath(a.flash) if a.flash else '',
                 '--mmc', os.path.abspath(a.mmc) if a.mmc else '']
         subprocess.Popen(args, start_new_session=True, stdin=subprocess.DEVNULL,
@@ -490,7 +520,10 @@ def main():
         return
     req = {'op': a.op}
     if a.op in ('x', 'break', 'del'):
-        va, _, label = a.args[0].partition('=')
+        spec, _, cond = a.args[0].partition('?')
+        if cond:
+            req['cond'] = cond
+        va, _, label = spec.partition('=')
         req['va'] = CATCHES.get(va) if va in CATCHES else int(va, 16)
         req['label'] = label or va
         req['n'] = int(a.args[1]) if len(a.args) > 1 else 16

@@ -73,13 +73,17 @@ Read `docs/devices.md` (schema, layering) before touching `models/`, `src/standi
   instance in `tools/instance.py list`, or `run-gui.sh`, which boots one): clone it
   (`tools/instance.py clone NAME NAME-test`) or use a `--session build/sydb-<name>` session.
 
-## N-Gage QD (EKA1): a separate board
+## EKA1 phones (N-Gage QD, 7650, 6600, 9500, P910i): their own kernel, separate boards
 
-The original N-Gage firmware (Symbian 6.1, EKA1 kernel) runs on its own QEMU board `ngage`
-(`src/qemu-ngage/`, built by `scripts/build-qemu-ngage.sh` into `build/qemu-ngage/`), outside
-the device model and sydb. Start with `docs/eka1-ngage.md` (state, running, debugging, next);
-evidence is in `docs/eka1-ngage-questions.md`. Window: `python3 eka1/tools/ngage_phone.py`;
-debug sessions: `eka1/tools/ngage_sess.py` (own sessions only, never `phone-*` unasked).
+Symbian 6.1-7.0s phones run their own EKA1 kernel on QEMU boards in `src/qemu-ngage/` (built by
+`scripts/build-qemu-ngage.sh` into `build/qemu-ngage/`), outside the device model and sydb: `-M ngage`
+(N-Gage QD), `nokia7650`, `nokia6600` (DCT4 variants of ngage.c), `nokia9500` (QEMU's OMAP1510), `p910i`
+(a PNX4000 board modelled from the phone's code). Start with `docs/eka1-ngage.md` (tools, running,
+debugging) and the phone's `docs/devices/<id>/bring-up.md`; overview in `docs/device-matrix.md` 2.2b; the
+method for a new SoC and an unknown modem protocol: `docs/devices/se-p910i/how-it-was-done.md`.
+Window: `python3 eka1/tools/ngage_phone.py --model M`; debug sessions: `eka1/tools/ngage_sess.py` (own
+sessions only, never `phone-*` unasked). After changing shared code (ngage*.c, patches/qemu-ngage/, the
+build script) run `tests/ngage-boot-check.py --model ngage / nokia7650 / nokia6600 --idle`.
 
 ## Hosted EKA2: the kernel as a Linux process
 

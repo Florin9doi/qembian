@@ -133,6 +133,12 @@ static void host_snd_beep(void *ctx, uint32_t hz, uint32_t ms, uint32_t gain)
     syborg_snd_beep(hz, ms, gain);
 }
 
+/* host UTC for the RTC status reply (19 0A, the date/time sub-block) */
+static int64_t host_wall_seconds(void *ctx)
+{
+    return g_get_real_time() / G_USEC_PER_SEC;
+}
+
 static const SybModemHost modem_host = {
     .set_irq = host_set_irq,
     .timer_mod = host_timer_mod,
@@ -146,6 +152,7 @@ static const SybModemHost modem_host = {
     .snd_pending = host_snd_pending,
     .snd_ring_size = host_snd_ring_size,
     .snd_beep = host_snd_beep,
+    .wall_seconds = host_wall_seconds,
 };
 
 /* ---- packet data from the host network */

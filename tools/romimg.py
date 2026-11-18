@@ -14,6 +14,10 @@ E32_UIDS_EXE = 0x1000007A
 E32_UIDS_DLL = 0x10000079
 
 
+class RomError(Exception):
+    """the image's root directory list is not usable (not a ROM image, or truncated)"""
+
+
 class Rom:
     def __init__(self, data):
         self.d = data
@@ -34,11 +38,32 @@ class Rom:
         o = a - self.base
         return self.d[o:o + n]
 
-    def walk(self):
+    def roots(self):
+        """(hardware, address) pairs of the root directory list; RomError if it is not usable.
+
+Other images (the phones' boot ROM: an ARM branch table at 0, no Symbian header) read
+as plausible TRomHeader fields by accident; their root list is the first thing that does not
+hold up, so every caller that wants to know "is this really a ROM" comes through here."""
+        o = self.rootlist - self.base
+        if not 0 <= o <= len(self.d) - 4:
+            raise RomError('root list 0x%08x is outside the image (0x%08x..0x%08x, %d bytes)'
+                           % (self.rootlist, self.base, self.base + len(self.d), len(self.d)))
         n = self.u32(self.rootlist)
-        seen = set()
+        if not 1 <= n <= 64:
+            raise RomError('implausible root list count %d at 0x%08x' % (n, self.rootlist))
+        if o + 4 + 8 * n > len(self.d):
+            raise RomError('root list of %d entries at 0x%08x runs past the image' % (n, self.rootlist))
+        out = []
         for i in range(n):
-            hw, addr = struct.unpack_from('<II', self.d, self.rootlist - self.base + 4 + 8 * i)
+            hw, addr = struct.unpack_from('<II', self.d, o + 4 + 8 * i)
+            if not self.inrom(addr):
+                raise RomError('root directory 0x%08x is outside the image' % addr)
+            out.append((hw, addr))
+        return out
+
+    def walk(self):
+        seen = set()
+        for hw, addr in self.roots():
             yield from self._dir(addr, '', hw, seen)
 
     def _dir(self, addr, path, hw, seen):
@@ -47,9 +72,13 @@ class Rom:
         seen.add(addr)
         size = self.u32(addr)
         p = addr + 4
-        end = p + size
-        while p < end:
+        end = min(p + size, self.base + len(self.d))        # a directory may claim more than the file has
+        while p + 10 <= end:
             esz, ealin, att, nl = struct.unpack_from('<IIBB', self.d, p - self.base)
+            if not nl:
+                return          # no name: padding behind a directory size that overruns the file
+            if p + 10 + nl * 2 > self.base + len(self.d):
+                return                                      # entry name runs past the file
             name = self.bytes(p + 10, nl * 2).decode('utf-16le', 'replace')
             if att & 0x10:
                 yield from self._dir(ealin, path + name + '/', hw, seen)
@@ -87,6 +116,10 @@ def main():
     a = ap.parse_args()
     data = open(a.img, 'rb').read()
     rom = Rom(data)
+    try:
+        rom.roots()
+    except RomError as e:
+        raise SystemExit('%s: not an EKA2 XIP ROM: %s' % (a.img, e))
     print('# romBase=0x%08x romSize=0x%x root=0x%08x kernData=0x%08x kernLimit=0x%08x primary=0x%08x'
           % (rom.base, rom.size, rom.rootlist, rom.kerndata, rom.kernlimit, rom.primary))
     print('# hardware=0x%08x variantFile=0x%08x extensionFile=0x%08x version=%s compression=0x%x (%d->%d) hdrsize=0x%x'

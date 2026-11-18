@@ -143,6 +143,13 @@ Two objects handle `0A 01`:
 [ref]; with no SIM a real modem reports exactly that. Absent subblocks are skipped safely.
 **[verified]**
 
+**Correction (2026-11-18, from the N95 8GB modem firmware itself: [n95-isi-encoders.md](../../research/n95-isi-encoders.md) 4.1, 11.5, 11.6):**
+the 3.1.6 / 3.1.7 replies above are what the TSY accepts [verified TSY side], but the real modem's sub-blocks are
+longer: `NET_RAT_INFO` is `2C 08 01 01 00 00 00 00` for GSM (`2C 08 02 00 ..` UMTS), and `NET_REG_INFO_COMMON` is
+8 bytes (`00 08 st mode 00 00 00 00`), followed (except NSPS_NO_COVERAGE) by `NET_GSM_REG_INFO` 09 of 24 bytes:
+no SIM `00 02 00 08 06 02 00 00 00 00 09 18 ...` [V shape, I status 06]. The same holds for the `02` IND. The
+reply tables were realigned to these forms on 2026-11-18; the original rows are kept as evidence.
+
 #### 3.1.8 `09 C0` — `SIM_STATUS_REQ` (service 0, answered with `C1 00 06` since run 42)
 **NokiaDSY** (`0x808bfb54`) maps the status: `0x01`/`0x1C`/`0x4B` → 3 = card present (then waits
 for SIM init), `0x06`/`0x24` → 4 = no card (DOS SIM state → sae 0x100052E9 = 5). `SEC_STATE_RESP`
@@ -225,7 +232,7 @@ fake coverage. **[verified]**
 Opens extension channel `0x20` (32) with `aInfo=0` (`FUN_816e2xxx`, `imp_IscApi_ord21(…,0x20,…)`),
 no subscription. Every request is `Send` + a **synchronous** `Receive` with an `RTimer` of
 `0x4C4B40` µs = **5 s** (`FUN_816e22d6` `0x816e22d6`; timeout → `ReceiveCancel`, `KErrTimedOut`
-(−33); `KErrOverflow` → grows the buffer from `aNeeded` and retries). Order
+(−33); `KErrNoMemory` (−4) → grows the buffer from `aNeeded` and retries). Order
 (`FUN_816e27fc` `0x816e27fc`): **[verified]**
 
 1. `FUN_816e279a`: loop up to 10 rounds of SIM `0x1F` with service types `02`, `01`, `0x2E`
@@ -304,7 +311,7 @@ or `'M'` (`00 01`): product name / manufacturer **[inferred]**. Optional reply:
 |---|---|---|
 | `1B 29` (NOKIATSY, 1 entry `01 26`) | `00 6C 00 1B 12 00 C 00 T 2A 00 01 74 00 00 0C 00 00 00 01 01 26 00 00` | echo the request's entries with value 0; **generic rule:** copy the request payload from `[10]`, set `[10]=00`, keep `[11]=01`, zero the low 16 bits of every entry at `sb+8+4i` |
 | `1B 29` (SAServer, 3 entries) | `00 6C 00 1B 1A 00 C 00 T 2A 00 01 74 00 00 14 00 00 00 03 01 08 00 00 00 23 00 00 01 35 00 00` | same generic rule (22-byte payload → total 32, `len=0x1A`) |
-| `1B 2E` (SAServer) | `00 6C 00 1B 16 00 C 00 T 2F 00 01 F0 00 00 10 00 00 00 00 00 00 00 00 00 00 00 00` | `[11]` **must** be ≥ 1; subblock `F000`, len 16, flags 0 |
+| `1B 2E` (SAServer) | `00 6C 00 1B 16 00 C 00 T 2F 00 01 F0 00 10 00 00 00 00 00 00 00 00 00 00 00 00 00` | `[11]` **must** be ≥ 1; subblock `F000` (ISIMESSAGE type 3: id16, len8 at +2 = 0x10, filler), flags 0 (2026-11-18: the length was in the filler byte before; the real modem sends 138 data bytes, n95-isi-encoders.md 6) |
 | `0A 0B` `NET_RSSI_GET_REQ` | `00 6C 00 0A 0A 00 C 00 T 0C 00 01 04 04 00 00` | cause OK, `NET_RSSI_CURRENT` 0 % |
 | `0A 36` `NET_RAT_REQ` | `00 6C 00 0A 0A 00 C 00 T 37 00 01 2C 04 01 00` | `NET_RAT_INFO` = GSM |
 | `0A 00` `NET_MODEM_REG_STATUS_GET_REQ` | `00 6C 00 0A 0A 00 C 00 T 01 00 01 00 04 06 00` | `NET_REG_INFO_COMMON`, status `NOSERV_NOSIM` |
@@ -319,6 +326,13 @@ or `'M'` (`00 01`): product name / manufacturer **[inferred]**. Optional reply:
 | `1B 0B` (EInfoServer) | `00 6C 00 1B 12 00 C 00 T 0C 00 01 4E 0C 00 06 52 4D 2D 33 32 30 00 00` | optional ("RM-320"); for data `00 01` use id `4D` |
 | `31 19`, `31 30` | no reply | not needed for boot |
 | `15 02` / `09 C0` / `08 11` / `1C 2D` / `09 E4` | unchanged from part 1 | NOKIATSY's `0x65` parser needs `[10]==[11]`; its `0xC1` parser ignores `0x1C` |
+
+**Correction (2026-11-18, [n95-isi-encoders.md](../../research/n95-isi-encoders.md) 10, 11.5):** rows in this table that
+the N95 modem encodes differently, as now in `platform/isi/replies-bb5.txt` / the modem core: `1B 2F` is 138 data bytes
+`00 01 F0 00 88 00` + three u32 + zeros; `0A 37` and `0A 01` use 8-byte sub-blocks (see the note before 3.1.8);
+`17 01` / `17 0B` carry one sub-block per set request mask bit, in bit order (TSY `17 00 {03}` -> sub-blocks 00 and 01;
+`17 0A {02}` -> 16 only); `15 79` is `00 01` (rf on) in NORMAL; `09 1A` with no SIM is `2F FB` (`2F 24 00 00 00 00`
+with a SIM). Original rows kept.
 
 Length bytes: `1B 2A` to NOKIATSY = 10 + 14 = 24 bytes → `len = 18 = 0x12`, i.e. the header is
 `00 6C 00 1B 12 00 C 00`; to SAServer = 10 + 22 = 32 bytes → `len = 0x1A`; `1B 2F` = 10 + 18 = 28 →

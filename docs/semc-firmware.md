@@ -1,6 +1,8 @@
 # Sony Ericsson (UIQ) firmware: formats, what each phone holds, how to read it
 
-State of 2026-11-13. Covers the two firmwares held: P1i (UIQ 3.0) and P910i (UIQ 2.1). Every claim
+State of 2026-11-13. Covers the two firmwares held: P1i (UIQ 3.0) and P910i (UIQ 2.1); since
+2026-11-13 twelve more UIQ 3 sets come out of the Emma service tool archive — what is in it, and how
+to get the files out, is [semc-emma.md](semc-emma.md). Every claim
 is marked [V] (read from those files) or [I] (inferred: from names, strings or public specs). The
 tool is `tools/fw/semc.py`; its docstring repeats the formats. Tests: `tests/semc_test.py`.
 Phase 2 (how to run each phone) is in "Next" below; [uiq.md](uiq.md) has the platform overview.
@@ -120,6 +122,9 @@ GSM plat") [V: strings]: the first modem message a fake peer must send [I].
   the UI comes up before the CCPU answers: [I], the first boot tells.
 
 ### P910i: its own EKA1 kernel on a new board
+
+2026-11-18: done as `-M p910i`: boots to the UIQ set up wizard and the start-up Power menu;
+[devices/se-p910i/bring-up.md](devices/se-p910i/bring-up.md).
 
 - Kernel side from the ROM header lists [V]: EKern, EUser, EPower, epbusz, Hal, EFile, EStart, EComm,
   `udiskonchip.dll` (M-Systems DiskOnChip flash disk), `rolfdrv.pdd` + `earolf.fsy` (A:), `DocSupportDrv`,

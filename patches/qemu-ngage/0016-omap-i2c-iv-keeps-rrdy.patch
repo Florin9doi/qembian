@@ -1,0 +1,44 @@
+diff -ru a/hw/i2c/omap_i2c.c b/hw/i2c/omap_i2c.c
+--- a/hw/i2c/omap_i2c.c	2026-11-18 18:48:46.133092299 +0100
++++ b/hw/i2c/omap_i2c.c	2026-11-18 18:48:46.155939035 +0100
+@@ -42,6 +42,7 @@
+ 
+     uint8_t mask;
+     uint16_t stat;
++    uint16_t iv_ack;        /* qembian: RRDY/XRDY reported through I2C_IV, still set in STAT */
+     uint16_t dma;
+     uint16_t count;
+     int count_cur;
+@@ -60,7 +61,8 @@
+ 
+ static void omap_i2c_interrupts_update(OMAPI2CState *s)
+ {
+-    qemu_set_irq(s->irq, s->stat & s->mask);
++    s->iv_ack &= s->stat;                   /* an acknowledged bit that cleared re-arms */
++    qemu_set_irq(s->irq, s->stat & s->mask & ~s->iv_ack);
+     if ((s->dma >> 15) & 1)                             /* RDMA_EN */
+         qemu_set_irq(s->drq[0], (s->stat >> 3) & 1);    /* RRDY */
+     if ((s->dma >> 7) & 1)                              /* XDMA_EN */
+@@ -184,9 +186,20 @@
+     case 0x0c:  /* I2C_IV */
+         if (s->revision >= OMAP2_INTR_REV)
+             break;
+-        ret = ctz32(s->stat & s->mask);
++        ret = ctz32(s->stat & s->mask & ~s->iv_ack);
+         if (ret != 32) {
+-            s->stat ^= 1 << ret;
++            /*
++             * qembian: reading IV acknowledges the interrupt. ARDY/NACK/AL are events and clear;
++             * RRDY/XRDY follow the data register (cleared by a DATA access), so they stay set in
++             * STAT. Clearing RRDY here lost the Nokia 9500's keyboard byte: Ei2c's interrupt
++             * handler reads IV while its read routine (0x500428D8) polls STAT for RRDY/ARDY, and
++             * EKeyb's I2C transfer never finished (no key after the lid opened).
++             */
++            if (ret == 3 || ret == 4) {
++                s->iv_ack |= 1 << ret;
++            } else {
++                s->stat ^= 1 << ret;
++            }
+             ret++;
+         } else {
+             ret = 0;

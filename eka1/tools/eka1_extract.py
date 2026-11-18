@@ -1190,6 +1190,64 @@ def verify_files(img: Image, src: Source, files: List[dict]) -> dict:
             "ok": not mismatches}
 
 
+def kernel_header(rom: bytes, rom_base: int, addr: int) -> dict:
+    """The fields of the TRomImageHeader at `addr` that the reports quote (EKA1 layout:
+    uids, uid checksum, entry, code address, data address, code size, text size, data size,
+    bss size, heap min/max, stack size, dll ref table, export count, export dir)."""
+    o = addr - rom_base
+    if o < 0 or o + 0x44 > len(rom):
+        return {}
+    w = struct.unpack_from("<17I", rom, o)
+    return {"address": addr, "entry": w[4], "code_address": w[5], "data_address": w[6],
+            "code_size": w[7], "text_size": w[8], "data_size": w[9], "bss_size": w[10],
+            "header_size": w[5] - addr, "dll_ref_table": w[14], "export_count": w[15], "export_dir": w[16]}
+
+
+def bank_lines(mapping: List[dict], rom_base: int) -> List[str]:
+    """One line per contiguous flash range of the ROM: flash range -> ROM offset/virtual."""
+    runs: List[List[int]] = []
+    for m in sorted(mapping, key=lambda m: m["rom_offset"]):
+        fa, n, ro = m["flash_address"], m["flash_length"], m["rom_offset"]
+        if runs and runs[-1][0] + runs[-1][1] <= fa and fa - (runs[-1][0] + runs[-1][1]) == ro - (runs[-1][2] + runs[-1][1]):
+            runs[-1][1] = fa + n - runs[-1][0]
+        else:
+            runs.append([fa, n, ro])
+    return [f"flash 0x{fa:08X}..0x{fa + n:08X} -> ROM offset 0x{ro:07X} (virtual 0x{rom_base + ro:08X})"
+            for fa, n, ro in runs]
+
+
+def variant_lines(variant_info: Optional[dict]) -> List[str]:
+    if not variant_info:
+        return ["- Variant/PPM overlay: not found."]
+    d = variant_info.get("directory_image") or {}
+    w = variant_info.get("data_image")
+    v = variant_info.get("validation") or {}
+    out = [f"- Variant/PPM overlay (`{variant_info.get('source')}`): extracted to `output/variant/`; "
+           f"directory tree at flash 0x{d.get('flash_address', 0):08X} mapped at virtual "
+           f"0x{d.get('virtual_base', 0):08X}."]
+    if w:
+        out.append(f"- PPM file data window: flash 0x{w['flash_address']:08X} mapped at virtual "
+                   f"0x{w['virtual_base']:08X} (signature score {w.get('signature_score')}).")
+    else:
+        out.append("- No separate PPM data window: the file data lies in the tree's own window or in the MCU ROM.")
+    out.append(f"- Variant files extracted: {sum(1 for f in variant_info.get('files', []) if f.get('complete'))}; "
+               f"byte-for-byte verification: {v.get('files_checked')} checked, "
+               f"{len(v.get('mismatches', []))} mismatches.")
+    return out
+
+
+def keep_added_sections(generated: str, existing: Optional[str]) -> str:
+    """The generated notes have no `## ` headings; sections an analyst appended to an earlier
+    copy (e.g. "## Kernel export and executive-call tables (Ghidra pass)") start with one.
+    Keep those, so a --report rerun does not drop them."""
+    if not existing:
+        return generated
+    i = existing.find("\n## ")
+    if i < 0:
+        return generated
+    return generated.rstrip("\n") + "\n" + existing[i:]
+
+
 def write_analysis(analysis_dir: Path, rom_manifest: dict, variant_info: Optional[dict],
                    sources, rom_src, prim, sec, files, problems, validation,
                    rom: Image, entries: List[Entry], out_dir: Path) -> None:
@@ -1348,23 +1406,41 @@ def write_analysis(analysis_dir: Path, rom_manifest: dict, variant_info: Optiona
 
     # Header / Ghidra notes.
     h = rom_manifest["header"]
-    notes = f"""# Ghidra loading notes (RH-29 N-Gage QD EKA1 ROM)
+    kaddr = next((m["address"] for m in prim if m["name"].lower() == "ekern.exe"), 0)
+    k = kernel_header(rom.data, rom.base, kaddr) if kaddr else {}
+    banks = bank_lines(rom_manifest.get("mapping", []), h["rom_base"])
+    sym_start = min([h["rom_root_dir_list"]] + [m["address"] for m in prim]) - h["rom_base"]
+    kern_lines = (
+        f"""- Kernel executable: `ekern.exe` TRomImageHeader at ROM virtual address
+  **0x{kaddr:08X}** (ROM offset 0x{kaddr - h['rom_base']:06X}).
+  Header size 0x{k['header_size']:X}; code base **0x{k['code_address']:08X}**; entry point
+  **0x{k['entry']:08X}** ({'Thumb' if k['entry'] & 1 else 'ARM'}).  Code size 0x{k['code_size']:X},
+  text size 0x{k['text_size']:X}.  Initialised data template at 0x{k['data_address']:08X}
+  (size 0x{k['data_size']:X}); BSS size 0x{k['bss_size']:X}.  Exports: {k['export_count']}
+  (directory at 0x{k['export_dir']:08X}).  The kernel's writable data/BSS live at the
+  header's `kern_data_address` = **0x{h['kern_data_address']:08X}..0x{h['kern_limit']:08X}**,
+  which is RAM, not in `ROM.bin`; add an uninitialised Ghidra block there if you want
+  kernel RAM references to resolve.
+- Suggested focused range for kernel analysis: `0x{kaddr:08X}..0x{kaddr + k['header_size'] + k['code_size']:08X}`.
+  If whole-ROM auto-analysis is noisy, use the kernel-only program, or start
+  analysis at the kernel and ignore the bootstrap/NOS region below it."""
+        if k else "- Kernel executable: `ekern.exe` not found in the primary module list.")
+    notes = f"""# Ghidra loading notes ({rom_src.name}, EKA1 ROM)
 
 Architecture: **32-bit little-endian ARMv4T**.  Use Ghidra language
-**`ARM:LE:32:v4t`** ("ARM v4t, little endian").  The N-Gage QD is ARM9-family;
-public sources disagree between ARM920T and ARM925T, but both are ARMv4T.  Do
-not enable Thumb-2, NEON or ARMv7 features.
+**`ARM:LE:32:v4t`** ("ARM v4t, little endian").  The DCT4-generation phones
+(N-Gage QD, 6600) are ARM9-family; public sources disagree between ARM920T and
+ARM925T, but both are ARMv4T.  Do not enable Thumb-2, NEON or ARMv7 features.
 
 Two valid ways to load it:
 
 1. **Recommended: whole ROM.** Import `output/rom/ROM.bin` as **Raw Binary**,
-   base **0x50000000**.  Everything (ROM header, module tables, all modules and
+   base **0x{h['rom_base']:08X}**.  Everything (ROM header, module tables, all modules and
    their absolute pointers) is then in one address space.
 2. **Kernel only.** Import `output/rom/files/System/Libs/ekern.exe` as **Raw
-   Binary**, base **0x5031AF9C**.  This file starts with its 0x64-byte
-   TRomImageHeader; the actual code begins at file offset 0x64, i.e.
-   **0x5031B000**.  The entry point is **0x5031B054** (ARM, bit 0 clear).
-   Do *not* load it at 0x5031B000 unless you first strip the 0x64-byte header.
+   Binary**, base **0x{kaddr:08X}**.  The file starts with its TRomImageHeader; the code
+   begins at the header's code address{f" (**0x{k['code_address']:08X}**, file offset 0x{k['header_size']:X})" if k else ""}.
+   Do *not* load the file at the code address unless you first strip the header.
 
 - ROM file: `output/rom/ROM.bin`
 - Load as **Raw Binary**, base address **0x{h['rom_base']:08X}** (from ROM header at 0x8C).
@@ -1374,46 +1450,34 @@ Two valid ways to load it:
 - Root directory list: **0x{h['rom_root_dir_list']:08X}** (header 0x94).
 - First module list (`primary_file`): **0x{h['primary_file']:08X}** (header 0xA0).
 - Second module list (`secondary_file`): **0x{h['secondary_file']:08X}** (header 0xA4).
-- Reset/restart vector field: **0x{h['restart_vector']:08X}** (header 0x7C; 0 in this image).
+- Reset/restart vector field: **0x{h['restart_vector']:08X}** (header 0x7C; 0 in both DCT4 images seen).
 - ROM is XIP and contains raw TRomImage / ROM objects, not installable E32Image
-  files. Do not expect a PE/E32 header at each file address; use the ROM virtual
+  files.  Do not expect a PE/E32 header at each file address; use the ROM virtual
   address from `analysis/rom_manifest.json` (or the module lists) as the image base
   for each object.
-- Kernel executable: `ekern.exe` TRomImageHeader at ROM virtual address
-  **0x{next((m['address'] for m in prim if m['name'].lower()=='ekern.exe'), 0):08X}**
-  (ROM offset 0x{next((m['address'] for m in prim if m['name'].lower()=='ekern.exe'), 0) - h['rom_base']:06X}).
-  Header size 0x64; code base **0x5031B000**; entry point **0x5031B054**
-  (ARM).  Code size 0x2736C.  Initialised data template at 0x50341B84
-  (size 0x4E4); BSS size 0x69E4.  The kernel's writable data/BSS live at the
-  header's `kern_data_address` = **0x80000000..0x80400000**, which is RAM, not
-  in `ROM.bin`; add an uninitialised Ghidra block there if you want kernel RAM
-  references to resolve.
-- Module header rule: every XIP module begins with a 0x64-byte
-  TRomImageHeader.  Code starts at header + 0x64.  The entry point is at
-  header + 0x10; its bit 0 is the Thumb selector (odd = Thumb).  These offsets
-  are observed consistently across `ekern.exe`, `EUser.dll`, `EFile.exe`,
-  `Hal.dll`, `Calendar.app` and others in this ROM; treat the Symbian field
-  names as inferred, the addresses themselves as measured.
-- Suggested focused range for kernel analysis: `0x5031AF9C..0x50342808`.
-  If whole-ROM auto-analysis is noisy, use the kernel-only program, or start
-  analysis at the kernel and ignore the CMT/loader region below 0x50300000.
-- The lower part of the image (ROM offsets below roughly 0x00300000) is
-  baseband/CMT and loader code: strings there are source paths under
-  `ENOS/CMT_SW/...`.  The Symbian EKA1 module tables start at ROM offset
-  0x00311000 and the first module (`ekern.exe`) at offset 0x0031AF9C.  Treat
-  the low region as a different CPU/baseband image, not as Symbian userland.
-- Drivers: `*.ldd` (logical), `*.pdd` (physical), `*.fsy` (file system),
-  `*.csy` (comms), `*.prt`/`*.nif`/`*.agt`/`*.agx` (protocols/agents).
+{kern_lines}
+- Module header rule: every XIP module begins with a TRomImageHeader (0x64 bytes in the
+  RH-29 and NHL-10 images).  Code starts at the header's code address (header + 0x64).
+  The entry point is at header + 0x10; its bit 0 is the Thumb selector (odd = Thumb).
+  On the RH-29 these offsets were observed consistently across `ekern.exe`, `EUser.dll`,
+  `EFile.exe`, `Hal.dll`, `Calendar.app` and others; treat the Symbian field names as
+  inferred, the addresses themselves as measured.
+- The Symbian part (module tables, file tree) starts at ROM offset 0x{sym_start:06X}.
+  The code below it is the bootstrap and the baseband (NOS/CMT) image: strings there
+  are source paths under `ENOS/CMT_SW/...`.  Treat it as a different image, not as
+  Symbian userland (on the RH-29 and NHL-10 the NOS code itself is scrambled).
 - Useful starting points: ROM header at 0x{h['rom_base']:08X}; jump table at
   0x{h['rom_base']:08X} (first 0x7C bytes); `ekern.exe`; `EFile.exe`; `EUser.dll`;
   `Hal.dll`; `EikCore.dll`.
-- The ROM's flash image is split: flash 0x00000000..0x00F00000 maps to ROM
-  offset 0..0x00F00000; flash 0x02000000..0x02265000 maps to ROM offset
-  0x00F00000..0x01165000 (`rom_offset = flash - 0x00110000` for the upper
-  bank, `virtual = 0x50000000 + rom_offset`).  Load the reconstructed
-  `ROM.bin`, not the raw flash segments; see `analysis/validation.json`.
+- Drivers: `*.ldd` (logical), `*.pdd` (physical), `*.fsy` (file system),
+  `*.csy` (comms), `*.prt`/`*.nif`/`*.agt`/`*.agx` (protocols/agents).
+- The ROM is assembled from these flash ranges (load the reconstructed `ROM.bin`,
+  not the raw flash segments; see `analysis/validation.json`):
+{chr(10).join('  - ' + b for b in banks)}
 """
-    (analysis_dir / "ghidra-notes.md").write_text(notes, encoding="utf-8")
+    notes_path = analysis_dir / "ghidra-notes.md"
+    previous = notes_path.read_text(encoding="utf-8") if notes_path.exists() else None
+    notes_path.write_text(keep_added_sections(notes, previous), encoding="utf-8")
 
     # Representative object headers (observed bytes, not fabricated headers).
     samples = [
@@ -1448,7 +1512,7 @@ Two valid ways to load it:
 
     # Short report.
     total = sum(1 for f in files if f.get("complete"))
-    rep = f"""# RH-29 / N-Gage QD EKA1 extraction report
+    rep = f"""# {rom_src.name}: EKA1 extraction report
 
 ## Inputs and identification
 
@@ -1464,64 +1528,57 @@ adjustment, which is recorded but not "corrected" in the payload); the EKA1
 ROM is stored uncompressed and executes in place (XIP).  Byte order is
 little-endian ARM throughout.
 
-## The actual obstacle in the previous extractor
+## Why the first extractor failed (found on the RH-29, true of the NHL-10 too)
 
-The previous `dct4_extract.py` correctly parsed the Phoenix/DCT4 records and
-assembled adjacent flash blocks, but its Symbian stage assumed:
+The first `dct4_extract.py` parsed the Phoenix/DCT4 records and assembled
+adjacent flash blocks correctly, but its Symbian stage assumed:
 
 1. the EKA1 ROM starts at the beginning of an assembled *flash* segment;
 2. ROM virtual address = flash address + 0x50000000 everywhere;
 3. a directory size includes its own 4-byte size field.
 
-None of those holds for this firmware:
+None of those holds:
 
 - The ROM header is split between a type-0x21 record at flash 0 (300 bytes) and
   type-0x14 blocks starting at flash 0x164, with a 56-byte unprogrammed hole.
-- The ROM is **split across two flash banks**: flash 0x00000000..0x00F00000 is
-  ROM offset 0, and flash 0x02000000..0x02265000 continues the same ROM at
-  offset 0x00F00000 (`rom_offset = flash - 0x00110000` for the upper bank;
-  `virtual = 0x50000000 + rom_offset`).  A single `flash + base` formula
-  therefore points file data at the wrong bytes.
-- EKA1 directory `size` in this ROM counts the entry bytes only; the on-disk
-  directory is `4 + size` bytes.  The old parser stopped four bytes early and
-  rejected the tree.
+- The ROM is split across flash banks (two on the RH-29, three on the NHL-10;
+  this image's ranges are below), so a single `flash + base` formula points
+  file data at the wrong bytes.
+- EKA1 directory `size` counts the entry bytes only; the on-disk directory is
+  `4 + size` bytes.  The old parser stopped four bytes early and rejected the tree.
 - The ROM header's `primary_file`/`secondary_file` fields point to module lists
   (`ekern.exe`, `ecust.dll`, all drivers, servers and libraries), not to a
   single "variant file".
 
-The new tool reconstructs the ROM by using the ROM header's own `rom_size` and
-root pointer, concatenating the lower bank with the next upper-bank window,
-and then proves the mapping by extracting files from the ROM's own directory
-tree.  Every directory size, name, pointer and alignment is bounds checked, and
-each extracted file is byte-for-byte re-verified against the original record
-payloads.
+## How the ROM is assembled
+
+The ROM header's own `rom_size` and root pointer decide the image; the flash
+blocks are concatenated in order and the mapping is proven by extracting every
+file of the ROM's own directory tree (each byte re-verified against the record
+payloads).  EKA1 directory `size` counts the entry bytes only (the directory is
+`4 + size` bytes).  Every directory size, name, pointer and alignment is
+bounds checked.  Flash ranges:
+
+{chr(10).join('- ' + b for b in banks)}
 
 ## Result
 
 - Reconstructed ROM: `output/rom/ROM.bin`, {len(rom.data)} bytes, base 0x{rom.base:08X}.
-- ROM tree entries: {len(entries)} (directories include `System`, `Nokia`).
+- ROM tree entries: {len(entries)}.
 - Files extracted: {total}; incomplete: {len(problems)}.
 - Module lists: {len(prim)} primary (kernel/variant/extension) + {len(sec)} secondary (rest of the ROM modules).
 - Byte-for-byte verification: {validation['files_checked']} files checked, {len(validation['mismatches'])} mismatches.
-- Kernel: `ekern.exe` (EKA1 kernel), listed first in `primary_file`.
-- Variant/PPM overlay: {'extracted to `output/variant/`' if variant_info else 'not found'}:
-  directory tree at flash 0x02330000 mapped at virtual 0x51230000, file data at
-  flash 0x00F00000 mapped at virtual 0x51300000 (validated by MIDI/JPEG
-  signatures).  The PPM tree is a second, separate address space; it references
-  both its own data and modules that live in the MCU ROM.
-- Variant files extracted: 1576; byte-for-byte verification: 1576 checked,
-  0 mismatches (PPM-resolved bytes vs the DCT4 record payloads, ROM-resolved
-  bytes vs the reconstructed ROM).
-- ROM offsets below roughly 0x00300000 contain CMT/baseband and loader code
-  (`ENOS/CMT_SW/...` source-path strings).  The Symbian EKA1 module tables and
-  file tree start at ROM offset 0x00311000; `ekern.exe` starts at 0x0031AF9C.
+- Kernel: `ekern.exe` at 0x{kaddr:08X}, size 0x{next((m['size'] for m in prim if m['name'].lower() == 'ekern.exe'), 0):X}{f", {k['export_count']} exports" if k else ""}.
+{chr(10).join(variant_lines(variant_info))}
+- The Symbian part starts at ROM offset 0x{sym_start:06X}; below it are the bootstrap and the
+  baseband (NOS/CMT) image (`ENOS/CMT_SW/...` source-path strings).
+- The PPM tree is a second, separate address space; it references both its own data and
+  modules that live in the MCU ROM.  PPM-resolved bytes are verified against the DCT4 record
+  payloads, ROM-resolved bytes against the reconstructed ROM.
 
 ## Kept uncertain
+{"" if not (variant_info and variant_info.get("data_image")) else chr(10) + "- The PPM data window (validated by MIDI/JPEG signatures and file extensions) is direct file" + chr(10) + "  data; its container format beyond that is not fully identified."}
 
-- The high-entropy block at flash 0x00F00000 in the PPM image is a localized
-  data window mapped at virtual 0x51300000 (validated by MIDI/JPEG signatures
-  and file extensions).  Its container format beyond direct file data is not
-  fully identified.
 - ROM header fields after 0xC4 are not needed here and are reported raw, not
   interpreted as EKA2 fields.
 - XIP/TRomImage objects have no standalone E32 header; their bytes are preserved

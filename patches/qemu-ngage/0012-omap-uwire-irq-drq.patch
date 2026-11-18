@@ -1,0 +1,90 @@
+diff -ru a/hw/arm/omap1.c b/hw/arm/omap1.c
+--- a/hw/arm/omap1.c	2026-11-18 16:48:59.466825673 +0100
++++ b/hw/arm/omap1.c	2026-11-18 16:54:46.195513100 +0100
+@@ -2166,9 +2166,34 @@
+     s->slave[chipselect & 3].opaque = opaque;
+ }
+ 
++/*
++ * qembian: the transfer-done interrupts and the TX DMA request. SR5 bit 1 enables the interrupts
++ * (the Nokia 9500 sets SR5 = 2 and binds both interrupts) [V guest], bit 0 the DMA request [I]. The
++ * Nokia 9500's EuWire.dll binds "Lv2_uWireTX" / "Lv2_uWireRX" and waits for them: without them
++ * one transfer went out per boot and every Microwire user (the inner panel's ID read, the LM4855
++ * amplifier, the cover LCD) hung. Each completed transfer pulses its line (as levels held until
++ * a CSR/RDR read they stormed: EuWire's handler acknowledges otherwise).
++ */
++static void omap_uwire_done(struct omap_uwire_s *s, bool tx, bool rx)
++{
++    if (s->setup[4] & 2) {
++        if (tx) {
++            qemu_irq_pulse(s->txirq);
++        }
++        if (rx) {
++            qemu_irq_pulse(s->rxirq);
++        }
++    }
++    if ((s->setup[4] & 1) && tx) {
++        qemu_irq_lower(s->txdrq);
++        qemu_irq_raise(s->txdrq);
++    }
++}
++
+ static void omap_uwire_transfer_start(struct omap_uwire_s *s)
+ {
+     int chipselect = (s->control >> 10) & 3;        /* INDEX */
++    bool tx = false, rx = false;
+ 
+     if ((s->control >> 5) & 0x1f) {         /* NB_BITS_WR */
+         int nbits = (s->control >> 5) & 0x1f;
+@@ -2181,8 +2206,7 @@
+                           s->txbuf >> (16 - ((s->control >> 5) & 0x1f)));
+         }
+         s->control &= ~(1 << 14);           /* CSRB */
+-        /* TODO: depending on s->setup[4] bits [1:0] assert an IRQ or
+-         * a DRQ.  When is the level IRQ supposed to be reset?  */
++        tx = true;
+     }
+ 
+     if ((s->control >> 0) & 0x1f) {         /* NB_BITS_RD */
+@@ -2193,9 +2217,9 @@
+             qemu_log_mask(LOG_UNIMP, "uWireSlave RX CS:%d\n", chipselect);
+         }
+         s->control |= 1 << 15;              /* RDRB */
+-        /* TODO: depending on s->setup[4] bits [1:0] assert an IRQ or
+-         * a DRQ.  When is the level IRQ supposed to be reset?  */
++        rx = true;
+     }
++    omap_uwire_done(s, tx, rx);
+ }
+ 
+ static uint64_t omap_uwire_read(void *opaque, hwaddr addr, unsigned size)
+@@ -2238,12 +2262,17 @@
+ {
+     struct omap_uwire_s *s = opaque;
+     int offset = addr & OMAP_MPUI_REG_MASK;
++    static unsigned logged;
+ 
+     if (size != 2) {
+         qemu_log_mask(LOG_GUEST_ERROR, "%s: write at offset 0x%" HWADDR_PRIx
+                       " with bad width %d\n", __func__, addr, size);
+         return;
+     }
++    if (logged < 400) {                 /* qembian: the first register writes, for bring-up */
++        logged++;
++        qemu_log_mask(LOG_UNIMP, "omap-uwire: write %02x = %04x\n", offset, (unsigned)value);
++    }
+ 
+     switch (offset) {
+     case 0x00:  /* TDR */
+@@ -2280,6 +2309,11 @@
+ 
+     case 0x18:  /* SR5 */
+         s->setup[4] = value & 0x000f;
++        if (!(s->setup[4] & 1)) {
++            qemu_irq_lower(s->txdrq);
++        } else if (!(s->control & (1 << 14))) {
++            qemu_irq_raise(s->txdrq);       /* qembian: DMA enabled, transmitter free */
++        }
+         break;
+ 
+     default:

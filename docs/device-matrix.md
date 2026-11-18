@@ -62,7 +62,7 @@ platform release. Higher levels (L3 telephony offline, L4 audio, L5 GL) are trac
 
 ## 2. Devices worked on
 
-### 2.0 Current status (2026-11-12)
+### 2.0 Current status (2026-11-18)
 
 The tables in 2.1-2.3 below record the first bring-ups (2026-11-08 to 11-10) and are kept for their
 details; this table is the current state. "Idle" = the home screen after start-up; features are on
@@ -88,7 +88,11 @@ instance's `[overrides.sim]`).
 | E90 Communicator (`nokia-e90-ra6`) | S60 3rd FP1 | idle (Offline) on the inner display 800x352; the lid switches to the cover display 240x320 = HAL screen 1, its own panel in QEMU (2026-11-17) | GLES 1.1 on the host GPU (sygl; glprobe1 full screen) | - | - | personality sym92l91 (as N81/E71), lid = EKeyDeviceA/B + QEMU active panel (H-e90-two-panels; closing the lid during boot: white screen); QWERTY letters typed (5730 map, E90 matrix not read) (docs/devices/nokia-e90-ra6/bring-up.md) |
 | 6720 classic (`nokia-6720-rm424`) | S60 3rd FP2 | home screen after the first-boot region/date/time and Phone setup queries (2026-11-17) | software | as the E52 | - | its Hal.dll declares 2 screens (TV-out): patched to 1 (H-6720-one-screen); before, the window server died on the empty second screen and the phone stayed black (docs/devices/nokia-6720-rm424/bring-up.md) |
 | E52, E72, E5-00, N86, N97, N81 8GB, E71 | 3rd FP2 / 5th / FP1 | first-boot wizard or earlier (see `models/registry.toml`) | - | - | - | profile drafts |
-| N-Gage QD (separate `ngage` board, EKA1) | S60 1.x / Symbian 6.1 | idle, Menu; MMC card as E: (`-M ngage,mmc=`) | framebuffer | - | stand-in NOS | games start from the card, the first one tried (Snakes) aborts (docs/eka1-ngage.md) |
+| N-Gage QD (RH-29, `-M ngage`, EKA1) | S60 1.x / Symbian 6.1 | idle, Menu, games from an MMC card image as E: (`-M ngage,mmc=`): Snakes plays, Crash Nitro Kart races (software 3D, >= 21 frames/s) | framebuffer (screen chunk) | - | stand-in NOS + ISI table; Bluetooth module minimal (stack starts, off) | the first EKA1 board; ~0.4 % host CPU at idle (docs/eka1-ngage.md) |
+| 7650 (NHL-2NA, `-M nokia7650`, the `ngage` board, EKA1) | S60 1.0 / Symbian 6.1 | home screen after the first-boot time and date queries (2026-11-18); keypad and joystick | framebuffer (screen chunk, 12 bpp) | - | stand-in NOS (N-Gage replies) | docs/devices/nokia-7650-nhl2/bring-up.md |
+| 6600 (NHL-10, `-M nokia6600`, the `ngage` board, EKA1) | S60 2nd / Symbian 7.0s | home screen after the first-boot time and date queries (2026-11-18); keypad and joystick | framebuffer (screen chunk, RGB565) | - | stand-in NOS over ISA_IF; SIM ready, no network | docs/devices/nokia-6600-nhl10/bring-up.md |
+| 9500 Communicator (RA-2, `-M nokia9500`, QEMU's OMAP1510, EKA1) | S80 2nd / Symbian 7.0s | both screens: the cover idle screen (wallpaper, clock, indicators) and the inner 640x200 S80 UI; lock code, first-start wizard (language, time/date, contact card), Desk running (2026-11-18) | OMAP LCD controller (inner, console 0) + the cover panel on Microwire (console 1) | audio path runs without a DSP, no sound | XBUS link to a modem peer, ISI table (SIM, lock code, language list) | the lid is a real switch on the keyboard controller (I2C); QWERTY, command buttons and cover keypad (docs/devices/nokia-9500-ra2/bring-up.md) |
+| P910i (SE-P910i R5B01, `-M p910i`, its own PNX4000 board, EKA1) | UIQ 2.1 / Symbian 7.0 | the UIQ home screen (Applications launcher) after the Language dialog, set up wizard (calibration, flip keyboard, location, time) and the start-up Power menu (2026-11-18) | the video RAM (208x320 RGB565) behind the panel chip and LCD FIFO | silent (I2C codec writes complete, no PCM) | OSE peer on the GSM link with a reply table: StartSignal, SIM present (empty SIM files), emergency numbers, battery 100 %; no network | first non-Nokia EKA1 phone and first board without a datasheet; touch and keypad panels, jog dial, flip as GPIO pins; "Disk corrupt D:" (Memory Stick) at each boot (docs/devices/se-p910i/bring-up.md, how-it-was-done.md) |
 
 Values from `models/<id>/device.toml` unless noted ([bring-up] = the device's notes under
 `docs/devices/<id>/`, [roms] = directory names under `roms/`). "-" = not known or not applicable.
@@ -128,6 +132,24 @@ Values from `models/<id>/device.toml` unless noted ([bring-up] = the device's no
 
 On a real device (Pixel 3a, postmarketOS): `tools/hosted/device-bundle.py --rom ID`, `docs/hosted-eka2/pixel-3a.md` [untested].
 
+### 2.2b EKA1 phones (their own kernel, `src/qemu-ngage/`, `eka1/`)
+
+Symbian 6.1-7.0s phones run on the EKA1 kernel, which our EKA2 kernel cannot stand in for (docs/uiq.md). They
+run their own, unmodified kernel on a QEMU board per SoC, outside the device model (no `models/` profile, no
+sydb): `eka1/tools/ngage_phone.py --model M` is the window, `eka1/tools/ngage_sess.py` the debugger, and
+`tests/ngage-boot-check.py` checks the shared board code.
+
+| Phone | Board | Storage | Modem side | Display | State (2026-11-18) |
+|---|---|---|---|---|---|
+| N-Gage QD (RH-29) | `ngage` (DCT4 UPP: interrupt controller, timers, CBUS/UEM, MMC + DMA, Bluetooth LPRF) | NOR flash, kept per phone | NOS stand-in + ISI table | screen chunk | home screen, games from a card |
+| 7650 (NHL-2NA) | `nokia7650` (ngage variant) | NOR | NOS stand-in (N-Gage replies) | screen chunk 12 bpp | home screen, keypad |
+| 6600 (NHL-10) | `nokia6600` (ngage variant) | NOR | NOS stand-in over ISA_IF | screen chunk RGB565 | home screen, keypad; "boots, not much more" |
+| 9500 (RA-2) | `nokia9500` (QEMU OMAP310/1510 + patches 0003-0017) | DiskOnChip: TrueFFS API stand-in | XBUS peer + ISI table | inner LCD + cover panel (two consoles) | both screens, wizard, Desk |
+| P910i (R5B01) | `p910i` (PNX4000 from the phone's code) | DiskOnChip: TrueFFS dispatcher stand-in; NOR (Z:, ROLF A:) | OSE peer + reply table | video RAM | UIQ home screen |
+
+Method notes for the next one: docs/eka1-ngage.md (tools), docs/devices/se-p910i/how-it-was-done.md (a board
+without a datasheet, the OSE protocol, traps).
+
 ### 2.3 Firmware, level, boot time, status
 
 | Profile id | Firmware held [roms] | Tested | Level (`[status]`) | Boot to idle | Key hacks / stand-ins | Open / next |
@@ -149,13 +171,14 @@ cheapest next steps in section 3.
 
 | Axis | Covered | Not covered |
 |---|---|---|
-| Platform release | 3rd (9.1), FP1 (9.2), FP2 (9.3), 5th (9.4), ^3 PR1.0, ^3 PR1.1, Anna, Belle Refresh, Belle FP2 | ^3 PR1.2, Belle, Belle FP1 |
+| Platform release | 3rd (9.1), FP1 (9.2), FP2 (9.3), 5th (9.4), ^3 PR1.0, ^3 PR1.1, Anna, Belle Refresh, Belle FP2; UIQ 3.0 (P1i, P990i); EKA1: S60 1.x / 6.1 (N-Gage QD, 7650), S60 2nd / 7.0s (6600), S80 2nd / 7.0s (9500), UIQ 2.1 / 7.0 (P910i) | ^3 PR1.2, Belle, Belle FP1; UIQ 3.1/3.3; EKA1 S60 2nd FP1-FP3 (8.0a/8.1a), S80 1st (9210), UIQ 2.0 (P800) |
 | Memory model | moving, multiple, flexible | - |
 | CPU | ARM926, ARM1136, ARM1176 | Cortex-A8 (non-Nokia S60 only; optional) |
-| SoC family | OMAP1710, OMAP2420, RAPIDO, RAPIDO + BCM2727, BCM2763 (701, 808) | [unverified] Freescale (E71/6120c class) |
+| SoC family | OMAP1710, OMAP2420, RAPIDO, RAPIDO + BCM2727, BCM2763 (701, 808), PNX4008 (P1i/P990i, our kernel); EKA1 boards: DCT4 UPP (N-Gage QD, 7650, 6600), OMAP1510 (9500, QEMU's model), PNX4000 (P910i, modelled from its code) | [unverified] Freescale (E71/6120c class) |
 | Display | 240x320 portrait, 360x640 portrait panel, 360x640 on a landscape panel | 320x240 native landscape, 352x416, 640x360 native landscape with QWERTY, 640x480, dual screen |
 | Input | keypad, keypad + QWERTY slide, resistive touch, capacitive touch | QWERTY bar, optical navi key, NaviScroll (declared, no stand-in), touch + QWERTY, 5th-edition capacitive (X6) |
 | Graphics | software, PowerVR MBX via sygl, VideoCore via khr/gcebe (incl. BCM2763 and Belle's Qt/QML home screen) | - |
+| Modem protocol | BB5 ISI over ISC (every Nokia S60 3rd+), OPA over CAIF (fake CCPU: P1i, P990i), ISI over XBUS (9500), ISI behind a NOS stand-in (DCT4: N-Gage QD, 7650, 6600), Ericsson OSE signals (P910i) | real network anywhere (all modems are tables) |
 | Audio | OMAP DSP bridge (plays, MP3/AAC decoded on the host), RAPIDO ring on the host (N8, 701, 808) | RAPIDO stream formats of the 9.3/9.4 phones (5730, N79, 5800, N97: silent until measured and declared) |
 | RAM | 64 (N73), 128, 256, 512 (701, 808) | - |
 

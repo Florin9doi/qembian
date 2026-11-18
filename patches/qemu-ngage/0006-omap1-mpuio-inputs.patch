@@ -1,0 +1,27 @@
+diff -ru a/hw/arm/omap1.c b/hw/arm/omap1.c
+--- a/hw/arm/omap1.c	2026-11-18 12:07:18.940693120 +0100
++++ b/hw/arm/omap1.c	2026-11-18 12:07:18.964907465 +0100
+@@ -2122,6 +2122,12 @@
+     return s;
+ }
+ 
++/* qembian: board devices drive MPUIO input lines (Nokia 9500: the modem's "I have data" line) */
++qemu_irq *omap_mpuio_in_get(struct omap_mpuio_s *s)
++{
++    return s->in;
++}
++
+ /* MicroWire Interface */
+ struct omap_uwire_s {
+     MemoryRegion iomem;
+diff -ru a/include/hw/arm/omap.h b/include/hw/arm/omap.h
+--- a/include/hw/arm/omap.h	2026-11-18 12:07:18.941693161 +0100
++++ b/include/hw/arm/omap.h	2026-11-18 12:07:18.965519806 +0100
+@@ -263,6 +263,7 @@
+ void omap_uart_reset(struct omap_uart_s *s);
+ 
+ struct omap_mpuio_s;
++qemu_irq *omap_mpuio_in_get(struct omap_mpuio_s *s);
+ 
+ struct omap_uwire_s;
+ 

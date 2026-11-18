@@ -17,7 +17,8 @@
  * then the ISI message: transaction id, message id, data.
  *
  * Replies come from a table (-M ngage,isi=FILE; the BB5 fake modem's format, `reply RES REQ
- * RESP BYTES...`). A reply frame mirrors the request [I]: same resource, receiver = the
+ * RESP [@XX] BYTES...`; `@XX`: only when the request's byte 10, its subtype, is XX; such a line
+ * wins over one without). A reply frame mirrors the request [I]: same resource, receiver = the
  * request's sender object, sender object 0, the request's transaction id, RESP, BYTES. It is
  * queued on the channel the request came from and handed to the stub when that channel has a
  * receive (request 0) outstanding: the stub's DFC fetches it (device +0x30..), writes it into
@@ -26,6 +27,17 @@
  *
  * Indications the modem sends by itself: `ind UNIT OBJ RES MSG BYTES...`, queued when that
  * unit's channel opens (receiver object OBJ, transaction id 0).
+ *
+ * Nokia 6600 (-M nokia6600): no NOSDRIVER channels. enosdriver.ldd hands each frame to the NOS
+ * (export 1, ngage_isi_isa_send) and the NOS hands frames up by calling enosdriver's export 2
+ * with a raw frame pointer, which isa_if_driver routes by receiver object [V,
+ * docs/devices/nokia-6600-nhl10/bring-up.md]. One pseudo channel (isa_chan) stands for that
+ * path: always ready to receive. A frame: media, receiver device, sender device, resource,
+ * length (LE, from the receiver object on), receiver object, sender object, transaction id,
+ * message id, data [V: isaapi CheckCrcMsgL]. A reply swaps devices and objects [I].
+ * Indications (`ind UNIT OBJ RES MSG BYTES`, as for the N-Gage): UNIT is the subscribing object
+ * (decimal); the indication goes to object OBJ when UNIT subscribes (resource 0, message 0, to
+ * object 0x10: a list of resource/message pairs [I]), from object 0x10.
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
@@ -43,11 +55,13 @@ typedef struct {
 } NgageIsiChan;
 
 static NgageIsiChan chans[NGAGE_ISI_CHANS];
+static NgageIsiChan isa_chan = { .dlc = 1, .unit = 0xee, .rx_pending = true };
 
 typedef struct {
     uint8_t res, req, resp, len;
     bool echo;                  /* "echo": the request's data, first byte 0 (BB5 H-light) */
-    uint8_t data[64];
+    int sub;                    /* "@XX": only for requests whose byte 10 (subtype) is XX; -1 any */
+    uint8_t data[200];          /* len= up to 200 (the 9500's SIM 09 31 reply needs a 76-byte frame) */
 } NgageIsiReply;
 
 static NgageIsiReply *replies;
@@ -233,7 +247,7 @@ void ngage_isi_load(const char *path)
     for (char **l = lines; *l; l++) {
         char *h = strchr(*l, '#');
         g_auto(GStrv) t = NULL;
-        NgageIsiReply r = { 0 };
+        NgageIsiReply r = { .sub = -1 };
         unsigned k = 0, pad = 0;
 
         if (h) {
@@ -277,6 +291,10 @@ void ngage_isi_load(const char *path)
             }
             if (!strcmp(*w, "echo")) {
                 r.echo = true;
+                continue;
+            }
+            if (**w == '@') {
+                r.sub = strtoul(*w + 1, NULL, 16);
                 continue;
             }
             if (!strncmp(*w, "len=", 4)) {
@@ -329,6 +347,12 @@ static void enqueue(NgageIsiChan *c, const uint8_t *req, uint32_t reqlen, const 
     m->b[7] = 0;
     m->b[8] = req[8];                           /* transaction id */
     m->b[9] = r->resp;
+    if (c == &isa_chan) {
+        m->b[0] = req[0];                       /* media */
+        m->b[1] = req[2];                       /* receiver device = the request's sender */
+        m->b[2] = req[1];
+        m->b[7] = req[6];                       /* sender object = the request's receiver */
+    }
     memcpy(m->b + 10, data, dlen);
     m->len = 10 + dlen;
     while (*q) {
@@ -349,8 +373,13 @@ static void on_send(NgageIsiChan *c, unsigned unit, const uint8_t *b, uint32_t l
         const NgageIsiReply *r = NULL;
 
         for (unsigned i = 0; i < nreplies; i++) {
-            if (replies[i].res == b[3] && replies[i].req == b[9]) {
+            if (replies[i].res == b[3] && replies[i].req == b[9] && replies[i].sub < 0 &&
+                !(r && r->sub >= 0)) {
                 r = &replies[i];
+            }
+            if (replies[i].res == b[3] && replies[i].req == b[9] && replies[i].sub >= 0 &&
+                len > 10 && replies[i].sub == b[10]) {
+                r = &replies[i];                /* a subtype match wins */
             }
         }
         qemu_log_mask(LOG_UNIMP, "ngage-isi: unit %u send res %02x msg %02x tid %02x obj %02x: "
@@ -359,8 +388,50 @@ static void on_send(NgageIsiChan *c, unsigned unit, const uint8_t *b, uint32_t l
         if (r && c) {
             enqueue(c, b, len, r);
         }
+        if (c == &isa_chan && b[3] == 0 && b[9] == 0) {
+            /* a subscription: the modem's state indications for this object */
+            for (unsigned i = 0; i < ninds; i++) {
+                if (inds[i].unit == b[7]) {
+                    /* as if the subscriber had asked: the reply swaps devices and objects */
+                    uint8_t hdr[10] = { b[0], b[1], b[2], inds[i].res, 0, 0, b[6], inds[i].obj, 0, 0 };
+                    NgageIsiReply ir = { .res = inds[i].res, .resp = inds[i].msg, .len = inds[i].len };
+
+                    memcpy(ir.data, inds[i].data, inds[i].len);
+                    enqueue(c, hdr, sizeof(hdr), &ir);
+                    qemu_log_mask(LOG_UNIMP, "ngage-isi: object %02x subscribed: indication %02x %02x "
+                                  "queued\n", b[7], inds[i].res, inds[i].msg);
+                }
+            }
+        }
     }
     g_string_free(g, true);
+}
+
+void ngage_isi_isa_send(const uint8_t *b, uint32_t len)
+{
+    on_send(&isa_chan, isa_chan.unit, b, len);
+}
+
+/* Nokia 9500 (XBUS): the next frame for the phone's ISA_IF, if any; its length, 0 = none. */
+uint32_t ngage_isi_isa_take(uint8_t *buf, uint32_t cap)
+{
+    for (NgageIsiMsg **q = &queue; *q; q = &(*q)->next) {
+        NgageIsiMsg *m = *q;
+
+        if (m->c == &isa_chan) {
+            GString *g = g_string_new(NULL);
+            uint32_t n = MIN(m->len, cap);
+
+            *q = m->next;
+            memcpy(buf, m->b, n);
+            hex(g, m->b, m->len);
+            qemu_log_mask(LOG_UNIMP, "ngage-isi: isa deliver: %s\n", g->str);
+            g_string_free(g, true);
+            g_free(m);
+            return n;
+        }
+    }
+    return 0;
 }
 
 bool ngage_isi_ready(void)
@@ -385,7 +456,9 @@ bool ngage_isi_fetch(uint32_t *dlc, uint32_t *a1, uint32_t *req, uint32_t *len)
             *q = m->next;
             fetched = *m;
             g_free(m);
-            fetched.c->rx_pending = false;
+            if (fetched.c != &isa_chan) {
+                fetched.c->rx_pending = false;
+            }
             *dlc = fetched.c->dlc;
             *a1 = fetched.c->rx_a1;
             *req = fetched.c->rx_req;

@@ -191,3 +191,22 @@ no kernel change. Record/replay (3) is still open.
   `set breakpoint always-inserted on`. (3) The daemon dropped the connection twice during `dbg wait` after a
   breakpoint hit in a fork. (4) A `dbg attach` after a session restart can talk to a stale gdb: breakpoints set,
   never hit. Wanted: fork/restore read the device from the snapshot, resume through QMP, re-attach gdb per QEMU pid.
+- **ngage_sess (2026-11-18, Nokia 6600 bring-up):** (1) `break VA=~LABEL` on a running machine is accepted
+  but the logging catch only arms after a `pause`/`cont`; it looked as if the code never ran. Wanted: arm
+  at once, or say so. (2) No `key` op: scripted presses go through QMP by hand, and the 6600's ekeyb
+  ignores presses shorter than about a second (debounce). Wanted: `ngage_sess key CODE [--hold S]`.
+  (3) `stack` printed stale words; it now marks the saved SP (DThread+0x158).
+
+## From the P910i bring-up (2026-11-18, eka1/tools/ngage_sess.py)
+
+- **Breakpoint budget:** with more than about six breakpoints/catches none fired, silently. The daemon should
+  check each `Z1` reply and refuse (or warn) past the limit.
+- **Conditional logging catches:** `VA=~LABEL?EXPR` ignores EXPR and logs every hit (about 1 s each): apply the
+  condition before logging.
+- **`x` on another process's run address** fails while that process is not mapped; translate through the owning
+  chunk's home address (DChunk +0x28) automatically, as `stack` does.
+- **An OSE request decoder:** a tool that takes a signal number and prints its swbp.dll stub, the awaited reply
+  signals and the decoder's reads (done by hand with grep over a listing, see docs/devices/se-p910i/how-it-was-done.md
+  s. 3), and a `p910i-gsm:` log reader that lists UNANSWERED requests per run.
+- **Leave finder:** a one-shot "who left with code N" (the CPU-state trace on User::Leave's first block, filtered
+  and symbolised) instead of grepping qemu.log by hand.

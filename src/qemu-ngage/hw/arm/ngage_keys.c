@@ -18,6 +18,16 @@
  * Host keys (QEMU input layer: ngage_phone.py, QMP input-send-event) map through NGAGE_KEYS.
  * The power key is not in the matrix (UEM over CBUS, dev 1 reg 0x1F bit 1): not modelled yet.
  *
+ * Nokia 6600 (-M nokia6600; research agent's static RE of its ekeyb.dll, 2026-11-18, in
+ * docs/devices/nokia-6600-nhl10/bring-up.md): the same ports and scan, but [V]
+ *   - two sub-matrices scanned together: rows 0-1 x sense lines 0-1 (left soft, menu, right soft,
+ *     0xAA) and rows 2-5 x sense lines 2-5, where line 5 is GPIO 0x0C120C04 bit 19 (active low);
+ *   - a 5-way joystick outside the matrix: 0x0C15020A bits 13 left, 1 up, 2 right, 10 down,
+ *     11 select (active low); enable 0x0C150216 / disable 0x0C150214 with left 0x08, up 0x20,
+ *     right 0x80, down 0x02, select 0x04, which are also its CTSI status-2 bits [I];
+ *   - a switch line 0x0C15020C bit 9 (0xA8/0xA9 on change; idle high = not asserted [I]).
+ * Unmapped, these read 0 = asserted (joystick held), so the 6600 board maps both pages.
+ *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 #include "qemu/osdep.h"
@@ -48,8 +58,42 @@ static const NgageKey ngage_keys[] = {
     { KEY_F12, "power", -1, -1 },
 };
 
+/* Nokia 6600 [V positions; names from the scan codes]; row -2 = joystick bit in 0x0C15020A */
+static const NgageKey nhl10_keys[] = {
+    { KEY_F1, "left soft", 0, 0 },   { KEY_F5, "menu", 0, 1 },
+    { KEY_F2, "right soft", 1, 0 },
+    { KEY_LEFTSHIFT, "edit", 2, 2 }, { KEY_KPASTERISK, "*", 2, 3 }, { KEY_F10, "#", 2, 4 },
+    { KEY_BACKSPACE, "clear", 2, 5 },
+    { KEY_1, "1", 3, 2 }, { KEY_2, "2", 3, 3 }, { KEY_3, "3", 3, 4 }, { KEY_0, "0", 3, 5 },
+    { KEY_4, "4", 4, 2 }, { KEY_5, "5", 4, 3 }, { KEY_6, "6", 4, 4 }, { KEY_F3, "call", 4, 5 },
+    { KEY_7, "7", 5, 2 }, { KEY_8, "8", 5, 3 }, { KEY_9, "9", 5, 4 }, { KEY_F4, "end", 5, 5 },
+    { KEY_LEFT, "left", -2, 13 },    { KEY_UP, "up", -2, 1 },   { KEY_RIGHT, "right", -2, 2 },
+    { KEY_DOWN, "down", -2, 10 },    { KEY_ENTER, "select", -2, 11 },
+    { KEY_F12, "power", -1, -1 },
+};
+
+/* joystick line (bit in 0x0C15020A) -> its enable / CTSI status-2 bit [I] */
+static uint16_t joy_irq_bit(int line)
+{
+    switch (line) {
+    case 13: return 0x08;
+    case 1: return 0x20;
+    case 2: return 0x80;
+    case 10: return 0x02;
+    case 11: return 0x04;
+    }
+    return 0;
+}
+
 typedef struct {
-    MemoryRegion mr, ctsi_mr;
+    MemoryRegion mr, ctsi_mr, gpio_mr, joy_mr;
+    const NgageKey *keys;
+    unsigned nkeys;
+    bool nhl10;
+    uint16_t joy;                   /* pressed joystick lines (bits of 0x0C15020A) */
+    uint16_t joy_ier;               /* joystick interrupt enables (CTSI status-2 bits) */
+    uint16_t joy_regs[16];
+    uint32_t gpio_regs[8];
     qemu_irq irq;
     uint16_t ctsi, ctsi2;
     uint16_t regs[16];
@@ -64,7 +108,8 @@ static uint8_t kpd_rows(NgageKpd *k)            /* rows pulled by a pressed key 
     uint8_t v = 0;
 
     for (int r = 0; r < 6; r++) {
-        if (k->pressed[r] & k->xc) {
+        /* 6600: sense line 5 (GPIO bit 19) counts as always driven [I] */
+        if (k->pressed[r] & (k->xc | (k->nhl10 ? 0x20 : 0))) {
             v |= 1 << r;
         }
     }
@@ -101,7 +146,7 @@ static uint64_t kpd_read(void *opaque, hwaddr a, unsigned size)
     NgageKpd *k = opaque;
 
     if (a == 0x00) {
-        return ~kpd_cols(k) & 0x1f;             /* active low */
+        return ~kpd_cols(k) & 0x1f;             /* active low; 6600 line 5 is on the GPIO */
     }
     if (a == 0x0c) {
         return ~kpd_rows(k) & 0x3f;
@@ -149,6 +194,64 @@ void ngage_ctsi2_raise(uint16_t bits)
     kpd_update(&kpd);
 }
 
+/* 6600: GPIO block 0x0C120C00; +04 bit 19 = sense line 5 (active low), the rest read back */
+static uint64_t gpio_read(void *opaque, hwaddr a, unsigned size)
+{
+    NgageKpd *k = opaque;
+    uint32_t v = k->gpio_regs[(a >> 2) & 7];
+
+    if ((a & ~3) == 0x04) {
+        v |= 1u << 19;
+        if (kpd_cols(k) & 0x20) {
+            v &= ~(1u << 19);
+        }
+    }
+    return v >> ((a & 3) * 8);
+}
+
+static void gpio_write(void *opaque, hwaddr a, uint64_t v, unsigned size)
+{
+    ((NgageKpd *)opaque)->gpio_regs[(a >> 2) & 7] = v;
+}
+
+/* 6600: joystick and switch port 0x0C150200 (+0A lines, +0C bit 9 switch; active low) */
+static uint64_t joy_read(void *opaque, hwaddr a, unsigned size)
+{
+    NgageKpd *k = opaque;
+
+    if (a == 0x0a) {
+        return ~k->joy & 0xffff;
+    }
+    if (a == 0x0c) {
+        return k->joy_regs[6] | 0x0200;         /* switch not asserted [I] */
+    }
+    return k->joy_regs[(a >> 1) & 15];
+}
+
+static void joy_write(void *opaque, hwaddr a, uint64_t v, unsigned size)
+{
+    NgageKpd *k = opaque;
+
+    k->joy_regs[(a >> 1) & 15] = v;
+    if (a == 0x16) {
+        k->joy_ier |= v & 0xee;
+    } else if (a == 0x14) {
+        k->joy_ier &= ~v;
+    }
+}
+
+static const MemoryRegionOps gpio_ops = {
+    .read = gpio_read, .write = gpio_write, .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid = { .min_access_size = 1, .max_access_size = 4 },
+    .impl = { .min_access_size = 4, .max_access_size = 4 },
+};
+
+static const MemoryRegionOps joy_ops = {
+    .read = joy_read, .write = joy_write, .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid = { .min_access_size = 2, .max_access_size = 4 },
+    .impl = { .min_access_size = 2, .max_access_size = 2 },
+};
+
 static const MemoryRegionOps kpd_ops = {
     .read = kpd_read, .write = kpd_write, .endianness = DEVICE_LITTLE_ENDIAN,
     .valid = { .min_access_size = 2, .max_access_size = 4 },
@@ -163,13 +266,31 @@ static const MemoryRegionOps ctsi_ops = {
 
 static void ngage_key_event(DeviceState *dev, QemuConsole *src, QemuInputEvent *evt)
 {
-    for (unsigned i = 0; i < ARRAY_SIZE(ngage_keys); i++) {
-        const NgageKey *key = &ngage_keys[i];
+    for (unsigned i = 0; i < kpd.nkeys; i++) {
+        const NgageKey *key = &kpd.keys[i];
 
         if (key->host != evt->key.key) {
             continue;
         }
         qemu_log_mask(LOG_UNIMP, "ngage-key: %s %s\n", key->name, evt->key.down ? "down" : "up");
+        if (key->row == -2) {                   /* 6600 joystick line */
+            uint16_t b = joy_irq_bit(key->col);
+
+            if (evt->key.down) {
+                kpd.joy |= 1 << key->col;
+            } else {
+                kpd.joy &= ~(1 << key->col);
+            }
+            /*
+             * Raise the line's CTSI status-2 bit on every edge. Gating it on the enables
+             * (0x0C150214/16) as first modelled lost every press: the values ekeyb leaves there
+             * (0x0645 / 0x0186 at idle) do not match the remap bits [V run, regression
+             * "joystick_dead"; the enable layout is [I]]. ekeyb's ISR acks with 0xEE.
+             */
+            kpd.ctsi2 |= b;
+            kpd_update(&kpd);
+            return;
+        }
         if (key->row < 0) {
             return;                             /* power: UEM, not modelled */
         }
@@ -189,11 +310,20 @@ static const QemuInputHandler ngage_key_handler = {
     .event = ngage_key_event,
 };
 
-void ngage_keys_init(MemoryRegion *sys, qemu_irq irq)
+void ngage_keys_init(MemoryRegion *sys, qemu_irq irq, bool nhl10)
 {
     QemuInputHandlerState *s;
 
     kpd.irq = irq;
+    kpd.nhl10 = nhl10;
+    kpd.keys = nhl10 ? nhl10_keys : ngage_keys;
+    kpd.nkeys = nhl10 ? ARRAY_SIZE(nhl10_keys) : ARRAY_SIZE(ngage_keys);
+    if (nhl10) {
+        memory_region_init_io(&kpd.gpio_mr, NULL, &gpio_ops, &kpd, "nhl10.gpio", 0x20);
+        memory_region_add_subregion(sys, 0x0c120c00, &kpd.gpio_mr);
+        memory_region_init_io(&kpd.joy_mr, NULL, &joy_ops, &kpd, "nhl10.joystick", 0x20);
+        memory_region_add_subregion(sys, 0x0c150200, &kpd.joy_mr);
+    }
     memory_region_init_io(&kpd.mr, NULL, &kpd_ops, &kpd, "ngage.keypad", 0x20);
     memory_region_add_subregion(sys, NGAGE_KPD_BASE, &kpd.mr);
     memory_region_init_io(&kpd.ctsi_mr, NULL, &ctsi_ops, &kpd, "ngage.ctsi", 0x4);

@@ -1,0 +1,59 @@
+--- a/hw/misc/omap_clk.c	2026-11-18 11:24:03.038064261 +0100
++++ b/hw/misc/omap_clk.c	2026-11-18 11:24:03.074426141 +0100
+@@ -507,6 +507,48 @@
+     .parent = &xtal_osc32k,
+ };
+ 
++/*
++ * Pin-function clock outputs that omap1.c's pin-mux code switches (omap_pin_funcmux0/1_update,
++ * the COMP_MODE/... updates) but that had no clock here: omap_findclk() then stopped the machine
++ * with a hardware error as soon as a guest wrote the funcmux registers (Nokia 9500 bootstrap,
++ * "omap_findclk: mcbsp3.clkx not found"). Outputs only: nothing in QEMU consumes them [qembian].
++ */
++static struct clk mcbsp3_clkx = {
++    .name   = "mcbsp3.clkx",
++    .parent = &armper_ck,
++    .flags  = CLOCK_IN_OMAP310 | CLOCK_IN_OMAP1510,
++};
++
++static struct clk clk32k_out = {
++    .name   = "clk32k_out",
++    .parent = &clk32k,
++    .flags  = CLOCK_IN_OMAP310 | CLOCK_IN_OMAP1510,
++};
++
++static struct clk ck_ref14 = {
++    .name   = "ck_ref14",
++    .parent = &ck_ref,
++    .flags  = CLOCK_IN_OMAP310 | CLOCK_IN_OMAP1510,
++};
++
++static struct clk aclk_out = {
++    .name   = "aclk_out",
++    .parent = &armper_ck,
++    .flags  = CLOCK_IN_OMAP310 | CLOCK_IN_OMAP1510,
++};
++
++static struct clk dclk_out = {
++    .name   = "dclk_out",
++    .parent = &armper_ck,
++    .flags  = CLOCK_IN_OMAP310 | CLOCK_IN_OMAP1510,
++};
++
++static struct clk tclk_out = {
++    .name   = "tclk_out",
++    .parent = &armper_ck,
++    .flags  = CLOCK_IN_OMAP310 | CLOCK_IN_OMAP1510,
++};
++
+ static struct clk *onchip_clks[] = {
+     /* OMAP 1 */
+ 
+@@ -565,6 +607,7 @@
+     &usb_hhc_ck1510, &usb_hhc_ck16xx,
+     &mclk_1510,  &mclk_16xx, &mclk_310,
+     &bclk_1510,  &bclk_16xx, &bclk_310,
++    &mcbsp3_clkx, &clk32k_out, &ck_ref14, &aclk_out, &dclk_out, &tclk_out,
+     &mmc1_ck,
+     &mmc2_ck,
+     &cam_mclk,

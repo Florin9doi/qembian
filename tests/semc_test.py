@@ -102,6 +102,30 @@ def build_eka1(tree, base=0x50000000):
     return bytes(img[:max(pos[0], 0x400)])
 
 
+def build_eka2_lookalike(branch=b'\x7e\x00\x00\xea', base=0xF8000000, size=0x200000,
+                         rootlist=None, root_count=None, dir_size=None):
+    """an image whose TRomHeader fields read like an EKA2 XIP ROM but which is not one: Sony
+    Ericsson's ACPU boot ROM (the "EROM CXC1620xx" files) is an ARM branch table at 0 followed by
+    masked code, and the bytes at 0x7c happen to look like base/root list/header size. root_count
+    writes a root list count, dir_size a directory that claims more bytes than the file holds."""
+    img = bytearray(0x400)
+    img[0:4] = branch
+    struct.pack_into('<I', img, 140, base)
+    struct.pack_into('<I', img, 144, size)
+    struct.pack_into('<I', img, 148, base + 0x100 if rootlist is None else rootlist)
+    struct.pack_into('<I', img, 188, 0x200)                      # iHeaderSize
+    if root_count is not None:
+        struct.pack_into('<I', img, 0x100, root_count)
+    if dir_size is not None:
+        struct.pack_into('<II', img, 0x100, 1, 0x05050505)       # one root
+        struct.pack_into('<I', img, 0x108, base + 0x200)         # -> directory at 0x200
+        struct.pack_into('<I', img, 0x200, dir_size)
+        e = struct.pack('<IIBB', 4, base + 0x300, 0, 2) + 'ab'.encode('utf-16le')
+        img[0x204:0x204 + len(e)] = e
+        img[0x300:0x304] = b'DATA'
+    return bytes(img)
+
+
 def prefix(addr, body):
     d = struct.pack('<II', addr, len(body)) + body
     return d + bytes(-(len(d) + semc.PAD_TAIL) % 0x1000)
@@ -253,6 +277,43 @@ class QuickCoreTest(unittest.TestCase):
             os.unlink(f.name)
 
 
+class Eka2LookalikeTest(unittest.TestCase):
+    """2026-11-13: a real EROM ("Lily EROM CXC162096", 907861 bytes) was called core and then killed the
+    ROM walker: its root list count reads as 1600114342 and the entry parse ran off the end of the file
+    (struct.error). The first byte pattern must not be enough to call an image a ROM."""
+
+    def test_erom_lookalike_is_not_core(self):
+        d = build_eka2_lookalike(root_count=0xBEAD)
+        self.assertIsNone(semc.eka2_header(d))
+        tmp = tempfile.NamedTemporaryFile(suffix='EROM CXC162096.bin', delete=False)
+        try:
+            tmp.write(d)
+            tmp.close()
+            self.assertEqual(semc.classify(tmp.name)[0], 'semc-armimg')
+        finally:
+            os.unlink(tmp.name)
+
+    def test_root_list_count_rejected_with_reason(self):
+        with self.assertRaises(semc.romimg.RomError) as cm:
+            list(semc.romimg.Rom(build_eka2_lookalike(root_count=0xBEAD)).walk())
+        self.assertIn('root list count', str(cm.exception))
+
+    def test_root_list_outside_the_file(self):
+        d = build_eka2_lookalike(rootlist=0xF8000000 + 0x4000)
+        with self.assertRaises(semc.romimg.RomError) as cm:
+            list(semc.romimg.Rom(d).walk())
+        self.assertIn('outside the image', str(cm.exception))
+
+    def test_truncated_directory_stops_instead_of_crashing(self):
+        d = build_eka2_lookalike(dir_size=0x10000)
+        files = list(semc.romimg.Rom(d).walk())
+        self.assertEqual([(f['path'], f['size'], f['addr']) for f in files], [('ab', 4, 0xF8000300)])
+
+    def test_branch_table_alone_is_not_enough(self):
+        self.assertFalse(semc.arm_image(struct.pack('<I', 0xEA00007E) + bytes(0x100)))
+        self.assertTrue(semc.arm_image(struct.pack('<I', 0xEA00007E) + bytes(0x400)))
+
+
 class EmmaTest(unittest.TestCase):
     SCRIPT = ('begin;\nencryption on;\n'
               'w_free 0x0002 0x079E 0x0000 0x01 0x08 0x00 0x00 0x4A 0x01 0x03 0x43 0x58 0x43 0x0A 0x02 0x52 0x31 0x00 0x0D;\n'
@@ -347,6 +408,14 @@ class ExtractTest(unittest.TestCase):
         semc.write_file(os.path.join(out, 'rolf-x'), 'system/data/ProductInfo.rsc', b'\x00\x02P910i\x00')
         ident = semc.identity(out, dict(inputs=[]))
         self.assertEqual((ident['pda'], ident['version'], ident['product']), ('CXC162108', 'R6E30', 'P910i'))
+
+    def test_identity_accepts_a_part_number_instead_of_a_cxc(self):
+        """2026-11-13: the UIQ 3.3 phones (G700/G900 in the Emma archive) write a part number, not a
+        CXC, as the software id (\"PDA: 1203-6566\"): the identity of the whole firmware came out empty."""
+        out = os.path.join(self.d, 'out2')
+        semc.write_file(os.path.join(out, 'z'), 'private/102030EE/version.txt', b'PDA: 1203-8787 R6J825\r\n')
+        ident = semc.identity(out, dict(inputs=[]))
+        self.assertEqual((ident['pda'], ident['version']), ('1203-8787', 'R6J825'))
 
     def test_classify_kinds(self):
         cases = {

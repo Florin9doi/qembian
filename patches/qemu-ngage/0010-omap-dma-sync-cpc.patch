@@ -1,0 +1,32 @@
+diff -ru a/hw/dma/omap_dma.c b/hw/dma/omap_dma.c
+--- a/hw/dma/omap_dma.c	2026-11-18 16:28:51.268141254 +0100
++++ b/hw/dma/omap_dma.c	2026-11-18 16:28:51.305335703 +0100
+@@ -380,9 +380,14 @@
+             a->dest += a->frame_delta[1];
+             a->frame ++;
+ 
+-            /* If the channel is async, update cpc */
+-            if (!ch->sync)
+-                ch->cpc = a->dest & 0xffff;
++            /*
++             * qembian: update cpc at the end of every frame, synchronised channels too (the real
++             * progress counter moves with each transfer). Only at deactivation, which waits while
++             * the request line is high, the counter moved after the guest had re-armed the channel:
++             * the Nokia 9500's XbusDma RX poller (0x500B4D78) took that for a partial frame and
++             * disabled its fresh receive (XBUSProtocol fault 0x1000D).
++             */
++            ch->cpc = a->dest & 0xffff;
+         }
+     } while ((bytes -= ch->data_type));
+ }
+@@ -569,8 +574,8 @@
+         a->src += (uint64_t)min_elems * a->elem_delta[0] + frames * a->frame_delta[0];
+         a->dest += (uint64_t)min_elems * a->elem_delta[1] + frames * a->frame_delta[1];
+ 
+-        /* If the channel is async, update cpc */
+-        if (!ch->sync && frames) {
++        /* qembian: synchronised channels too (see omap_dma_transfer_generic) */
++        if (frames) {
+             ch->cpc = a->dest & 0xffff;
+         }
+     }

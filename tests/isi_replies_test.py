@@ -105,11 +105,13 @@ class MessagingHangsNetRegStatus(unittest.TestCase):
                 self.assertEqual(p, 0x01)
                 self.assertEqual(data[0], 0x00)               # cause OK
                 self.assertEqual(data[1], 2)                  # two sub-blocks
-                self.assertEqual(list(data[2:4]), [0x00, 0x04])
+                self.assertEqual(data[2], 0x00)               # NET_REG_INFO_COMMON
+                c = data[3]                                   # 4 (as first written) or 8 (the N95 modem's, 2026-11-18)
+                self.assertIn(c, (0x04, 0x08))
                 self.assertEqual(data[4], 0x06)               # NOSERV_NOSIM
-                self.assertEqual(data[6], 0x09)               # NET_GSM_REG_INFO
-                self.assertGreaterEqual(data[7], 0x18)        # >= 24 bytes: the TSY reads up to +0x16
-                self.assertGreaterEqual(n, 6 + data[7])
+                self.assertEqual(data[2 + c], 0x09)           # NET_GSM_REG_INFO
+                self.assertGreaterEqual(data[3 + c], 0x18)    # >= 24 bytes: the TSY reads up to +0x16
+                self.assertGreaterEqual(n, 2 + c + data[3 + c])
 
     def test_93_reg_status_e0_answered_like_0a00(self):
         # the 9.3 TSYs (E52, E72, E5-00) ask with NET_REG_STATUS_GET_REQ 0xE0 instead of 0x00
@@ -118,6 +120,8 @@ class MessagingHangsNetRegStatus(unittest.TestCase):
                 rep = reply_of(dev, 0x0A, 0xE0)
                 self.assertIsNotNone(rep, 'NET_REG_STATUS_GET_REQ (E0) unanswered')
                 self.assertEqual(rep[0], 0xE1)
+                if str(devmodel.get(devmodel.load(dev), 'platform.os_version', '')) == '9.2':
+                    continue    # S60 3.1 (N95 line) never sends E0; its 0A 00 is the N95 modem's 8-byte form (2026-11-18)
                 self.assertEqual(bytes(rep[2]), bytes(reply_of(dev, 0x0A, 0x00)[2]))
 
 
@@ -163,6 +167,89 @@ class E61StartupStalls(unittest.TestCase):
         self.assertGreaterEqual(len(data), 7)    # bytes 11..16: the MAC, reversed
         self.assertNotEqual(bytes(data[1:7]), bytes(6))
 
+
+
+class N95ModemRealignment(unittest.TestCase):
+    """2026-11-18: the canned replies differed from what the N95 8GB's own modem firmware encodes
+    (docs/research/n95-isi-encoders.md 10, 11.5). Table side; the core-built replies are in tests/modem_unit_test.py
+    (ModemCoreReplies)."""
+
+    N95 = 'nokia-n95-8gb-rm320'
+
+    def test_reg_status_common_subblock_is_8_bytes(self):
+        p, n, data = reply_of(self.N95, 0x0A, 0x00)
+        self.assertEqual(data[:10], [0x00, 0x02, 0x00, 0x08, 0x06, 0x02, 0x00, 0x00, 0x00, 0x00])
+        self.assertEqual(data[10:12], [0x09, 0x18])
+        self.assertEqual(n, 34)
+
+    def test_rat_subblock_2c_is_8_bytes(self):
+        self.assertEqual(reply_of(self.N95, 0x0A, 0x36), (0x37, 10, [0x00, 0x01, 0x2C, 0x08, 0x01, 0x01, 0, 0, 0, 0]))
+
+    def test_sim_read_no_sim_is_fb(self):
+        self.assertEqual(reply_of(self.N95, 0x09, 0x19), (0x1A, 2, [0x2F, 0xFB]))
+
+    def test_rtc_time_reply_has_datetime_subblock(self):
+        p, n, data = reply_of(self.N95, 0x19, 0x0A)
+        self.assertEqual((p, n), (0x0B, 18))
+        self.assertEqual(data[:4], [0x01, 0x02, 0x01, 0x0C])     # OK, 2 sub-blocks, sb 01 of 12 bytes first
+        self.assertEqual(data[14:], [0x04, 0x04, 0x01, 0x00])    # then sb 04 (RTC state valid)
+
+    def test_em_lines_in_mask_bit_order(self):
+        self.assertEqual(reply_of(self.N95, 0x17, 0x00)[2], [0x01, 0x02, 0x00, 0x04, 0x02, 0x00, 0x01, 0x04, 0x00, 0x00])
+        self.assertEqual(reply_of(self.N95, 0x17, 0x0A)[2], [0x01, 0x02, 0x15, 0x04, 0x01, 0x00, 0x16, 0x04, 0x07, 0x07])
+
+    def test_mtc_rf_status_left_to_the_core(self):
+        self.assertIsNone(reply_of(self.N95, 0x15, 0x16))
+
+    def test_net_0a40_not_supported_on_n95(self):
+        self.assertEqual(reply_of(self.N95, 0x0A, 0x40), (0xF0, 6, [0x01, 0x40, 0x00, 0x00, 0x00, 0x00]))
+
+    def test_net_0a40_kept_41_on_s60_32_and_5th(self):
+        # the 2026-11-17 Messaging fix on the 9.3/9.4 phones answered 41; their modems are not the N95's
+        for dev in BB5:
+            if str(devmodel.get(devmodel.load(dev), 'platform.os_version', '')) not in ('9.3', '9.4'):
+                continue
+            with self.subTest(dev=dev):
+                self.assertEqual(reply_of(dev, 0x0A, 0x40), (0x41, 3, [0x01, 0x00, 0x00]))
+
+
+
+class SAServerSpinsOnLongProductProfile(unittest.TestCase):
+    """2026-11-18 regression: the realignment made 1B 2E -> 2F the 138 data bytes the N95 modem's encoder sends.
+    SAServer receives on ISC channel 35 with a 128-byte buffer (10-byte header + 118 data bytes): our ISC stand-in
+    completed the 148-byte message with KErrOverflow (-9), SAServer re-posted the same buffer at once (1.5 million
+    times by 156 s) and start-up starved: N95 8GB logo late and no home screen, 5230/5800/E52 black screen.
+    Closed: the real NokiaISCDriver answers KErrNoMemory (-4) with the needed length and SAServer grows its buffer
+    (tests/iscpeer_overflow_test.py, iscrx.h); the phone's parser (SAFeatureInfoService FUN_8092313e) reads only
+    status, nsb, sub-block F000 (ISIMESSAGE type 3: id16, len8 at +2), flags +4 and two words +8/+12, so the table
+    carries the real layout cut to that whole 16-byte sub-block (18 data bytes). The 118-byte cap stays: a short
+    receive buffer must never be the thing a table line relies on the driver to fix."""
+
+    SASERVER_MAX_DATA = 128 - 10
+
+    def test_product_profile_is_real_layout_cut_to_what_the_phone_reads(self):
+        for dev in BB5:
+            with self.subTest(dev=dev):
+                rep = reply_of(dev, 0x1B, 0x2E)
+                if rep is None:
+                    continue
+                p, n, data = rep
+                self.assertEqual((p, n), (0x2F, 18))
+                d = data + [0] * (n - len(data))
+                self.assertEqual(d[:4], [0x00, 0x01, 0xF0, 0x00])      # status OK, 1 sub-block, id16 F000
+                self.assertEqual(d[4], n - 2)                          # len8 = the whole sub-block (old form: 0, length in the filler)
+                self.assertEqual(d[5], 0x00)                           # filler (the real modem: 88 00)
+                self.assertGreaterEqual(n, 2 + 16)                     # flags +4 and words +8/+12 present
+
+    def test_no_reply_overflows_128_byte_receive_buffer(self):
+        for dev in BB5:
+            text = isi.table_text(devmodel.load(dev))
+            for ln in text.splitlines():
+                ln = ln.split('#')[0].split()
+                if len(ln) < 4:
+                    continue
+                with self.subTest(dev=dev, msg=' '.join(ln[:2])):
+                    self.assertLessEqual(int(ln[3], 16), self.SASERVER_MAX_DATA)
 
 
 class LintCrashedOnSonyEricsson(unittest.TestCase):

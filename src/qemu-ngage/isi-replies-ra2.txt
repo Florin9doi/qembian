@@ -1,0 +1,50 @@
+# ISI replies for the Nokia 9500 board (-M nokia9500,isi=THIS FILE): ISA_IF frames carried over XBUS
+# (nokia9500_xbus.c). Format as src/qemu-ngage/isi-replies.txt (reply RES REQ RESP BYTES...: the data
+# after the message id). docs/devices/nokia-9500-ra2/bring-up.md has the evidence for each line.
+reply 00 01 02 00 a7                                      # isaapi CheckCrc (EStart, 0x501018BC): req to object 0x1f {00 00}; the reply's data[1] must be 0xA7 (the 6600 wanted 0x82), else panic IsaApi 1; unanswered = IsaApi 0 after 10 s [V]; data[0], message id 02 [I]
+# --- Seeded from the 6600/7650/N-Gage tables (DCT4/BB5 ISI); each [I] for the 9500 until its own parser is read.
+reply 15 0B 6E 00 00                                      # MTC_STARTUP_SYNQ_REQ -> RESP (MTC replies are id + 0x63) [I]
+reply 15 02 65 01 01 00 00                                # MTC_STATE_QUERY (EStart/DSY object 0x69): current NORMAL, target NORMAL [I]
+reply 15 01 64 00 00                                      # MTC_STATE_REQ -> OK [I]
+reply 15 04 67 00 00                                      # MTC_POWER_ON_REQ -> OK [I]
+reply 15 12 75 00 00                                      # MTC_SHUTDOWN_SYNC_REQ -> OK [I]
+reply 1B 02 03 echo                                       # product-profile read (N-Gage parser): status 00, the request's sub-blocks echoed [I]
+# Object 0x69 (105) subscribes to 15 65, 19 02, 19 0B, 23 03, 23 05 (res 00 msg 00 to object 0x1f).
+ind 105 69 15 C0 01 03                                    # MTC_STATE_INFO_IND: NORMAL, START (sent on subscription) [I]
+# Object 0x52 (82) is DosServer's (Nokia.dsy) channel: its subscription lists 0B 17, 21 0A, 1E 1C, 12 1C, 15 09,
+# EF 09 ED 08 10 15 C0 ... (the 6600's DSY list, object 0x54 there). Indications and replies from the 6600 table [I].
+ind 82 52 15 C0 01 03                                     # MTC_STATE_INFO_IND: NORMAL, START [I]
+ind 82 52 09 EF 05 08 08                                  # SIM_IND [I]
+ind 82 52 08 10 02 01                                     # PN_SECURITY 0x10 {02 01} [I]
+reply 09 C0 C1 00 01                                      # DSY SIM C0: [11] 01 = OK (6600 handler) [I]
+reply 09 2D 2E 3A 01 00                                   # DSY SIM 2D (6600) [I]
+reply 09 2B 2C len=16 3A 01 00                            # DSY SIM 2B (6600) [I]
+reply 08 11 12 05 13 00 00 00 00 00 00                   # security code state: Nokia.dsy 0x50171E4C: data[0] 05 -> DOS SIM state 7 (OK) [V]; data[1] must be 12/13/63, else error path (SIM state 0 = 'SIM card not valid' on the cover, 08 11 re-sent) [V]; 13 -> event 0x19 = 0 [V, meaning I]; PhoneTsy's Mmgsmwcdma 0x50C0AAF4 also reads data[7] [V] (docs/research/ra2-sim-state.md)
+reply 53 00 01 00 00                                      # DSY 0x53 query (SIM lock [I]): data[0] 01 (the 6600 value) flipped the DOS SIM state 7 -> 1 right after this reply ("SIM card not valid" on the cover) [V by a Sae catch at 0x5015D6E8]; 00 keeps 7 (OK) [V by run, meaning I]
+reply 0B 11 12 @05 05 01 02 08 08 00 00 00 00 00 00       # DSY audio query {05 08} (6600) [I]
+reply 0B 11 12 @06 06 01 02 08 01 00 00 00 00 00          # DSY hands-free query {06 01} (DosServer waits, 0x5016BEA4): handler 0x5016BF80 wants subtype 06 and sub-block id 02 (IsiMsg finder 0x500F5AE4; the N-Gage's id 06 = not found, wait never ended) [V]; sb {02, 08, 01 = the item [I], 00, u16 value}: 0 = not hands-free [I]
+# Object 0x69 (Custom.ldd) request 2 = DSY GetSWStartupReason (Starter's SysUtil call, stall 20): handler 0x500acb98 wants
+# msg 05, data[0] 00 = OK, data[14..15] u16 LE = the SW start-up reason (100 = normal) [V layout, docs/research/ra2-dsy.md; bytes 1..13 I]
+reply 23 04 05 00 00 D4 00 00 00 00 00 00 00 00 00 00 00 64 00
+# docs/research/ra2-isi-replies-2.md: Nokia.dsy waits (nested scheduler wait 0x5016C584) for the audio-parameter reply
+reply 0B 00 01 01 00                                      # Nokia.dsy audio param query {0A}/{01} (obj 0x52): msg 01, data[0] = value (FF = unknown) [V parser 0x5016C1A0]; value 01 [I, N-Gage's]
+reply 17 06 07 01 01 0F 04 0F A0                          # SpeDeServer (obj 0x66) battery voltage read: [0] 01, [1] 1 sub-block {0F, len, u16 BE}; > 0x0D5B = OK [V 0x500AF9F6/0x500AED18]; 4000 mV [I]
+# Left silent on purpose: 17 0C (msg 0D is a no-op, 0x500AF990 [V]); 1B 00 {41} IMEI and 5A 00 (obj 0x4b; silent on the 6600 too [I]); D1 04, 19 0A (Custom.ldd, not on the start-up path [I])
+# LightServer (obj 0x67), docs/research/ra2-isi-replies-3.md: one synchronous receive (0x500966E0) per request; any message to 0x67 ends the wait
+reply 3A 03 04 00                                         # set brightness (light, res 0x3A): parser takes msg 04/06, reads only data[0] (>= 1 byte else USER 21) [V]; 00 = OK [I]
+reply 3A 05 06 00                                         # 3A 05 (0x50096978, when this+0x98 == 1): same parser [V], msg 06 pairing [I]
+reply 15 14 77 00 00 00 00 00 00                          # MTC 15 14 (0x50096D30, when HAL 0x39 reads 0): parser needs 6 data bytes; this returns 0 = LightServer state 1 [V], meaning [I]
+reply 02 16 17 00 00 00 00 00 00 00 00 00 00 00 00        # SMS 02 16 {00 00} (PhoneTsy, obj 0x4b): CbsServer's ETel call waits on it; Networkhandling's CbsMcnClient then got KErrNotFound and the phone engine was left half-built (Telephone abort) [V chain]; reply id 17 and layout [I: SMS_GSM_CB_ROUTING_RESP guess, status 00, zero padded]
+reply 0A 00 01 00 00                                      # NET_MODEM_REG_STATUS_GET (PhoneTsy): handler 0x50C096BC needs the request's tid [V]; data[0] 00 status [V read, I value]; data[1] 0 sub-blocks -> parser 0x50C0974C skips (docs/research/ra2-isi-replies-4.md)
+# PhoneTsy (obj 0x4b) SIM/GPDS start-up requests: data layouts from the N-Gage table (same ISI servers), the 9500 parsers not read [I] (docs/research/ra2-isi-replies-4.md)
+reply 31 19 1A len=12                                     # N-Gage data layout [I for the 9500]
+reply 09 3D 3E len=42 FA 01 31 31 32 00 00 00 00 00 39 31 31 # N-Gage data layout [I for the 9500]
+# PhoneTsy SIM replies, docs/research/ra2-isi-replies-5.md (IsiMsg field accessors take field ids: 0x500FBBCC Mid by id, 0x500FB9F4 byte by id)
+reply 09 23 24 @25 25 01 00                               # SIM CB topics (CustomApi StartSimCbTopicBrowsing, CbsServer's synchronous call): Mmcustomtsy parser 0x50C3211C: [0] 25, tid, [1] 01 OK, [2] count 0 -> KErrNotFound (no topics) [V]
+reply 09 31 32 len=70 3B 01                               # SIM 09 31 {3B 00 00}: handler 0x50C09EE0: [1] 01 OK, then Mid(12,4) and Mid(16,60) of the frame (frame >= 76, else USER 22) [V]; zero contents [I]
+reply 09 09 0A 01 01                                      # SIM 09 09 {01 00}: handler 0x50C089B8 (no tid check) reads [1]: 01 = OK path [V path, I meaning]
+reply 09 1D 1E 2D 01 08 09 10 10 00 00 00 00 10           # SIM IMSI {2D 00}: handler 0x50C0A054: [1] 01, Mid(12, [2]+1) BCD into 15 digits [V]; IMSI 001010000000001 [I]
+reply 09 3B 3C 00 2A                                      # DSY 09 3B (after code state 05): data[1] 2A -> DOS event 9 = 0, 2B -> 1 [V]; which is normal [I]
+reply 1B 1F 20 00 00 00 17 30 30 30 30 30 30 30 31 30 0A 0A 0A 0A 0A 0A 0A 0A 0A 0A 24 30 30 31   # SpeDeServer func 11 language list (Startup -> SysLangUtil 0x5009CE74): parser 0x500AFD0E: [0] 00 OK, [2..3] u16 BE length, then the text [V]; text '00000' '0010' 10 x LF '$001' = UK English [V SysLangUtil 0x5009D0AC format, I meaning] (docs/research/ra2-spede.md)
+reply 08 01 02 00 00                                      # security code verify {06 00 '12345' 00} (lock code typed on the inner display) -> 02 (OK) {00 00}: the BB5 table's answer [I for the 9500]
+reply 1B 04 05 echo                                       # product-profile write (SpeDeServer, the chosen language on first start: sub-block 47 08 .. 19 01): status 00 + the request's sub-blocks echoed, as the 1B 02 read [I]

@@ -13,6 +13,7 @@ Analysis tools then see real names for every cross-DLL call.
 import argparse, json, os, struct, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dso_ordinals  # noqa: E402
+import e32load        # noqa: E402  (sdk_lib_default: ordinals are per platform; never hard-code an SDK)
 
 B = 0x80000000
 
@@ -20,8 +21,10 @@ B = 0x80000000
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('img'); ap.add_argument('json'); ap.add_argument('name'); ap.add_argument('out')
-    ap.add_argument('--sdk-lib', default=os.environ.get('S60_SDK_LIB', os.path.expanduser('~/work/S60_3rd_FP1/Epoc32/release/armv5/lib')))
+    ap.add_argument('--sdk-lib', default=None,
+                    help='import libraries for export/import names (default: $S60_SDK_LIB, else the device profile sdk_lib)')
     a = ap.parse_args()
+    a.sdk_lib = a.sdk_lib or e32load.sdk_lib_default()
     d = open(a.img, 'rb').read()
     j = json.load(open(a.json))
     imgs = [f for f in j['files'] if 'image' in f]
