@@ -11,6 +11,14 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 if [ -z "${SYBORG_IN_CONTAINER:-}" ]; then
+  # kernel/execpers_map.h (the exec numbering tables of every personality) is generated, but the
+  # personality patches only leave a stale sym92-only placeholder: regenerate it before compiling,
+  # on the host (the generator needs python3; the legacy container has none that is recent enough)
+  KD=build/epocroot/sf/os/kernelhwsrv/kernel/eka/kernel
+  maps=(); for p in $(cd "$ROOT/personalities" && LC_ALL=C ls); do
+    [ -f "$ROOT/personalities/$p/exec.map" ] && maps+=("$p=personalities/$p/exec.map")
+  done
+  ( cd "$ROOT" && python3 -I tools/personality/gen_exec_map.py "$KD/execs.txt" "$KD/execpers_map.h" "${maps[@]}" )
   exec "$ROOT/scripts/in-container.sh" /work/scripts/build-kernel.sh "$@"
 fi
 source /work/scripts/env.sh
