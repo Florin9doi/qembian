@@ -129,6 +129,8 @@ scripts/build-hosttools.sh              # Symbian host tools (rombuild, elf2e32,
 scripts/build-kernel.sh                 # the EKA2 kernel
 scripts/build-qemu-modern.sh --container   # QEMU with the Syborg board -> build/qemu-modern-ct/
 
+GCC14=build/toolchains/arm-2009q3 ELF2E32=build/epocroot/epoc32/tools/elf2e32 ./src/semc/pvr2dif/build.sh p990i
+
 # per phone (N95 8GB shown)
 tools/fw/store.py import /path/to/RM-320-flash-files   # into roms/RM-320/35.0.001/
 tools/fw/inventory.py --device nokia-n95-8gb-rm320     # extract (build/firmware/...)

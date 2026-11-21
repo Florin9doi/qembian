@@ -20,6 +20,6 @@ link="PVR2DIF{000a0000}.dll"
 # the real PVR2DIF's header: uid1 DLL, uid2/uid3 0, vid 0x7000000f, All -TCB (docs/research/p1i-pvr2d.md)
 "$E2E" --elfinput="$OBJ/pvr2dif.elf" --output="$OUT/PVR2DIF.dll" --targettype=DLL --linkas="$link" \
   --uid1=0x10000079 --uid2=0 --uid3=0 --sid=0 --vid=0x7000000f --capability="All-TCB" \
-  --definput="$HERE/pvr2dif.def" --dso="$OBJ/PVR2DIF.dso" --compressionmethod=none >"$OBJ/e2e.log" 2>&1 \
+  --definput="$HERE/pvr2dif.def" --defoutput="e2edefoutput" --dso="$OBJ/PVR2DIF.dso" --compressionmethod=none >"$OBJ/e2e.log" 2>&1 \
   || { cat "$OBJ/e2e.log"; exit 1; }
 echo "pvr2dif: $OUT/PVR2DIF.dll $(stat -c %s "$OUT/PVR2DIF.dll") bytes"
