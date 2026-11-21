@@ -19,7 +19,10 @@ fetch() {	# url sha256
 }
 fetch "$BINUTILS_URL" "$BINUTILS_SHA256"
 fetch "$GCC_URL" "$GCC_SHA256"
-tar xf "$(basename "$BINUTILS_URL")"; tar xf "$(basename "$GCC_URL")"
+# --no-same-owner/--no-same-permissions: do not chown/chmod to the archive's owner and modes; storage that refuses
+# that (rootless podman on some file systems) otherwise fails the build with "Cannot change mode"
+TAR=(tar --no-same-owner --no-same-permissions)
+"${TAR[@]}" -xf "$(basename "$BINUTILS_URL")"; "${TAR[@]}" -xf "$(basename "$GCC_URL")"
 BU=$(basename "$BINUTILS_URL" | sed 's/\.tar\..*//'); GC=$(basename "$GCC_URL" | sed 's/\.tar\..*//')
 
 # binutils 2.29.1: the last series that knows arm*-symbianelf well; 2017 code, so a modern host
