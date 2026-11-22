@@ -1,0 +1,34 @@
+--- a/hw/arm/omap1.c
++++ b/hw/arm/omap1.c
+@@ -3775,7 +3775,9 @@
+     omap_mpu_timer_reset(mpu->timer[2]);
+     omap_wd_timer_reset(mpu->wdt);
+     omap_os_timer_reset(mpu->os_timer);
+-    omap_lcdc_reset(mpu->lcd);
++    if (mpu->lcd) {
++        omap_lcdc_reset(mpu->lcd);
++    }
+     omap_ulpd_pm_reset(mpu);
+     omap_pin_cfg_reset(mpu);
+     omap_mpui_reset(mpu);
+@@ -3983,10 +3985,16 @@
+                     qdev_get_gpio_in(s->ih[1], OMAP_INT_OS_TIMER),
+                     omap_findclk(s, "clk32-kHz"));
+ 
+-    s->lcd = omap_lcdc_init(system_memory, 0xfffec000,
+-                            qdev_get_gpio_in(s->ih[0], OMAP_INT_LCD_CTRL),
+-                            omap_dma_get_lcdch(s->dma),
+-                            omap_findclk(s, "lcd_ck"));
++    /*
++     * qembian: no LCD controller on the 1610 path: the Nokia 6630 drives a smart panel through SoSSI and
++     * never touches 0xFFFEC000 [V]; its panel's console (the board's) is then console 0.
++     */
++    if (!is_1610) {
++        s->lcd = omap_lcdc_init(system_memory, 0xfffec000,
++                                qdev_get_gpio_in(s->ih[0], OMAP_INT_LCD_CTRL),
++                                omap_dma_get_lcdch(s->dma),
++                                omap_findclk(s, "lcd_ck"));
++    }
+ 
+     omap_ulpd_pm_init(system_memory, 0xfffe0800, s);
+     omap_pin_cfg_init(system_memory, 0xfffe1000, s);

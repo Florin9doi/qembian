@@ -1,0 +1,17 @@
+--- a/hw/arm/omap1.c
++++ b/hw/arm/omap1.c
+@@ -562,6 +562,14 @@
+     case 0x48:  /* LOCL_TIME */
+     case 0x4c:  /* APLL_CTRL */
+     case 0x50:  /* POWER_CTRL */
++        /*
++         * qembian: the OMAP1610's APLL_CTRL bit 15 = the 48 MHz APLL is locked; the Nokia 6630's kernel
++         * (0x5000d820) polls it with no timeout after enabling a module clock that needs the APLL
++         * (Bluetooth UART): never set, the Supervisor spun for ever and no DFC ran (keys dead).
++         */
++        if (s->omap1610 && addr == 0x4c) {
++            return s->ulpd_pm_regs[addr >> 2] | 0x8000;
++        }
+         return s->ulpd_pm_regs[addr >> 2];
+     }
+ 

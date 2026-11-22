@@ -2,7 +2,7 @@
 
 qembian runs the original user side of Nokia S60 and Sony Ericsson UIQ 3 phones (Symbian 9.x) on an
 open-source EKA2 kernel inside QEMU, and older Symbian phones (6.1-7.0s, the EKA1 kernel: N-Gage QD, 7650,
-6600, 9500 Communicator, P910i) with their own kernel on QEMU boards built for their chips. The phone's
+6600, 3230, 6630, N70, 9210 Communicator, 9500 Communicator, 7710, P800, P910i) with their own kernel on QEMU boards built for their chips. The phone's
 own ROM supplies the applications, servers and libraries. qembian supplies the kernel (for the EKA1
 phones: the board), and replacements for the phone's hardware drivers. The goal is
 to develop and debug Symbian applications in the real firmware environment of a given phone,
@@ -103,6 +103,23 @@ Tested device (the reference) and the phones that work today (2026-11-18; detail
   - **Nokia 9500 Communicator** (RA-2, S80 2nd / Symbian 7.0s, `--model nokia9500`, on QEMU's OMAP1510 model):
     both screens (the cover's idle screen, the inner 640x200 S80 UI), the lid as a real switch, QWERTY and
     command buttons, lock code and first-start wizard (`docs/devices/nokia-9500-ra2/bring-up.md`).
+  - **Nokia 3230** (RM-51, S60 2nd Edition FP1 / Symbian 7.0s, `--model nokia3230`, the `ngage` board): the S60 home
+    screen and Menu, keys and joystick, no sound or network (`docs/devices/nokia-3230-rm51/bring-up.md`).
+  - **Nokia 6630** (RM-1, S60 2nd Edition FP2 / Symbian 8.0a, the first Symbian 8 phone, `--model nokia6630`, QEMU's
+    OMAP1510 made an OMAP1610): the S60 home screen and Menu grid, keypad and joystick, no sound, network or DRM
+    (`docs/devices/nokia-6630-rm1/bring-up.md`, `how-it-was-done.md`).
+  - **Nokia N70** (RM-84, S60 2nd Edition FP3 / Symbian 8.1a, `--model nokian70`, the 6630's board reporting an
+    OMAP1710): the Active Standby home screen and the Menu grid, keypad and joystick, no sound, network or DRM
+    (`docs/devices/nokia-n70-rm84/bring-up.md`, `how-it-was-done.md`).
+  - **Nokia 9210 Communicator** (RAE-3, Series 80 1st edition / **Symbian 6.0**, `--model nokia9210`, a board
+    modelled from the phone's code): the first-boot wizard and the S80 Desk on the 640x200 screen, QWERTY, command
+    buttons and application keys (Telephone, Messaging, Internet), C: on its DataFlash kept across boots; no network
+    (`docs/devices/nokia-9210-rae3/bring-up.md`, `how-it-was-done.md`).
+  - **Nokia 7710** (RM-12, the only Series 90 phone, Symbian 7.0s, `--model nokia7710`, the 9500's OMAP1510 board):
+    the S90 Desk after the first-boot touch calibration and Setup wizard; the mouse is the pen, the 5-way and
+    hardware keys, C: kept per phone (`docs/devices/nokia-7710-rm12/bring-up.md`, `how-it-was-done.md`).
+  - **Sony Ericsson P800** (UIQ 2.0 / Symbian 7.0, the first UIQ phone, `--model p800`, the P910i's board): the
+    UIQ home screen after the set up wizard; the pen, settings kept across boots (`docs/devices/se-p800/bring-up.md`).
   - **Sony Ericsson P910i** (UIQ 2.1 / Symbian 7.0, `--model p910i`, a Philips PNX4000 board modelled from the
     phone's own code: no datasheet exists): the UIQ home screen after the set up wizard and the Power menu; the
     mouse is the pen, the flip is a switch, a fake GSM side (Ericsson OSE protocol) with a SIM and a full battery,
@@ -155,6 +172,18 @@ keypad flip is modelled as the phone reads it (a switch: pen UI on 240x320 when 
 **Research registry (2026-11-17).** `tools/registry.py` (and an MCP server, `tools/registry_mcp.py`) keeps what
 is known about each firmware: modules, imports, ECom plugins, components and claims with evidence
 (`docs/registry/`).
+
+**The N95 8GB on its own modem firmware (2026-11-22).** Instead of the fake modem's reply tables, the phone's
+real modem software (the loader and MCUSW from its flash files) runs on an emulated modem CPU (QEMU machine
+`n95-cmt`: interrupt controller, timers, power chip, SSI link, a minimal DSP) linked to the phone. It boots to the
+Offline idle screen without a SIM; apps, the profile list and Switch off work. One command:
+`python3 tools/sydb/sydb.py phone NAME --modem real` (or the instance setting `settings.modem = real`). The
+modem's traffic is logged, and `tools/cmt/isirecord.py` compares its answers with the fake modem's, which is how
+the fake modem's tables are corrected (`docs/research/n95-cmt-emulation.md`, `docs/research/n95-cmt-recorded-isi.md`).
+
+**UI as data (2026-11-20).** `sydb ui` gives the foreground app's screen as data (title, softkeys, list and menu
+items, the selection, the control tree), like Android's uiautomator; `ui select TEXT` and `ui wait TEXT` drive
+it (`docs/ui-automation.md`).
 
 **Host platform.** Linux on x86-64 (amd64) is the only tested host. Other systems and
 architectures may work, but they are not tested or supported.

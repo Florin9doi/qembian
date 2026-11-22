@@ -1,0 +1,65 @@
+--- a/hw/arm/omap1.c
++++ b/hw/arm/omap1.c
+@@ -504,11 +504,22 @@
+     struct omap_mpu_state_s *s = opaque;
+     uint16_t ret;
+ 
++    /*
++     * qembian: the OMAP1610's ULPD takes 32-bit accesses to its 16-bit registers (the Nokia 6630's
++     * kernel uses LDR/STR) and has registers past POWER_CTRL; 0x7C SOFT_REQ_REG2 is read back by
++     * epower.dll ("Someone has disabled GPIO func.clock !" unless bit 2 stays set).
++     */
++    if (s->omap1610 && size == 4) {
++        size = 2;
++    }
+     if (size != 2) {
+         qemu_log_mask(LOG_GUEST_ERROR, "%s: read at offset 0x%" HWADDR_PRIx
+                       " with bad width %d\n", __func__, addr, size);
+         return 0;
+     }
++    if (s->omap1610 && addr >= 0x54 && addr <= 0x9c && !(addr & 3)) {
++        return s->ulpd_1610_regs[(addr - 0x54) >> 2];
++    }
+ 
+     switch (addr) {
+     case 0x14:  /* IT_STATUS */
+@@ -577,11 +588,19 @@
+     static const int bypass_div[4] = { 1, 2, 4, 4 };
+     uint16_t diff;
+ 
++    if (s->omap1610 && size == 4) {     /* qembian: see omap_ulpd_pm_read */
++        size = 2;
++        value &= 0xffff;
++    }
+     if (size != 2) {
+         qemu_log_mask(LOG_GUEST_ERROR, "%s: write at offset 0x%" HWADDR_PRIx
+                       " with bad width %d\n", __func__, addr, size);
+         return;
+     }
++    if (s->omap1610 && addr >= 0x54 && addr <= 0x9c && !(addr & 3)) {
++        s->ulpd_1610_regs[(addr - 0x54) >> 2] = value;
++        return;
++    }
+ 
+     switch (addr) {
+     case 0x00:  /* COUNTER_32_LSB */
+@@ -3882,6 +3901,8 @@
+     SysBusDevice *busdev;
+     MemoryRegion *system_memory = get_system_memory();
+ 
++    s->omap1610 = is_1610;
++
+     /* Core */
+     s->cpu = ARM_CPU(cpu_create(cpu_type));
+     s->sdram_size = memory_region_size(dram);
+--- a/include/hw/arm/omap.h
++++ b/include/hw/arm/omap.h
+@@ -400,6 +400,8 @@
+     struct omap_lcd_panel_s *lcd;
+ 
+     uint32_t ulpd_pm_regs[21];
++    uint16_t ulpd_1610_regs[19];   /* qembian: the OMAP1610's ULPD 0x54..0x9C */
++    bool omap1610;                 /* qembian: omap1610_mpu_init */
+     int64_t ulpd_gauge_start;
+ 
+     uint32_t func_mux_ctrl[14];

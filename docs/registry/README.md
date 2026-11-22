@@ -12,7 +12,9 @@ its consumers rely on, what do we actually know, and which bounded question unbl
 | **component** | a logical role (`gce-render-stage`, `qt`, `tsy-nokia`), its strategy, source availability, notes, and its subsystem memberships |
 | **binary** | one module in one firmware: device, firmware, path, uid3, arch, code size, hash (crc32 today), extraction provenance, load base (the code address for XIP), parse error, `shadowed_by` (the same path in a higher ROM layer is the one loaded); its component is NULL until seed or curation gives it a role |
 | **edge** | a *typed* relationship (`dll-import`: one per module pair, `n` = ordinals; the slots stay in the import index;
-`ecom-plugin`: one per implementation, from `tools/ecom_index.py`): `dll-import`, `ecom-plugin`, `ipc-client-server`, `ldd-pdd`, `shared-memory`, `device-protocol`, `replacement`, `adaptation`, `build-dependency`, `rom-file-override`, `byte-patch` |
+`ecom-plugin`: one per implementation, from `tools/ecom_index.py`; `ipc-client-server`: from `tools/ipc_index.py`, one
+`serves !Name` row per module that starts a named server and one `client of !Name` edge per client module -> the
+provider binary): `dll-import`, `ecom-plugin`, `ipc-client-server`, `ldd-pdd`, `shared-memory`, `device-protocol`, `replacement`, `adaptation`, `build-dependency`, `rom-file-override`, `byte-patch` |
 | **source** | a source candidate for a component: repo, revision, build recipe, and whether it is exact / related / unknown to the shipped binary |
 | **contract** | what an outside participant may rely on: participants, arguments, ownership, completion, cancellation, errors, status (`known` / `partial` / `unknown`) |
 | **claim** | one statement with an exact scope (device / firmware), evidence, confidence (`verified` / `inferred`), and status; corrections **supersede** instead of erasing |
@@ -44,6 +46,7 @@ tools/registry.py seed      # docs/registry/*.toml -> DB; content-hashed, so a s
 tools/registry.py seed --migrate   # explicit rewrite of curated columns; operational state is never touched
 tools/import_index.py build --device ID   # <devdir>/imports.json: every E32 image, thunks, ordinal names
 tools/ecom_index.py build --device ID     # <devdir>/ecom.json: plugin DLL -> interface -> implementation
+tools/ipc_index.py build --device ID      # <devdir>/ipc.json: named servers -> starter module, client modules
 tools/registry.py ingest    # both indexes + resolved device profile + repo artifacts -> DB (idempotent)
 tools/registry.py export    # build/registry/{registry.json,registry.md,snapshot.html,registry.backup.sqlite3}
 tools/registry.py backup --out FILE     # SQLite's own consistent copy
@@ -119,9 +122,15 @@ The first version was checked against the 808 ROM and its own code; fixed, each 
 
 ## What is not done yet
 
-- **IPC / shared-memory edges**: no ingest path yet (server names from `CServer2` start-up strings and client
-  `CreateSession` literals would give `ipc-client-server`).
+- **IPC edges** (2026-11-19, `tools/ipc_index.py`): protected servers only (`!Name` literals, the module importing
+  `CServer2::StartL` is the provider, the ones importing `RSessionBase::CreateSession` the clients): 153 names on
+  the 808, 143 with a provider. Not seen: names built at run time or passed by RootServer (`!SocketServer`,
+  `!RootServer`, `!ConnectionServer`), unnamed servers, and which *subsession/opcode* a client uses. Clients of
+  a server in the same component (Ws32.dll for `!Windowserver`) are not listed: the component's importers are.
+- **Shared-memory edges**: no ingest path yet.
 - **Served UI with write access**: `registry.py export` produces a read-only snapshot.
 - **Ghidra preparation**: importing a binary, fixing `TMode`, and saving the program is still outside the registry.
-- **Other devices**: only the 808 is ingested; `import_index.py`/`ecom_index.py build --device ID` + `registry.py
-  ingest --device ID` add one (the N8 and 701 ECom indexes are built).
+- **Other devices**: the 808, the 701 (Belle FP2, 4677 binaries) and the N8 011.012 (Symbian^3, 4196) are ingested
+  (2026-11-19); `import_index.py` / `ecom_index.py` / `ipc_index.py build --device ID` + `registry.py ingest
+  --device ID` add one. A claim scoped `device/*` or to one firmware stays that device's; the N8's Belle firmware
+  (nokia-n8-rm596-v111) is not ingested yet.

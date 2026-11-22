@@ -10,47 +10,50 @@
 
 [[component]]
 key = "qt"
-title = "Qt 4.7 / QtWebKit (Belle UI toolkit)"
+title = "Qt 4.8.1 / QtWebKit (Belle UI toolkit)"
 role = "Qt runtime, QtWebKit, QtScript/Declarative on the phone's UI side; huge dependency fan-in"
-strategy = "undecided"
+strategy = "retain"
 source_availability = "available"
 subsystems = ["ui-toolkit", "source-assessment"]
 # family globs on purpose: the Qt stack is one strategy decision, not one per module
 binaries = ["qt*.dll", "qml*.dll", "xq*.dll", "javascriptcore.dll", "webkitengine.dll", "libgstqt*.dll"]
 sources = [
-  { repo = "qt/qt (LGPL 2.1)", revision = "4.7.x-belle?", relation = "related", notes = "Nokia's Belle Qt carries Symbian-specific patches; exact revision and ABI not established" },
+  { repo = "qt/qt (LGPL 2.1)", revision = "4.8.1", relation = "related", notes = "808 Belle FP2 ships Qt 4.8.1 (string + E32 module version 4.2049, 'Symbian full-config', OpenSource build); whether Nokia appended exports beyond the public 4.8.1 .def is open (docs/research/belle-qt-avkon-source-assessment.md)" },
 ]
 notes = """
-Undecided on purpose - and it must stay that way until a short source/compatibility assessment is done.
-229 modules import QtCore, but that is a dependency fact, not a work order: the phone ships Qt and Qt is
-retainable. The assessment asks: which Qt revision/patches does this firmware use, can it be rebuilt with a
-compatible ABI/ordinal set, and is anything we actually need to change inside it (vs. underneath it)?
-Do not create per-class research tasks here.
+Retain (owner's decision 2026-11-19, after docs/research/belle-qt-avkon-source-assessment.md): the 808 ships
+Qt 4.8.1; the 4.7.2 SDK libraries miss ordinals 183 modules use, no 4.8.1 Symbian source is local, and
+nothing a port needs lives inside Qt (EGL/VG/GL, bearer, sensors, modem are replaced underneath it).
+229 modules import QtCore, but that is a dependency fact, not a work order. Do not create per-class
+research tasks here. Open only if someone must change a Qt DLL: whether Nokia appended exports beyond the
+public 4.8.1 .def files (QtGui 11823..12809, QtNetwork 999..1165).
 """
 
 [[component]]
 key = "avkon"
 title = "Avkon / Uikon / CONE (S60 UI framework)"
 role = "S60 UI controls, app framework and window-owning client side (Eikon/Avkon/Uikon/CONE)"
-strategy = "undecided"
+strategy = "retain"
 source_availability = "partial"
 subsystems = ["ui-framework", "source-assessment"]
 binaries = ["avkon.dll", "uikon.dll", "cone.dll", "eikcoctl.dll", "eikctl.dll", "eiksrv.dll", "akn*.dll",
             "eik*.dll", "laf*.dll", "laf*"]
 sources = [
-  { repo = "oss.FCL.sf.os.ui (EPL, partial)", revision = "Symbian^3/Anna-era drop", relation = "related", notes = "source coverage per component is not established" },
+  { repo = "oss.FCL.sf.mw.classicui (EPL)", revision = "201039_2 (2010-10-08), ~/work/symbian/oss.FCL.sf.mw.classicui", relation = "related", notes = "two years older than Belle FP2; avkon .def max 4577 vs 88 used ordinals above it (162 modules), eikcoctl 38 above, cone 6 above (4 of them imported by QtGui); eikcore/eikdlg/eiksrv/form/bafl ordinal-clean" },
 ]
 notes = """
-Source exists for part of this stack (EPL drop), but "source exists" is not "this firmware can be rebuilt
-compatibly": the task is a coverage/version assessment, then decide per component whether to retain, build
-or replace the interface. Nothing here is a blanket RE target.
+Retain for now (owner's decision 2026-11-19, docs/research/belle-qt-avkon-source-assessment.md): the EPL
+classicui drop cannot serve this firmware's importers (missing ordinals in avkon, eikcoctl, cone, eikctl,
+aknnotify, aknskins, fontutils), and a rebuild would not be Belle behaviour. The EPL drop stays the reading
+copy (names exact). Long-term wish (owner): rewrite Avkon and the UI stack; not a task until the port
+needs it. Nothing here is a blanket RE target.
 """
 
 [[component]]
 key = "wserv"
 title = "Window server (EwSrv, Ws32, graphic drawers)"
 role = "The phone's window server: render-stage pipeline, screen/drawable management, event routing"
-strategy = "undecided"
+strategy = "retain"
 source_availability = "partial"
 subsystems = ["wserv", "source-assessment"]
 binaries = ["ewsrv.exe", "ws32.dll", "wsgraphicdrawer.dll", "ws32*.dll", "screen*.dll", "arrowcursor*.dll",
@@ -59,9 +62,13 @@ sources = [
   { repo = "oss.FCL.sf.os.graphics (EPL) + Nokia's NGA code", revision = "Symbian^3-era drop", relation = "related", notes = "Belle FP2 deltas unknown; EwSrv.exe itself is a ROFS binary" },
 ]
 notes = """
-EPL window-server source is available locally, so the value is in the Belle-specific deltas, not in a
-rewrite. EwSrv.exe is RAM-loaded from ROFS1 and picks its render stage by name ("gce") through ECom
-interface 0x10285A29 - that is the seam to start any WSERV work from.
+Retain (owner's UI-stack decision 2026-11-19; docs/research/belle-wserv-source-assessment.md): the EPL drop
+(PDK_4.0.a-1, 2010-10) is the exact reading copy of the plugin ABI, but Belle appended 16 Ws32 exports that
+Cone imports, and the server's built-in render-stage table, key routing and tree walkers differ. The seam is
+below the server: EwSrv instantiates gcerenderstage (0x20031CBA) itself under its built-in name
+"platformcompositor" (wsini.ini names "sssrenderstage alf compositor platformcompositor"); a replacement is a
+0x10285A29 plugin selected by a [platformcompositor] ID section, no server change. Next bounded question:
+which object-interface ids alfcompositorrs.dll resolves from its Next() stage.
 """
 
 [[component]]

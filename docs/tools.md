@@ -142,6 +142,22 @@ Parses the SPI files (the ROM's pre-built ECom registry) with their resource fil
 1380 plugins / 1773 implementations on the 808 in 0.3 s, no parse errors; `registry.py ingest` turns them
 into `ecom-plugin` edges. Tests: `tests/ecom_index_test.py`.
 
+## Named IPC servers, whole firmware: `tools/ipc_index.py`
+
+```
+tools/ipc_index.py build [--device ID]     # -> <build dir>/ipc.json (needs imports.json)
+tools/ipc_index.py server '!Windowserver'  # who starts it (EwSrv.exe) and who connects (Ws32.dll); a part of a name works
+tools/ipc_index.py module hwrmserver.exe   # what one module serves / connects to
+tools/ipc_index.py stats                   # counts, and the servers nobody was seen starting
+```
+
+Scans every module (XIP code, decompressed ROFS images) for `!Name` wide literals (protected server names;
+TLitC16 or bare) and sorts the holders by their euser imports: `CServer2::StartL` = the provider, `CreateSession`
+= a client (a server EXE that names another server is that one's client; a shadowed ROM copy never provides).
+808: 153 servers, 143 with a provider, in 18 s. `registry.py ingest` turns them into `ipc-client-server` edges
+(`registry.py context KEY` shows "serves" / "client of"; MCP tools `ipc_server`, `ipc_module`). Limits: names
+built at run time or handed over by RootServer (ESock, C32) are not seen. Tests: `tests/ipc_index_test.py`.
+
 ## ROM blobs: `tools/blob_glue.py`
 
 Glue for code placed at a fixed ROM address (src/gcebe; sygl has its own generator):
@@ -308,7 +324,8 @@ panic on the chosen GL backend, Switch off ends the session. Run it after every 
 ## Older helpers still useful
 
 - `tools/qmp.py SOCK screendump|type|key|hmp ...` (QMP client), `scripts/run-modern.sh` (plain run).
-- `tools/ghidra/decompile.sh NAME` (headless Ghidra, output `<build dir>/ghidra/NAME.c`).
+- `tools/ghidra/decompile.sh NAME` (headless Ghidra, output `<build dir>/ghidra/NAME.c`); `VTABLES="0x... 0x..."` walks
+  those vtables first (`VtableFuncs.java`), for the virtual methods nothing calls directly (the haptics packetizer: 38 -> 78 functions).
 - `tools/xipdis.py` (objdump with import names), `tools/research/xip_importers.py`.
 - `tools/personality/kabi.py` (our kernel's driver-facing vtables vs the N95's 9.2 ekern, slot by slot;
   `--func NAME` disassembles an export from both).
@@ -330,6 +347,25 @@ trap level with `User::MarkCleanupStack()` so cleanup-stack pushes work, but a l
 Approach for app development and debugging in general: [app-dev-debugging.md](app-dev-debugging.md).
 Planned LLM-driven debug bridge (MCP server, guest agent, kernel debug LDD): [devtools-bridge.md](devtools-bridge.md).
 
+### `tools/cmt/isirecord.py`: the real modem's answers vs the fake modem's
+
+`python3 tools/cmt/isirecord.py LOG... [--md OUT] [--emit]` reads the access logs of `--modem real` sessions
+(`<session>/modem/access.log`), pairs each phone request with the real modem firmware's answers, replays every
+distinct request through the fake modem core in table mode (the device's table and board config) and reports
+same / differs / missing; `--emit` proposes `reply` lines for constant answers. Serial-number answers are never
+written. Findings and decisions: docs/research/n95-cmt-recorded-isi.md; tests: tests/isirecord_test.py.
+
+### `src/n95apps/isiprobe`: ISI messages to the modem, from the phone
+
+`src/n95apps/isiprobe/build.sh` builds `build/n95apps/isiprobe.exe` (All-TCB; on a real phone it needs a
+self-signing patch such as OnePatch4All). It opens ISC channel 60 through IscApi.dll (imported by ordinal
+from `iscapi.def`, checked by tests/isiprobe_test.py), sends the hex ISI messages in `E:\isiprobe\in.txt`
+(else `C:\isiprobe\in.txt`; lines `ch N`, `wait MS`, `# ...`, length bytes 0000 = filled in) and writes
+`S`/`R`/`T` lines to `out.txt` next to it. For reading a real modem's answers (per-phone data blocks:
+docs/research/n95-cmt-memory-read.md); on an emulated phone:
+`sydb push in.txt 'C:\isiprobe\in.txt'; sydb push build/n95apps/isiprobe.exe 'C:\sys\bin\isiprobe.exe';
+sydb run 'C:\sys\bin\isiprobe.exe' --wait 15; sydb pull 'C:\isiprobe\out.txt' out.txt`.
+
 ### `src/n95apps/wgprobe`: window-group probe
 
 `src/n95apps/wgprobe/build.sh` builds `build/n95apps/wgprobe.exe` (no window group of its own).
@@ -337,6 +373,10 @@ Its `wgprobe_reg.rsc` is dsbtest's with UID3 and name patched (UID checksum reco
 needed). Install like dsbtest, launch from Menu → Applications; it prints `WGPROBE: focus <id>
 <name>` and the full window-group order (front first, ordinal priority, name = status|UID|caption)
 every time focus or order changes, polled every 0.5 s for 10 minutes.
+
+UI as data: `sydb ui` / `tools/sydb/uidump.py` (the focused app's control tree, list/menu items and
+selection, softkeys, editor text, drawn text, icons; `ui select`/`ui wait` for scripted UI flows; MCP
+`ui_tree`): [ui-automation.md](ui-automation.md).
 
 See also [sydb.md](sydb.md): the dev/debug bridge (session daemon + phone agent + CLI + MCP).
 

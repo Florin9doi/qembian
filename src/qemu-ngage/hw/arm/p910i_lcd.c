@@ -55,6 +55,8 @@ typedef struct {
     uint32_t tc_raw, err_raw, dma_cfg;
     qemu_irq dma_irq;
     unsigned dma_logged;
+    QEMUTimer *dma_timer;           /* P800: channels finish later (H-p800-dma) */
+    uint32_t dma_pending;
     /* DispSync */
     QEMUTimer *sync;
     qemu_irq sync_irq;
@@ -173,8 +175,17 @@ static bool lcd_gfx_update(void *opaque)
         uint32_t *row = (uint32_t *)(dst + y * stride);
         for (int x = 0; x < LCD_W; x++) {
             uint16_t p = le16_to_cpu(l->shown[y][x]);
-            uint32_t r = p >> 11, g = (p >> 5) & 0x3f, b = p & 0x1f;
-            row[x] = (r << 3 | r >> 2) << 16 | (g << 2 | g >> 4) << 8 | (b << 3 | b >> 2);
+
+            if (!p910_phone->doc) {
+                /* P800: 12-bit RGB444 in 16 (EColor4K): white 0x0FFF read as RGB565 was cyan [V by eye] */
+                uint32_t r = (p >> 8) & 15, g = (p >> 4) & 15, b = p & 15;
+
+                row[x] = (r * 17) << 16 | (g * 17) << 8 | (b * 17);
+            } else {
+                uint32_t r = p >> 11, g = (p >> 5) & 0x3f, b = p & 0x1f;
+
+                row[x] = (r << 3 | r >> 2) << 16 | (g << 2 | g >> 4) << 8 | (b << 3 | b >> 2);
+            }
         }
     }
     qemu_console_update_full(l->con);
@@ -255,8 +266,34 @@ static void dma_run(P910Lcd *l, int n)
         c[3] = le32_to_cpu(lli[3]);
     }
     c[3] &= ~0xfffu;                 /* transfer size counts down to 0 */
+    if (!p910_phone->doc) {
+        /*
+         * P800: the panel driver starts its full-frame transfer in power-up state 3 and takes the
+         * completion only in state 4 (0x500AE980); a transfer finished inside the Config write came
+         * before the state change and was dropped (stall 2, docs/research/p800-display.md) [V code].
+         * Finish 2 ms later, as a 133 KB transfer would on the phone.
+         */
+        l->dma_pending |= 1u << n;
+        timer_mod(l->dma_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + 2 * SCALE_MS);
+        return;
+    }
     c[4] &= ~1u;                     /* channel disabled when done */
     l->tc_raw |= 1u << n;
+    dma_update(l);
+}
+
+static void dma_finish(void *opaque)
+{
+    P910Lcd *l = opaque;
+
+    for (int n = 0; n < 8; n++) {
+        if (l->dma_pending & (1u << n)) {
+            l->ch[n][4] &= ~1u;
+            l->tc_raw |= 1u << n;
+        }
+    }
+    l->dma_pending = 0;
+    l->fifo[0x10 >> 2] &= ~1u;      /* the LCD FIFO's start bit [I] */
     dma_update(l);
 }
 
@@ -294,7 +331,7 @@ static void dma_write(void *opaque, hwaddr a, uint64_t val, unsigned size)
 
         l->ch[n][r] = val;
         if (r == 4) {
-            if ((val & 1) && !(val & (1 << 18))) {
+            if ((val & 1) && !(val & (1 << 18)) && !(l->dma_pending & (1u << n))) {
                 dma_run(l, n);
             }
             dma_update(l);
@@ -337,6 +374,8 @@ static void lcd_reset(void *opaque)
     memset(l->reg, 0, sizeof(l->reg));
     memset(l->ch, 0, sizeof(l->ch));
     l->tc_raw = l->err_raw = l->dma_cfg = 0;
+    l->dma_pending = 0;
+    timer_del(l->dma_timer);
     l->dirty = true;
     l->sync_level = false;
     qemu_set_irq(l->sync_irq, 0);
@@ -351,6 +390,7 @@ void p910_lcd_init(MemoryRegion *sys)
     l->dma_irq = p910_irq(IRQ_DMA);
     l->sync_irq = p910_irq(IRQ_DISPSYNC);
     l->sync = timer_new_ns(QEMU_CLOCK_VIRTUAL, sync_tick, l);
+    l->dma_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, dma_finish, l);
     memory_region_init_io(&l->fifo_mr, NULL, &fifo_ops, l, "p910i.lcd-fifo", 0x100);
     memory_region_add_subregion_overlap(sys, FIFO_BASE, &l->fifo_mr, 10);
     memory_region_init_io(&l->idx_mr, NULL, &chip_idx_ops, l, "p910i.lcd-index", 0x1000);

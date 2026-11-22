@@ -31,7 +31,14 @@ src/standins/_shared/isireplies.h
 # Nokia 9500 Communicator (RA-2)
 /eka1/ra2_rom/
 /eka1/ra2/
+/eka1/rm12_rom/
+/eka1/rm12/
 /eka1/p910i/
+/eka1/p800/
+/eka1/rm51_rom/
+/eka1/rm51/
+/eka1/rm1_rom/
+/eka1/rm1/
 tools/probes/*/libs/
 # Android native build outputs (android/native/build.sh)
 build/android/
@@ -40,3 +47,7 @@ downloads/android/
 # firmware binaries never go into models/ (proprietary; build/evidence is the place)
 models/**/*.dll
 models/**/*.exe
+/eka1/rm84_rom/
+/eka1/rm84/
+/eka1/rae3_rom/
+/eka1/rae3/

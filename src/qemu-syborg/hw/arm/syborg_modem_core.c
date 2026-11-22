@@ -1497,6 +1497,147 @@ static void ccpu_log(void *ctx, uint32_t unit, const char *text)
 
 static const SybCcpuOut ccpu_out_ops = { ccpu_send, ccpu_log, NULL };
 
+/* ---- link mode: the phone's own modem firmware answers (n95-cmt), this core only routes */
+
+/* a guest ISI message to the modem: the header completed as the phone's ISC driver does (receiver = the
+   modem, sender = the APE, sender object = the ISC channel number, which replies come back to) */
+static void modem_link_send(SyborgModemState *s, uint32_t chn, const uint8_t *m, uint32_t len)
+{
+    uint8_t out[MODEM_MAX_MSG];
+    if (!s->host->link_send || len > sizeof(out)) {
+        return;
+    }
+    memcpy(out, m, len);
+    out[1] = 0x00;                  /* receiver device: the modem (PN_DEV_HOST) */
+    out[2] = DEV_APE;               /* sender device */
+    out[4] = (len - 6) & 0xff;      /* length: the bytes after it */
+    out[5] = (len - 6) >> 8;
+    out[7] = CH_NUM(chn);           /* sender object */
+    /* remember that this object asked this resource (replace its oldest entry) */
+    ModemChannel *c = modem_chan(s, chn);
+    unsigned slot = 0;
+    for (unsigned i = 0; i < MODEM_LINK_RES; i++) {
+        if (c->link_res[i] == m[3] && c->link_seq[i]) {
+            slot = i;
+            break;
+        }
+        if (c->link_seq[i] < c->link_seq[slot]) {
+            slot = i;
+        }
+    }
+    c->link_res[slot] = m[3];
+    c->link_seq[slot] = ++s->link_seq;
+    s->link_sent++;
+    s->host->link_send(s->host_ctx, out, len);
+}
+
+/* link mode: the open channel object a modem message for channel number obj on resource res goes to: of the
+   objects open on that number, the one that sent a request to res last (several clients share a number: the
+   N95's audio server and Aamm's resource-0x77 client both on 36; bug 2026-11-22: the 77/09 "route done" went to
+   the other object, the key tone never finished, the key sound server and then Idle blocked: ViewSrv 11). None
+   asked: the object opened last on that number (chan_key), as before. 0 = no object open on it */
+uint32_t sybmodem_link_route(SyborgModemState *s, uint8_t obj, uint8_t res)
+{
+    uint32_t best = 0, best_seq = 0;
+    for (unsigned i = 0; i < MODEM_PORTS * MODEM_HANDLES; i++) {
+        ModemChannel *c = &s->ch[i];
+        if (!c->link_key || CH_NUM(c->link_key) != obj) {
+            continue;
+        }
+        for (unsigned k = 0; k < MODEM_LINK_RES; k++) {
+            if (c->link_seq[k] > best_seq && c->link_res[k] == res) {
+                best = c->link_key;
+                best_seq = c->link_seq[k];
+            }
+        }
+    }
+    for (unsigned port = 0; !best && port < MODEM_PORTS; port++) {
+        if (obj < MODEM_CHANNELS) {
+            best = s->chan_key[port][obj];
+        }
+    }
+    return best;
+}
+
+/* the indication subscription at the modem, as the phone's ISC driver keeps it: the union of the resources every
+   open channel subscribed to (its (resource, message id) pairs), sent when it changes as PN_COMMGR subscribe
+   (resource 0x10, message 0x10, {count, resource...}; parser FUN_f011ea64 in the N95 modem firmware, which
+   replaces the sender's earlier list) from object 0, so the modem's indications come back to object 0 and
+   sybmodem_link_receive hands them to the subscribed channels. Bug (2026-11-21): nothing subscribed, and the
+   modem's MTC_STATE_INFO_IND after a state change (sent only to subscribers, FUN_f011ec7c) was dropped, so the
+   phone waited for NORMAL forever (docs/research/n95-cmt-normal-state.md) */
+static void modem_link_subscribe(SyborgModemState *s)
+{
+    uint8_t res[sizeof(s->link_subs)];
+    uint32_t n = 0;
+    for (unsigned h = 0; h < MODEM_PORTS * MODEM_HANDLES; h++) {   /* every open object, not one per number */
+        ModemChannel *c = s->ch[h].link_key ? &s->ch[h] : NULL;
+        for (uint32_t i = 0; c && i + 1 < c->subs_len; i += 2) {
+            uint32_t k = 0;
+            while (k < n && res[k] < c->subs[i]) {
+                k++;
+            }
+            if ((k < n && res[k] == c->subs[i]) || n == sizeof(res)) {
+                continue;
+            }
+            memmove(res + k + 1, res + k, n - k);
+            res[k] = c->subs[i];
+            n++;
+        }
+    }
+    if (n == s->link_subs_n && !memcmp(res, s->link_subs, n)) {
+        return;
+    }
+    memcpy(s->link_subs, res, n);
+    s->link_subs_n = n;
+    uint8_t m[12 + sizeof(res)] = { 0x00, 0x00, DEV_APE, 0x10, 0, 0, 0x00, 0x00, 0x00, 0x10, (uint8_t)n };
+    memcpy(m + 11, res, n);
+    uint32_t len = (11 + n + 1) & ~1u;          /* padded to an even length */
+    m[4] = (len - 6) & 0xff;
+    m[5] = (len - 6) >> 8;
+    if (s->host->link_send) {
+        s->link_sent++;
+        s->host->link_send(s->host_ctx, m, len);
+    }
+}
+
+void sybmodem_link_enable(SyborgModemState *s)
+{
+    s->link = true;
+}
+
+/* a message from the modem: to the channel its receiver object names, else (object 0: an indication) to
+   every open channel subscribed to (resource, message id) */
+void sybmodem_link_receive(SyborgModemState *s, const uint8_t *m, size_t len)
+{
+    if (len < 10 || len > MODEM_MAX_MSG) {
+        s->link_dropped++;
+        return;
+    }
+    s->link_received++;
+    uint8_t obj = m[6];
+    bool sent = false;
+    if (obj) {
+        uint32_t key = sybmodem_link_route(s, obj, m[3]);
+        if (key) {
+            modem_push(s, RX_DELIVER, key, m, len);
+            sent = true;
+        }
+    } else {
+        for (unsigned h = 0; h < MODEM_PORTS * MODEM_HANDLES; h++) {
+            ModemChannel *c = &s->ch[h];
+            if (c->link_key && modem_subscribed(c, m[3], m[9])) {
+                modem_push(s, RX_DELIVER, c->link_key, m, len);
+                sent = true;
+            }
+        }
+    }
+    if (!sent) {
+        s->link_dropped++;
+        modem_guest_error(s, "syborg-modem: link: no channel for res %02x id %02x obj %02x\n", m[3], m[9], obj);
+    }
+}
+
 static void modem_tx(SyborgModemState *s, unsigned port, uint32_t kind)
 {
     ModemPort *p = &s->port[port];
@@ -1510,7 +1651,9 @@ static void modem_tx(SyborgModemState *s, unsigned port, uint32_t kind)
     p->in_tx = 1;                   /* what this send produces is read back by the guest in the same call */
     switch (kind) {
     case TX_SEND:
-        if (len >= 10) {
+        if (len >= 10 && s->link) {
+            modem_link_send(s, chn, p->tx, len);
+        } else if (len >= 10) {
             modem_request(s, chn, p->tx, len);
             modem_profile_inds(s, chn, p->tx[3] << 8 | p->tx[9]);  /* indications that follow this reply */
             sim_inds(s, chn, p->tx[3] << 8 | p->tx[9]);
@@ -1528,11 +1671,15 @@ static void modem_tx(SyborgModemState *s, unsigned port, uint32_t kind)
     case TX_SUBSCRIBE:
         c->subs_len = MIN(len, MODEM_SUBS);
         memcpy(c->subs, p->tx, c->subs_len);
-        if (modem_subscribed(c, RES_MTC, 0xc0) && !c->mtc_ind_sent) {
+        if (!s->link && modem_subscribed(c, RES_MTC, 0xc0) && !c->mtc_ind_sent) {
             modem_mtc_state_ind(s, chn);
             c->mtc_ind_sent = 1;
         }
-        modem_profile_inds(s, chn, -1);
+        if (!s->link) {
+            modem_profile_inds(s, chn, -1);
+        } else {
+            modem_link_subscribe(s);
+        }
         break;
     case TX_OPEN:
     case TX_CLOSE:
@@ -1542,8 +1689,12 @@ static void modem_tx(SyborgModemState *s, unsigned port, uint32_t kind)
         modem_forget_channel(s, chn);
         if (kind == TX_OPEN) {
             s->chan_key[port][CH_NUM(v)] = chn;
+            c->link_key = chn;
         } else if (s->chan_key[port][CH_NUM(v)] == chn) {
             s->chan_key[port][CH_NUM(v)] = 0;
+        }
+        if (s->link && kind == TX_CLOSE) {
+            modem_link_subscribe(s);        /* its resources may no longer be wanted */
         }
         break;
     default:

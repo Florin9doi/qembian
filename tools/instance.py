@@ -17,7 +17,7 @@ firmware share one composed ROM (build/roms/<id>/<firmware key>/).
   tools/instance.py clone SRC NEW                   config + drives (sparse copies); snapshots, logs not copied
   tools/instance.py rename OLD NEW
   tools/instance.py delete NAME --yes               the directory with its drives and snapshots
-  tools/instance.py set NAME KEY VALUE              settings.gl|audio|scale, rom_variant, primary;
+  tools/instance.py set NAME KEY VALUE              settings.gl|audio|scale|modem, rom_variant, primary;
                                                     firmware FW --keep-drives|--wipe-drives
   tools/instance.py adopt DIR NAME [--primary]      make an existing sydb session directory an instance
                                                     (moved to the instances directory; its device mark says
@@ -37,8 +37,8 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import device as devmodel   # tools/device.py
 
-SETTINGS = {'gl': ('host', 'soft'), 'audio': ('host', 'wav'), 'scale': float}
-DEFAULT_SETTINGS = {'gl': 'host', 'audio': 'host', 'scale': 1.0}
+SETTINGS = {'gl': ('host', 'soft'), 'audio': ('host', 'wav'), 'scale': float, 'modem': ('table', 'real')}
+DEFAULT_SETTINGS = {'gl': 'host', 'audio': 'host', 'scale': 1.0, 'modem': 'table'}
 
 
 class InstanceError(Exception):
@@ -405,7 +405,7 @@ def run(a):
             print('instance %s: firmware %s (%s)' % (a.name, a.value, device_id(inst)))
             return 0
         else:
-            raise InstanceError('settable: settings.gl|audio|scale, rom_variant, primary, firmware')
+            raise InstanceError('settable: settings.gl|audio|scale|modem, rom_variant, primary, firmware')
         write(inst)
         print('instance %s: %s = %s' % (a.name, a.key, a.value))
         return 0

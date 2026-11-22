@@ -24,7 +24,14 @@
 @ A NULL owner drops the notification.
 @ Build: src/qemu-ngage/nos-standin/build.sh -> ../hw/arm/ngage_ra2_bal_stub.h
 
+@ The 7710 (-M nokia7710) has the same Bal / DeviceManagementServer binaries relocated: build.sh assembles a
+@ second copy with --defsym RQCOMPLETE_SLOT=... --defsym DMS_READY=... (its EUser slot and DMS handler).
+        .ifndef RQCOMPLETE_SLOT
         .equ    RQCOMPLETE_SLOT, 0x500effac     @ EUser ord 926 User::RequestComplete(TRequestStatus*&, TInt)
+        .endif
+        .ifndef DMS_READY
+        .equ    DMS_READY, 0x5093731c           @ DeviceManagementServer's real "ready" handler
+        .endif
 
         .text
         .arm
@@ -92,6 +99,6 @@ bal_msg_cancel:
 dms_ready:
         cmp     r0, #0
         bxeq    lr                              @ the server object is not built yet: drop it
-        ldr     ip, =0x5093731c                 @ the real "ready" handler
+        ldr     ip, =DMS_READY                  @ the real "ready" handler
         bx      ip
         .ltorg

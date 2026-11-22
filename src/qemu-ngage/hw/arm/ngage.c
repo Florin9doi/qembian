@@ -97,6 +97,8 @@ typedef struct {
     uint32_t trace_mask_or;         /* bits set in the ROM header's trace mask (+0xD8) */
     uint16_t flash_manuf, flash_device;     /* the ID every chip answers (CFI01: Intel commands) */
     uint16_t flash_device1;                 /* chips 1.. if they differ (0 = flash_device) */
+    bool flash_amd;                 /* AMD command set (QEMU's CFI02, unlock 0x555/0x2AA x16): the 3230's
+                                       bootstrap and medint.pdd accept only AMD/Samsung parts [V] */
     bool uem_rtc;                   /* the UEM's RTC kept like a phone's: calibration set, so rtc.dll
                                        finds a valid clock (H-nhl10-rtc) */
     uint32_t md5_entries[2];        /* ROM offsets of the bootstrap's digest entries (H-ngage-md5);
@@ -189,6 +191,12 @@ static const struct {
 } ngage_known[] = {
     { 0x0c120020, 0x0c000000, "Q9: clock status; bit 26 after 0xC, bit 27 after 3 to +4: PLL locked [I]" },
     { 0x0c149000, 0x00000001, "Q10: written 0x2210, bootstrap 0x37fc waits for bit 0: ready/ack [I]" },
+    /*
+     * Nokia 3230: BC02_UART1.pdd (the CSR BlueCore on a UPP UART) polls the 16-bit register at 0x0C150572
+     * for bit 7 before each byte (0x5041385C, no timeout): BTTestServer spun there for ever and starved
+     * the start-up (H-rm51-bt-uart; transmitter ready [I]; no BlueCore behind it)
+     */
+    { 0x0c150570, 0x00800000, "H-rm51-bt-uart: 0x0C150572 bit 7, BlueCore UART transmitter ready [I]" },
 };
 
 /*
@@ -1013,6 +1021,7 @@ static const MemoryRegionOps ngage_dbg_ops = {
 
 #include "ngage_nos_stub.h"
 #include "ngage_nhl10_nos_stub.h"
+#include "ngage_rm51_nos_stub.h"
 #include "ngage_nhl2_nos_stub.h"
 static bool ngage_flash_restored;    /* Q55: saved flash applied, not a factory-fresh phone */
 #include "ngage_isi.h"
@@ -1303,8 +1312,32 @@ static struct arm_boot_info ngage_binfo;
 static DeviceState *ngage_flash(hwaddr base, const char *name, const void *image, size_t len,
                                 unsigned chip)
 {
-    DeviceState *fl = qdev_new(TYPE_PFLASH_CFI01);
+    DeviceState *fl;
     uint8_t *p;
+
+    if (ngm->flash_amd) {
+        fl = qdev_new(TYPE_PFLASH_CFI02);
+        qdev_prop_set_uint32(fl, "num-blocks", NGAGE_FLASH_SIZE / NGAGE_FLASH_SECTOR);
+        qdev_prop_set_uint32(fl, "sector-length", NGAGE_FLASH_SECTOR);
+        qdev_prop_set_uint8(fl, "width", 2);
+        qdev_prop_set_uint8(fl, "mappings", 1);
+        qdev_prop_set_uint16(fl, "id0", ngm->flash_manuf);
+        qdev_prop_set_uint16(fl, "id1", chip && ngm->flash_device1 ? ngm->flash_device1 : ngm->flash_device);
+        qdev_prop_set_uint16(fl, "id2", 0);      /* extended IDs (+0x1C/+0x1E) read as 0 [V: Samsung rows] */
+        qdev_prop_set_uint16(fl, "id3", 0);
+        qdev_prop_set_uint16(fl, "unlock-addr0", 0x555);
+        qdev_prop_set_uint16(fl, "unlock-addr1", 0x2aa);
+        qdev_prop_set_string(fl, "name", name);
+        sysbus_realize_and_unref(SYS_BUS_DEVICE(fl), &error_fatal);
+        sysbus_mmio_map(SYS_BUS_DEVICE(fl), 0, base);
+        p = memory_region_get_ram_ptr(pflash_cfi02_get_memory(PFLASH_CFI02(fl)));
+        memset(p, 0xff, NGAGE_FLASH_SIZE);
+        if (image) {
+            memcpy(p, image, len);
+        }
+        return fl;
+    }
+    fl = qdev_new(TYPE_PFLASH_CFI01);
 
     qdev_prop_set_uint32(fl, "num-blocks", NGAGE_FLASH_SIZE / NGAGE_FLASH_SECTOR);
     qdev_prop_set_uint64(fl, "sector-length", NGAGE_FLASH_SECTOR);
@@ -1535,6 +1568,9 @@ static void ngage_load_segments(uint8_t *img, size_t len)
 
 static uint8_t *ngage_flash_ptr(DeviceState *fl)
 {
+    if (ngm->flash_amd) {
+        return memory_region_get_ram_ptr(pflash_cfi02_get_memory(PFLASH_CFI02(fl)));
+    }
     return memory_region_get_ram_ptr(pflash_cfi01_get_memory(PFLASH_CFI01(fl)));
 }
 
@@ -1640,6 +1676,42 @@ static const NgageModel ngage_nhl10 = {
     .flash_manuf = 0x20, .flash_device = 0x88c0,
 };
 
+/*
+ * Nokia 3230 (RM-51 V 05.07, S60 2nd Edition FP1, Symbian 7.0s), docs/devices/nokia-3230-rm51/bring-up.md:
+ * the 6600's generation (same primary modules, 478 ekern exports in the same order). Three chips at
+ * n << 25 (the bootstrap's loop checks 0..2) [V]: ROM 0..16 MB in chip 0, the rest in chip 1 (PPM at
+ * flash 0x02B00000) [V: bank table ROM 0x64C]. The NOS stand-in is the 6600's with this phone's
+ * addresses (build.sh); the hidden NOS module (header 0x50455BF0) exports 1, 2, 4 [V].
+ */
+static const uint32_t ngage_rm51_nos_exports[][2] = {
+    { 0x5289aa88, NGAGE_RM51_NOS_SYM_nos_export1 },
+    { 0x5289aa58, NGAGE_RM51_NOS_SYM_nos_export2 },
+    { 0x5289aa1c, NGAGE_RM51_NOS_SYM_nos_export4 },
+};
+
+static const NgageModel ngage_rm51 = {
+    .name = "nokia3230",
+    .uem_rtc = true,
+    .nchips = 3,
+    .rom_map = { { 0, 0x01000000, 0 }, { 0x01000000, 0x00b00000, 1 } },
+    .nrom_map = 2,
+    .nos_alias = 0x52800000,            /* nosstarter: entry 0x528943A4, data 0x80002230 [V] */
+    .stub = ngage_rm51_nos_stub, .stub_len = sizeof(ngage_rm51_nos_stub),
+    .stub_va = NGAGE_RM51_NOS_STUB_VA,
+    .screen_chunk_ptr = 0x80001780,     /* as the 6600 (4 users agree) */
+    .screen_rgb565 = true,
+    .nos_exports = ngage_rm51_nos_exports, .nnos_exports = ARRAY_SIZE(ngage_rm51_nos_exports),
+    .trace_mask_or = 0x40000000,
+    .nos_rx_dfc = 0x8000755c + 0x200,   /* the stub's RX_DFC / RX_FLAG (RAM = the NOS bss) */
+    .nos_rx_flag = 0x8000755c + 0x1f8,
+    /*
+     * The bootstrap accepts chip types 2, 8, 10, 13-17 only (table ROM 0x7A60; ID table 0x7910) and medint's
+     * type switch (0x503959BC) has no ST/Intel types: Samsung 0xEC/0x22FA = type 14 [V tables; I which
+     * part the phone has], AMD command set (the bootstrap's fallback ID read 0x5FC0 unlocks at 0x555/0x2AA)
+     */
+    .flash_manuf = 0xec, .flash_device = 0x22fa, .flash_amd = true,
+};
+
 static void ngage_init(MachineState *machine)
 {
     MemoryRegion *sys = get_system_memory();
@@ -1743,7 +1815,7 @@ static void ngage_init(MachineState *machine)
             t->t[i].t = timer_new_ns(QEMU_CLOCK_VIRTUAL, ngage_timer_expire, &t->t[i]);
             t->t[i].irq = in[i];                                         /* IrqTimer<i> */
         }
-        ngage_keys_init(sys, in[25], ngm == &ngage_nhl10 || ngm == &ngage_nhl2);  /* 7650: the 6600's ekeyb (94% same code, same key lists) [V] */                       /* keypad, IrqCTSI_IRQ (Q53) */
+        ngage_keys_init(sys, in[25], ngm == &ngage_rm51 ? NGAGE_KPD_RM51 : (ngm == &ngage_nhl10 || ngm == &ngage_nhl2) ? NGAGE_KPD_NHL10 : NGAGE_KPD_NGAGE);  /* 7650: the 6600's ekeyb (94% same code, same key lists) [V] */                       /* keypad, IrqCTSI_IRQ (Q53) */
         ngage_lprf_setup();                                 /* Bluetooth, CBus dev 5, CTSI 2 */
         ngage_mmc_init(sys, in, ngage_mmc_file);            /* MMC 21-24, DMA channels 6.. [I] */
         memory_region_init_io(&t->mr, NULL, &ngage_timer_ops, t, "ngage.timers",
@@ -1846,6 +1918,12 @@ static void ngage_init_nhl10(MachineState *machine)
     ngage_init(machine);
 }
 
+static void ngage_init_rm51(MachineState *machine)
+{
+    ngm = &ngage_rm51;
+    ngage_init(machine);
+}
+
 static void ngage_machine_class_init(ObjectClass *oc, const void *data)
 {
     MachineClass *mc = MACHINE_CLASS(oc);
@@ -1915,11 +1993,29 @@ static const TypeInfo ngage_nhl2_machine_type = {
     .interfaces = arm_machine_interfaces,
 };
 
+/* Nokia 3230 */
+static void ngage_rm51_class_init(ObjectClass *oc, const void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+
+    ngage_machine_class_init(oc, data);
+    mc->desc = "Nokia 3230 (RM-51, DCT4 UPP, S60 2nd FP1, Symbian 7.0s EKA1) bring-up board";
+    mc->init = ngage_init_rm51;
+}
+
+static const TypeInfo ngage_rm51_machine_type = {
+    .name = MACHINE_TYPE_NAME("nokia3230"),
+    .parent = TYPE_MACHINE,
+    .class_init = ngage_rm51_class_init,
+    .interfaces = arm_machine_interfaces,
+};
+
 static void ngage_machine_init(void)
 {
     type_register_static(&ngage_machine_type);
     type_register_static(&ngage_nhl2_machine_type);
     type_register_static(&ngage_nhl10_machine_type);
+    type_register_static(&ngage_rm51_machine_type);
 }
 
 type_init(ngage_machine_init)

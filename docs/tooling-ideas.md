@@ -174,6 +174,15 @@ no kernel change. Record/replay (3) is still open.
   Also: the kernel's `KSEMAPHORE` trace bit (`--trace 0x80000010`) logs every semaphore Wait/Signal
   with its count and is the fastest way to see a lost signal — worth a line in docs/tools.md.
 
+- **`kwalk.py --user N` (done 2026-11-22, N95 linked to its modem firmware).** Closes the first gap above: per
+  thread it prints the registers saved on top of the supervisor stack (user r13, the exec call's return address)
+  and the first N code addresses on the user stack, read through the owning process's page directory (physical
+  reads via `Qqemu.PhyMemMode`, as uidump.py), so `tools/syb_sym.py addr` names where a blocked thread of *any*
+  process waits. Names are now "Process::Thread" (unnamed DevSound server threads show up as
+  `MmfAudioServer.exe::?`). It found Idle inside `CAknKeySoundSystem::BringToForeground` -> a synchronous key
+  sound server call -> DevSound, in minutes. Still wanted: the output gets cut when gdb's reply is long (run it
+  with `--name`), and a `--frames` mode that keeps only addresses whose preceding instruction is a call (as the
+  catcher's call-stack scan does).
 - **An ABI checker that counted stubs as implementations.** (2026-11-13, N81 splash stall)
   `tools/personality/check.py` compared the firmware EUSER's used SWIs against `personalities/*/exec.map`
   and treated an `!invalid` slot as present, so `F0a`/`F0b` (the N81 calls them for

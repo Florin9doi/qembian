@@ -1,0 +1,55 @@
+--- a/target/arm/tcg/translate.c
++++ b/target/arm/tcg/translate.c
+@@ -1971,6 +1971,18 @@
+          * (usually only necessary to work around guest bugs).
+          */
+         need_exit_tb = true;
++        /*
++         * qembian: on a pre-v6 core the two instructions after an SCTLR write were already fetched
++         * through the old translation and execute before the change shows: code that switches the
++         * MMU off or on relies on it ("mcr p15, 0, rX, c1, c0, 0; nop; mov pc, rY": the Nokia 6630's
++         * SecPdd.pdd entering and leaving its physically addressed monitor). Translate them in this TB,
++         * which ends after them (arm_tr_translate_insn) unless one of them branches.
++         */
++        if (cpnum == 15 && !is64 && crn == 1 && crm == 0 && opc1 == 0 && opc2 == 0 &&
++            !s->thumb && !arm_dc_feature(s, ARM_FEATURE_V6)) {
++            need_exit_tb = false;
++            s->prefetch_left = 2;
++        }
+     }
+     if (need_exit_tb) {
+         gen_lookup_tb(s);
+@@ -6634,7 +6646,18 @@
+     insn = arm_ldl_code(env, &dc->base, pc, dc->sctlr_b);
+     dc->insn = insn;
+     dc->base.pc_next = pc + 4;
+-    disas_arm_insn(dc, insn);
++    {
++        bool prefetched = dc->prefetch_left > 0;     /* qembian: see do_coproc_insn */
++
++        disas_arm_insn(dc, insn);
++        if (prefetched && dc->prefetch_left > 0) {
++            if (dc->base.is_jmp != DISAS_NEXT) {
++                dc->prefetch_left = 0;              /* it branched: the TB ends there */
++            } else if (--dc->prefetch_left == 0) {
++                gen_lookup_tb(dc);
++            }
++        }
++    }
+ 
+     arm_post_translate_insn(dc);
+ 
+--- a/target/arm/tcg/translate.h
++++ b/target/arm/tcg/translate.h
+@@ -44,6 +44,11 @@
+     /* The address of the current instruction being translated. */
+     vaddr pc_curr;
+     /*
++     * qembian: instructions still to translate in this TB after an SCTLR write on a pre-v6 core: they
++     * were prefetched through the old translation (ARM926/TI925 pipeline), see do_coproc_insn.
++     */
++    int prefetch_left;
++    /*
+      * For CF_PCREL, the full value of cpu_pc is not known
+      * (although the page offset is known).  For convenience, the
+      * translation loop uses the full virtual address that triggered

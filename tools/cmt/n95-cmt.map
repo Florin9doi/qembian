@@ -1,0 +1,195 @@
+# n95-cmt probe machine: what the N95 8GB modem (RAP3G) firmware has been found to need.
+# Format: src/qemu-syborg/hw/arm/syborg_cmtprobe.c. [V] = seen in the code, [I] = inferred.
+
+# ARM L2 cache controller (L210/L220 class) [V: 0x100 control bit 0, 0x730 sync, 0x7fc clean+invalidate
+# by way polled to 0, 0xf40 debug control; seen from MCUSW 0xf0100424, 0xf0107740]. Virtual 0xff600000 once
+# the MMU is on [V: literal 0xff600740 next to 0x50000740 at 0xf0107900].
+dev  l2x0 0x50000000
+
+# internal SRAM: the boot stack (sp 0x30003ff0) and early data (0x30002800) [V]; size unknown [I]
+quiet 0x30000000 0x00100000
+
+# PLLs 0..3 (NOLO FUN_080a11b8): config word (mult << 5 | div) at 0x20032d24/44/84/a4, control at +8,
+# written 0x9480/0xd480 sequences, then polled until bit 4 (locked) is set [V]
+orbits 0x20032d2c 0x10
+orbits 0x20032d4c 0x10
+# PLL 2 = ACCPLL: lock (bit 4) follows the request latch: 0x8000 to 0x20032c88 turns it on (MCUSW FUN_f010cb2a
+# then waits for the lock, "ACCPLL lock problem" otherwise), 0x8000 to 0x20032c84 off (FUN_f010caf8 waits for
+# the lock bit to clear) [V]
+latch 0x20032d8c 0x10 0x20032c88 0x20032c84 0x8000
+orbits 0x20032dac 0x10
+
+# SDRAM (DDR, 128 Mbit = 16 MB per the parts list [I]) at 0x08000000 [V: NOLO's size probe FUN_080a1104 /
+# FUN_080a0e48 writes 0x08000000 + cs * 1 MB + (1 << bit), bits 9..10 and 22..24]; controller at 0x18000000 [V].
+# Mirrored over 128 MB so the alias-based size probe sees 16 MB.
+ram    0x08000000 0x01000000 cmt.sdram
+mirror 0x08000000
+
+# On-chip boot ROM security service [V: NOLO 0x080a1d20 = 0xffff1209, called with a 16-byte service id
+# ab0fbd96af2ac271d26264af + u16 function (0x14 authenticate image, 0x18, 0x1d)]; high-level stand-in
+bootrom 0xffff1209 0xffff7c15
+# 0xffff7c15: the boot ROM routine MCUSW picks for ASIC version 0x1100 [V: FUN_f049c8c8 table]; others per
+# version: 0x31100 -> 0xffff8ad5, 0x21100 -> 0xffff8af5, 0x11100 -> 0xffff8b85, 0x2000 -> 0xffff88f1,
+# 0x1200 -> 0xffff88a1 (each with a second, even address: the secure-call gate's ARM entry)
+
+# the secure-call gate (MCUSW FUN_f049c540 jumps here with the MMU off; version 0x1100's entry) [V]: r4 = service
+# id (physical; the same 16-byte id + u16 function as NOLO's dispatcher), r5 = {a1, a2, a3} (physical); the
+# ROM returns to the popped resume address with r4 = 1, r0 = result
+bootrom-pa 0xffff7be4
+
+# ASIC id (write a selector, read: [3:0] type 0 = "3G", 1 GSM, 2 CDMA, 3 IDO, 4 U, 5 IDO2G, 6 TOR; [19:8]
+# version, NOLO prints "RAP%sv%d.%d%d %cA") [V: NOLO FUN_080a194c, MCUSW FUN_f049c8c8 (mask 0xfff00: 0x1000,
+# 0x1100, 0x1200, 0x2000, 0x11100, 0x21100, 0x31100)]. The N95's own version is not known [I]: 0x1100.
+val 0x20030300 0x00001100
+
+# trace port (XTI class [I]): byte 0xc7 at +0 opens a message, words at +8, +0x10, ... carry it, a byte at
+# +0 closes it [V]; recorded in order to access.log.stream, decoded by tools/cmt/xti.py
+stream 0x40100000 0x100000
+
+# free-running counter at 0x20040490 (base 0x20040480: +0x14 written 0 before each read) [V: MCUSW's delay-loop
+# calibration FUN_f010aeac waits for it to change, then counts 0x21 ticks; NOLO reads it too]. Rate [I]:
+# 32.768 kHz sleep clock assumed.
+counter 0x20040490 32768
+
+# hardware semaphores at 0x20040204 + 4 n (virtual 0xffd40204) [V: MCUSW 0xf010dd88 reads until 1 (take),
+# 0xf010dda2 writes 0xffffffff (release), 0xf010ddb0 writes 1 at start-up; semaphore 0 guards the CBUS
+# (hw_csm.c)]; read-to-take semantics [I: the only reading consistent with take/use/release]; count [I]
+hwsem 0x20040204 0x7c
+
+# CBUS controller [V: MCUSW hw_csm.c FUN_f010ce44 (read) / FUN_f010cdde (write), NOLO FUN_080a07ec], guarded by
+# hardware semaphore 0. Device 1 = Retu (hw_retu.c). Retu 0x16 (status) [V: NOLO FUN_080a15a6, MCUSW
+# FUN_f010c442]: 0x100 battery (BSI) in range ("BSI out of range" when clear), 0x400 start-up reason 0x400 = the
+# clean power-on (MCUSW's power task FUN_f01793ca keeps running on it alone) [I: the power key], 0x1000 halts
+# NOLO when the battery is out of range [I: charger], 0x200 -> reason 0x1000.
+cbus    0x20030700
+cbusreg 1 0x16 0x2520
+# bit 13 (0x2000): read by the SIM driver's card detect (FUN_f01be05c: set -> card 0x12, clear -> no card 0x11). With
+# it clear the driver only tells the APDU server "no card" and the SIM server (SIMSON, state 4) waits for card news
+# that never comes (09/C0 answers 4B forever, the phone's start-up waits for the SIM state:
+# docs/research/n95-cmt-sim-nocard.md). Set, the driver powers the card, arms the Retu SIM timer and, with no
+# answer-to-reset, takes its timeout path (Retu event 5, map "retuirq") [I: that a real empty N95 goes this way]
+# bit 5 (0x20) = power key line, 1 = released: hal_kbd FUN_f014c6cc reads Retu reg 0x16 field 0x0020; 0 made
+# ST_PWR_KEY_TEST (0x5a, FUN_f0164dec) report a stuck key [V]
+# ASIC ids (reg 0x00) of the CBUS chips [V: hw_version.c FUN_f0109b1a: type = table 0xf049f3a4[(id >> 8) & 0xf],
+# rev = id >> 4 & 0xf, id & 0xf; device 2 is read only when device 1's type is 0x0a; hal_light_phy.c FUN_f017a534
+# asserts unless device 2's type is 0x0b or 0x0d]. Device 1 (Retu) 0x0220 = type 0x0a rev 2, device 2 0x0350 =
+# type 0x0b rev 5 [I: values chosen from what the code accepts]
+cbusreg 1 0x00 0x0220
+cbusreg 2 0x00 0x0350
+# Retu ADC (reg 0x08: channel in [14:10], 10-bit result) [V: MCUSW hw_ad.c FUN_f010a3e4]. The battery voltage
+# MCUSW's power task checks (FUN_f01b29b4: power off below 3400 mV = 0xd48) depends on channels 1 and 8 (8 is
+# also the idle channel; which is the voltage and which the reference is open [I]): both at raw 0x200 ->
+# 3954 mV [V, measured with gdb; ch 1 alone -> 2508 mV]
+retuadc 1 0x200
+retuadc 8 0x200
+
+# I2C controllers, TI OMAP2 layout (hal_i2c_rap.c) [V: FUN_f01b9f28: SYSC +0x20 soft reset, CON +0x24 enable, SYSS +0x10
+# bit 0, REV +0x00 in {0x21,0x22,0x31,0x32,0x36,0x38}; handlers on intc 0x87 (bus 1) and 0x8a (bus 2) installed by
+# FUN_f01b9f28]. Transfer semantics: the OMAP2 I2C controller (STAT bits, XRDY/RRDY per byte, ARDY at the end) [I].
+i2c 0x20032200 0x87
+i2c 0x20032300 0x8a
+# bus 2 devices probed at start-up [V: NACKs logged]: 0x60 = TPA6130A2 headphone amplifier (hw_audio_tpa6130.c),
+# 0x48 = [I: unknown]; register files
+i2cdev 1 0x60
+i2cdev 1 0x48
+
+# SSI, the link to the APE (Symbian side) [V: ssi_hw.c strings "CMT_SSI: SST/SSR ...", ACWake/CAWake; SST (transmit)
+# at 0x20024700, SSR (receive) at 0x20024600 programmed by FUN_f012de7b]. 0x20024348 bit 1 request -> 0x2002434c
+# bit 0 ready (FUN_f012ed22), the same on 0x20024030 -> 0x20024034 (FUN_f012ee70) [V]: the OMAP pattern
+# SYSCONFIG bit 1 soft reset / SYSSTATUS bit 0 reset done [I]
+orbits 0x2002434c 0x1
+orbits 0x20024034 0x1
+
+# interrupt controller (hw_irq_1.c) at 0x20400000 (virtual 0xffc00000) [V: dispatcher FUN_f010dbbc reads +0x08
+# until -1 and calls handlers[n]; FUN_f010dc0a installs (+0x20 select, +0x24 = 2), FUN_f010dc96 enables (+0x0c),
+# FUN_f010dcae disables (+0x10); init +0x04 = 1, +0x10 = 0xffffffff; lock/unlock +0x88/+0x8c]. IRQ vector
+# 0xffff0018 -> 0xf049c200, FIQ -> 0xfe001dc0 (MCUSW's own vector page). Read-acknowledge [I].
+intc 0x20400000
+
+# OS timer (tickless, interrupt 0x2c) at 0x20040100 (virtual 0xffd40100) [V: FUN_f010e70c writes the next timeout
+# to +0x28 after waiting for +0x68 == 0, FUN_f010e64c reads +0x28 back as ticks left, handler 0xf010e58a reloads].
+# The free-running counter (0x20040490) is 32.768 kHz [V: FUN_f010e7d2 converts with 1/32768]; the OS timer is
+# assumed on the same clock [I].
+oneshot 0x20040100 32768 0x2c
+
+# hal_timer.c microsecond timer at 0x20040180, interrupt 0x24 [V: FUN_f0109db6: ticks = (us * 0x180 + 0x14) / 0x28
+# = 9.6 MHz, +0x28 count (read signed: negative = overdue), +0x48 adjust; the SSI wake-test timeout uses it]
+oneshot 0x20040180 9600000 0x24
+
+# SSI link to the APE with the built-in APE peer (docs/research/n95-cmt-ssi-protocol.md): control words on
+# channel 0, ISI on channel 3 by GDMA (0x20040780); "-" = no Symbian side (the peer still brings the link up and
+# logs what the modem sends); tools/cmt/probe.py --link SOCKET connects it to syborg-modem's link.
+ssi -
+# ACWake (APE -> CMT) is GenIO pin 29 of 0x20031d40 (level at +0x08 bit 29, interrupt on intc 0xf6) and CAWake
+# (CMT -> APE) is 0x20030800: both are part of the "ssi" peer, which plays the cold-boot wake test with them
+# (it held ACWake high before, and the modem reported the test failed: ST_CMT_APE_WAKEUP_TEST 0x3a)
+
+# fake modem DSP on the MCU-DSP interface (docs/research/n95-cmt-mdi-protocol.md): boot handshake, mailbox rings
+# in pdram0, PhoNet device 0x7c announced with a media-0x12 / resource-0xDA message (MTC's device sync needs it)
+dsp
+
+# Start-up self-tests (STServer, st_*_loop_test FUN_f0164afc..): test outputs looped back to inputs on the board.
+# Without them four tests fail (result 2) and the modem comes up in MTC state 08 (SELFTEST_FAIL): the phone's
+# Starter then takes startup reason 7 and goes to its fatal state 0xFA (docs/research/n95-cmt-emulation.md 6).
+# Pin table 0xf04b0df4 (hal_st.c, FUN_f0165950/FUN_f01659bc) [V]: outputs set at 0x20031cd4, cleared at 0x20031cd8
+# (pin 1 0x8000, 2 0x10000, 4 0x20000, 5 0x40000), inputs at 0x20031dc8 (pin 0 0x10000, 3 0x20000, 7 0x40000).
+setclr 0x20031cd4 0x20031cd8
+# st_ear_data_loop_test (FUN_f0165a1c) [V sequence, I wiring]: pin 2 reaches pin 0 through Retu when reg 0x19
+# bit 13 routes it, reg 0x18 bit 4 on and its field 0xe0 = 0 (reg 0x1a bit 13 on); pin 1 the same with field = 4
+# (0x80) and reg 0x1a bit 12. The test also checks that clearing reg 0x19 bit 13 breaks the loop.
+loop 0x20031dc8 0x10000 m:0x20031cd4:0x10000 r:0x19:0x2000 r:0x18:0xf0=0x10 r:0x1a:0x2000
+loop 0x20031dc8 0x10000 m:0x20031cd4:0x8000 r:0x19:0x2000 r:0x18:0xf0=0x90 r:0x1a:0x1000
+# st_sim_clk_loop_test (FUN_f0165c18) / st_sim_io_ctrl_loop_test (FUN_f0165cb6) [V sequence, I wiring]: pin 4 reaches
+# pin 3 while pin 5 is on and Retu reg 0x0e bit 13 (SIM line switch) is on (docs/research/n95-cmt-sim-interface.md 0)
+loop 0x20031dc8 0x20000 m:0x20031cd4:0x20000 m:0x20031cd4:0x40000 r:0x0e:0x2000
+# st_mbus_rx_tx_loop_test (FUN_f0165bc6) [V]: MBUS block 0x20032000: TX level +0x04 bit 6 comes back inverted at
+# +0x0c bit 7 (0xf0 -> 0, 0xb0 -> 1)
+loop 0x2003200c 0x80 m:0x20032004:0x40=0
+
+# SHA-1/MD5 hash accelerator at 0x20024400 (driver FUN_f012eeaa..FUN_f012f156, registers in
+# src/qemu-syborg/hw/arm/syborg_cmt_sham.h) [V driver use; I: the OMAP2 SHA1/MD5 IP]. The PRNG seeding (FUN_f012ea20,
+# first random number) hashes with it: without it the WCDMA core appl 0x3e's init (FUN_f0331940) waited forever
+# for "output ready", its CM never answered MTC's group 10 create, and MTC never reached state 0x0a. Its
+# reset-done bit (+0x64, once an "SSI reset" orbits line here) is part of the model.
+sham 0x20024400
+
+# Fake DSP replies (map "dspreply"), each with the MCU code that checks it:
+# E6/0D sleep clock measurement, sent by ST_SLEEPCLK_FREQ_TEST (0x38, FUN_f0164e60): reply id 0x8a, data
+# {00 00, u32 BE v} with (v >> 1) - 19198878 < 7521 (constants 0xf0165004/08) [V]; v = 38400000 (19.2 MHz over
+# 2 s) [I: unit]. Without it the test timed out (result 0x0d) and the phone's DosServer declared SELFTEST_FAIL.
+dspreply 0xe6 0x0d 0x8a 0000 0249f000
+
+# Stand-in protected-application directory (tools/cmt/nor.py pa_stub, handled by probe.py; the C code ignores
+# "pa" lines): the per-phone PA area is in no flash file and a stock phone's modem does not give it out over ISI
+# (docs/research/n95-cmt-memory-read.md). PA_ESN present without configuration = "not provisioned", which
+# ST_SECURITY_TEST (0x5d) accepts; without it the phone's DosServer declared the self-test failed.
+pa PA_ESN
+
+# Stand-in PMM records (tools/cmt/nor.py pmm_records, handled by probe.py; docs/research/n95-cmt-perm-data.md):
+# per-phone permanent data is in no flash file. Group 0x139 index 0, 615 bytes: WLAN tuning/calibration that
+# WlanServer reads with PN_PERMANENT_DATA 23/04 at start-up [V size, I meaning]; without it the modem answered
+# "no such record" (11), WlanServer exited -5 and IPWServer / the Telephone app panicked. Content: zeros [I].
+pmm 0x139 0 0x267
+
+# Retu interrupts (status reg 0x01 W1C, mask 0x02) on intc 0xfa, handler FUN_f010def4 [V]; SIM timer (0x1d count,
+# started by 0x1c power on) expiring -> event 5 [V meaning: docs/research/n95-cmt-sim-interface.md, I: 32768 Hz]
+retuirq 0xfa 32768
+# Retu RTC (reg 0x03 days|seconds, 0x04 hours|minutes) ticking with the virtual clock [I: layout]. Frozen at 0, the
+# modem polled reg 0x03 tens of thousands of times waiting for a tick and reported an invalid time; the phone asked
+# for the date and then stalled in its start-up (docs/research/n95-cmt-emulation.md 9)
+retortc
+
+# Modem time kept over the "power off" (docs/research/n95-cmt-emulation.md 10). Time appl init FUN_f0150ed4 /
+# FUN_f0150c9a keeps the stored time only if all hold, else it resets it to {0, 0, 2} = invalid and the phone asks
+# for the date and time (19/0B sub-block 04 = 2):
+# - backup battery >= 1700 mV (0x6a4): ADC request 0x13 = logical channel 14 = Retu physical channel 12 (table
+#   0xf049f3e4), 5 samples, linear gain 20000 -> raw 0x3a0 = 2447 mV [V gdb]; at 0 the RTC counts as lost
+retuadc 12 0x3a0
+# - Retu reg 0x05 minutes field 0x3d: the "RTC kept" marker (hal_rtc_if.c FUN_f0152858); with it the fingerprint
+#   FUN_f01526fa is 0x1a5e0 [V]
+cbusreg 1 0x05 0x007d
+# - PMM group 8 (object 0xf04ab050): index 0 and 1 the same 12-byte time {base, elapsed, type 3} (two copies that
+#   must agree), index 7 the 8-byte fingerprint {0x1a5e0, Retu reg 0x06 low byte, 0, 0, 0} [V layout, I base epoch]
+pmm 0x8 0 12 a01a026b0000000003000000 large
+pmm 0x8 1 12 a01a026b0000000003000000 large
+pmm 0x8 7 8 e0a5010000000000 large

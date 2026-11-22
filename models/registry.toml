@@ -293,6 +293,54 @@ model = "se-p990i"
 status = "bring-up"                          # R6E28 Generic World1 held (se_roms/P990): home screen 2026-11-17
 
 [[types]]
+code = "RM-51"
+name = "3230"
+platform = "s60-2.1"                         # S60 2nd Edition FP1, Symbian 7.0s, EKA1
+soc = "upp-wd2"                              # the 6600's DCT4 UPP [V: bootstrap literals, same kernel generation]
+model = ""                                   # not a device-model profile: QEMU board -M nokia3230 (src/qemu-ngage/hw/arm/ngage.c)
+status = "known"                             # V 05.07 boots to the S60 home screen and Menu (2026-11-19); docs/devices/nokia-3230-rm51/bring-up.md
+
+[[types]]
+code = "RM-1"
+name = "6630"
+platform = "s60-2.2"                         # S60 2nd Edition FP2, Symbian 8.0a, EKA1
+soc = "omap1610"                             # TI OMAP1610 [V: FIASCO header, bootstrap literals]; BB5 modem
+model = ""                                   # not a device-model profile: QEMU board -M nokia6630 (src/qemu-ngage/hw/arm/nokia9500.c + nokia6630_soc.c)
+status = "known"                             # V 6.03.40 boots to the S60 home screen and Menu grid (2026-11-19); docs/devices/nokia-6630-rm1/bring-up.md
+
+[[types]]
+code = "RAE-3"
+name = "9210"
+platform = "s80-1"                           # Series 80 1st edition (Crystal), Symbian 6.0, EKA1
+soc = "nokia-asic-ti925t"                    # TI925T core on an undocumented Nokia ASIC [V: CPU table, register map from code]
+model = ""                                   # not a device-model profile: QEMU board -M nokia9210 (src/qemu-ngage/hw/arm/nokia9210.c)
+status = "known"                             # V 4.13 boots to the Series 80 Desk (2026-11-20); docs/devices/nokia-9210-rae3/bring-up.md
+
+[[types]]
+code = "RM-84"
+name = "N70"
+platform = "s60-2.3"                         # S60 2nd Edition FP3, Symbian 8.1a, EKA1
+soc = "omap1710"                             # TI OMAP1710 [V: kernel chip type 0xB5F7, custom.ldd]; the 6630's register map; BB5 modem
+model = ""                                   # not a device-model profile: QEMU board -M nokian70 (src/qemu-ngage/hw/arm/nokia9500.c + nokia6630_soc.c)
+status = "known"                             # V 5.1003.3 boots to the S60 home screen and Menu grid (2026-11-20); docs/devices/nokia-n70-rm84/bring-up.md
+
+[[types]]
+code = "RM-12"
+name = "7710"
+platform = "s90"                             # Series 90 1.1, Symbian 7.0s, EKA1 (rom_base 0x50000000)
+soc = "omap1510"                             # the 9500's (bootstrap literals) [V]
+model = ""                                   # not a device-model profile: QEMU board -M nokia7710 (src/qemu-ngage/hw/arm/nokia9500.c)
+status = "known"                             # V4.10.0 boots to the S90 Desk on -M nokia7710 (2026-11-18); docs/devices/nokia-7710-rm12/bring-up.md
+
+[[types]]
+code = "SE-P800"
+name = "P800"
+platform = "uiq-2.0"                         # Symbian 7.0, EKA1 (rom_base 0x50000000)
+soc = "pnx4000"                              # the P910i's SoC [V: identical kernel IRQ name table]
+model = ""                                   # not a device-model profile: QEMU board -M p800 (src/qemu-ngage/hw/arm/p910i.c)
+status = "known"                             # R2D02 boots to the UIQ home screen on -M p800 (2026-11-19); docs/devices/se-p800/bring-up.md
+
+[[types]]
 code = "SE-P910i"
 name = "P910i"
 platform = "uiq-2.1"                         # Symbian 7.0, EKA1 (rom_base 0x50000000)

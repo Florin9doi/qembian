@@ -5,7 +5,7 @@ whole desktop/phone gap is not established. I would first measure equal guest wo
 lookup locality, then prototype a guarded return predictor. Expect incremental improvements from
 these changes; the evidence does not justify promising a several-fold speed-up.
 
-This is advice. No emulator changes or new
+This is advice, as requested by `docs/prompts/android-perf-handoff.md`. No emulator changes or new
 boot benchmarks were run. I inspected the local Android QEMU source, build script, existing review,
 and phone profile with the NDK simpleperf reporter. The profile reports 21.08% in
 `helper_lookup_tb_ptr`, 8.39% in `qht_lookup_custom`, 3.19% in `arm_get_tb_cpu_state`, 1.10% in the

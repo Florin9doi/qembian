@@ -160,3 +160,12 @@ reply 8C 21 22 F7 00 00 00 00 01 00 2A 00 08 00 00 00 00   # on: 808 (701 parser
 reply C9 24 25 00 00   # on: n8 701 808
 reply 0A E0 E1 00 02 00 04 06 02 09 18 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # NET_REG_STATUS_GET (the 9.3 TSY's form of 0A 00, same tid 4: E52/E72/E5-00): the same no-SIM payload in RESP E1 [I layout as 01]; unanswered, Messaging hung in RConnectionMonitor::ConnectL (2026-11-17, verified E52)
 reply 0A 40 F0 01 40 00 00 00 00                          # PN_NETWORK 0x40: the N95 modem's NET relay has no 0x40 handler and answers COMMON_MESSAGE F0 {01 40 00 00 00 00} (not supported) [V builder 0xF01F2988, I state coverage] docs/research/n95-isi-encoders.md 4.1, 11.5 item 9. The S60 3.2/5th phones that send it keep `41 {01 00 00}` in their own tables (2026-11-17 Messaging fix)
+
+# Recorded from the N95's own modem firmware (tools/cmt/isirecord.py on `sydb start --modem real` sessions, offline,
+# no SIM, 2026-11-22; docs/research/n95-cmt-recorded-isi.md). Each was unanswered in table mode (tools/isi.py log)
+reply 1B 0B 0C 00 01 4E 08 00 01 00 00 00 00              # on: n95 (real modem fw): INFO 0B {00 02 ..} -> 0C, sub-block 4E
+reply 01 AA AB 55 01 BA 0C 06 60 04 02 00 05 81 00 00 00  # on: n95 (real modem fw): PN_CALL AA {00 00 07 04 01 01} at boot
+reply 02 06 07 00 00                                      # on: n95 (real modem fw): resource 02 msg 06 -> 07 OK
+reply 02 25 26 00 00                                      # on: n95 (real modem fw): resource 02 msg 25 {01 55} -> 26 OK
+reply 31 06 07 FE 01                                      # on: n95 (real modem fw): GPDS 06 {FE ..} -> 07 {FE 01}
+reply 77 07 09 00 00                                      # on: n95 (real modem fw): audio route release 07 -> 08 {00 55} then 09 {00 00}; as 77 01, only the releasing 09 (Aamm: 08 is a no-op, 09 completes the request)

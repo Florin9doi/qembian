@@ -10,6 +10,7 @@
 //          * <event> k=v ...              unsolicited: hello (agent started), exit (watched process)
 //   put:   <tag> put <path> <size> <crc32hex>  -> "<tag> go", host sends <size> raw bytes -> ok/err
 //   get:   <tag> get <path>  -> "<tag> data size=N crc=C" + N raw bytes + "<tag> ok"
+//   ui:    <tag> ui [tid] [ms] -> one ". l=<line>" per line of the in-app probe's dump (src/n95apps/uiprobe)
 // No C++ exception runtime in this toolchain: only non-leaving APIs (or ones that leave on OOM).
 #include <e32base.h>
 #include <e32debug.h>
@@ -27,7 +28,12 @@
 
 #define P(fmt, ...) RDebug::Printf("DEVAGENT: " fmt, ##__VA_ARGS__)
 
-static const char KVersion[] = "6";
+static const char KVersion[] = "7";
+// `ui`: the in-app probe (src/n95apps/uiprobe, docs/ui-probe.md) answers through two properties in
+// the agent's own category (its SID), defined at start with pass-through policies
+static const TUid KUiCat = {0xE0001DB7};
+static const TUint KUiReq = 0x7569;			// byte array "<tid hex> <seq>"
+static const TUint KUiResp = 0x756a;			// large byte array "<seq>\n" + dump lines
 static const TInt KUnit = 1;
 static const TInt KMaxWatch = 32;
 static const TInt KChunk = 4096;
@@ -253,6 +259,7 @@ private:
 	void CmdKeepAwake(const TDesC8& aTag, const TDesC8& aOp);
 	void CmdProp(const TDesC8& aTag, TBool aSet, const TDesC8& aCat, const TDesC8& aKey, const TDesC8& aVal);
 	void CmdMem(const TDesC8& aTag);
+	void CmdUi(const TDesC8& aTag, const TDesC8& aTid, const TDesC8& aTimeout);
 	void ToPath(const TDesC8& aIn, TDes& aOut) { aOut.Copy(aIn.Left(aOut.MaxLength())); }
 
 	RBusDevComm iComm;
@@ -327,6 +334,13 @@ TInt CAgent::Start()
 	if (r != KErrNone)
 		return r;
 	iTimer.CreateLocal();
+	{
+	_LIT_SECURITY_POLICY_PASS(KPass);
+	TInt r1 = RProperty::Define(KUiReq, RProperty::EByteArray, KPass, KPass, 64);
+	TInt r2 = RProperty::Define(KUiResp, RProperty::ELargeByteArray, KPass, KPass, RProperty::KMaxLargePropertySize);
+	if ((r1 != KErrNone && r1 != KErrAlreadyExists) || (r2 != KErrNone && r2 != KErrAlreadyExists))
+		P("ui properties: define -> %d %d", r1, r2);
+	}
 	iTimer.After(iTimerStatus, 1000000);
 	TOut o;
 	o.Begin(_L8("*"), "hello");
@@ -516,6 +530,7 @@ void CAgent::HandleLine(TDes8& aLine)
 	else if (cmd == _L8("pget")) CmdProp(tag, EFalse, a[0], a[1], KNullDesC8);
 	else if (cmd == _L8("pset")) CmdProp(tag, ETrue, a[0], a[1], a[2]);
 	else if (cmd == _L8("mem")) CmdMem(tag);
+	else if (cmd == _L8("ui")) CmdUi(tag, a[0], a[1]);
 	else if (cmd == _L8("startup"))
 		{
 		// startup add PATH [w0 w1 w2] | startup rm PATH | startup check PATH
@@ -1350,6 +1365,108 @@ void CAgent::CmdProp(const TDesC8& aTag, TBool aSet, const TDesC8& aCat, const T
 	o.Begin(aTag, "ok");
 	o.Int("value", v);
 	End(o);
+	}
+
+// ui [TID] [TIMEOUT_MS]: ask the uiprobe in thread TID (default: the focused window group's thread)
+// for its UI dump; each dump line comes back as one item "l=<line>" (format: uiprobe.cpp)
+void CAgent::CmdUi(const TDesC8& aTag, const TDesC8& aTid, const TDesC8& aTimeout)
+	{
+	TUint32 tid = 0, ms = 3000;
+	if (aTid.Length() && !ParseUint(aTid, tid, EHex))
+		{
+		Err(aTag, KErrArgument, "usage: ui [tid-hex] [timeout-ms]");
+		return;
+		}
+	if (aTimeout.Length() && !ParseUint(aTimeout, ms))
+		ms = 3000;
+	if (!tid)
+		{
+		TInt r = Ws();
+		if (r != KErrNone)
+			{
+			Err(aTag, r, "wserv connect failed");
+			return;
+			}
+		TThreadId t;
+		r = iWs.GetWindowGroupClientThreadId(iWs.GetFocusWindowGroup(), t);
+		if (r != KErrNone)
+			{
+			Err(aTag, r, "no focused window group");
+			return;
+			}
+		tid = (TUint)t;
+		}
+	static TInt seq;
+	seq++;
+	TBuf8<16> want;
+	want.AppendNum(seq);
+	want.Append('\n');
+	RProperty resp;
+	TInt r = resp.Attach(KUiCat, KUiResp);
+	HBufC8* b = r == KErrNone ? HBufC8::New(RProperty::KMaxLargePropertySize) : NULL;
+	if (!b)
+		{
+		resp.Close();
+		Err(aTag, r != KErrNone ? r : KErrNoMemory, "ui reply property");
+		return;
+		}
+	TPtr8 bp = b->Des();
+	TRequestStatus rs, ts;
+	resp.Subscribe(rs);
+	TBuf8<64> req;
+	req.AppendNum(tid, EHex);
+	req.Append(' ');
+	req.AppendNum(seq);
+	r = RProperty::Set(KUiCat, KUiReq, req);
+	RTimer t;
+	t.CreateLocal();
+	t.After(ts, ms * 1000);
+	TBool got = EFalse;
+	while (r == KErrNone)
+		{
+		User::WaitForRequest(rs, ts);
+		if (rs == KRequestPending)
+			break;					// timed out
+		if (resp.Get(bp) == KErrNone && bp.Left(want.Length()) == want)
+			{
+			got = ETrue;
+			break;
+			}
+		resp.Subscribe(rs);				// an older reply: wait on
+		}
+	if (rs == KRequestPending) { resp.Cancel(); User::WaitForRequest(rs); }
+	if (ts == KRequestPending) { t.Cancel(); User::WaitForRequest(ts); }
+	t.Close();
+	resp.Close();
+	if (!got)
+		{
+		delete b;
+		Err(aTag, r != KErrNone ? r : KErrTimedOut,
+			"no reply: uiprobe not in that app (started before the probe was installed, or not an Eikon app)");
+		return;
+		}
+	TPtrC8 rest = bp.Mid(want.Length());
+	TInt lines = 0;
+	while (rest.Length())
+		{
+		TInt nl = rest.Locate('\n');
+		TPtrC8 line = nl < 0 ? rest : rest.Left(nl);
+		rest.Set(nl < 0 ? TPtrC8() : rest.Mid(nl + 1));
+		if (!line.Length())
+			continue;
+		TOut o;
+		o.Begin(aTag, ".");
+		o.Field("l", line);
+		End(o);
+		lines++;
+		}
+	TOut o;
+	o.Begin(aTag, "ok");
+	o.Hex("tid", tid);
+	o.Int("lines", lines);
+	o.Int("bytes", bp.Length());
+	End(o);
+	delete b;
 	}
 
 void CAgent::CmdMem(const TDesC8& aTag)

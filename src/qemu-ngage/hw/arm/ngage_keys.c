@@ -72,6 +72,25 @@ static const NgageKey nhl10_keys[] = {
     { KEY_F12, "power", -1, -1 },
 };
 
+/*
+ * Nokia 3230 (RM-51): one 6x6 table (ekeyb 0x503905F0, row * 6 + line) on the same ports as the N-Gage;
+ * the joystick is in the matrix (rows 0-1) and 0x0C15020A is never read [V: docs/research/rm51-keys.md].
+ * The N-Gage's layout with edit and C swapped, plus 0xAC (EStdKeyDevice8, a side key [I]) at (4, 1).
+ */
+static const NgageKey rm51_keys[] = {
+    { KEY_UP, "up", 0, 0 },          { KEY_LEFT, "left", 0, 1 },
+    { KEY_F2, "right soft", 0, 2 },  { KEY_LEFTSHIFT, "edit", 0, 3 },
+    { KEY_F5, "menu", 0, 4 },
+    { KEY_DOWN, "down", 1, 0 },      { KEY_RIGHT, "right", 1, 1 },
+    { KEY_F4, "end", 1, 2 },         { KEY_BACKSPACE, "clear", 1, 3 },
+    { KEY_ENTER, "select", 1, 4 },
+    { KEY_F1, "left soft", 2, 0 },   { KEY_1, "1", 2, 2 }, { KEY_6, "6", 2, 3 }, { KEY_8, "8", 2, 4 },
+    { KEY_F3, "call", 3, 0 },        { KEY_5, "5", 3, 2 }, { KEY_7, "7", 3, 3 }, { KEY_F10, "#", 3, 4 },
+    { KEY_F6, "side 0xAC", 4, 1 },   { KEY_9, "9", 4, 2 }, { KEY_0, "0", 4, 3 }, { KEY_3, "3", 4, 4 },
+    { KEY_KPASTERISK, "*", 5, 2 },   { KEY_2, "2", 5, 3 }, { KEY_4, "4", 5, 4 },
+    { KEY_F12, "power", -1, -1 },
+};
+
 /* joystick line (bit in 0x0C15020A) -> its enable / CTSI status-2 bit [I] */
 static uint16_t joy_irq_bit(int line)
 {
@@ -90,6 +109,7 @@ typedef struct {
     const NgageKey *keys;
     unsigned nkeys;
     bool nhl10;
+    bool rm51;                      /* 3230: GPIO port (line 5, switch bit 20), no joystick port */
     uint16_t joy;                   /* pressed joystick lines (bits of 0x0C15020A) */
     uint16_t joy_ier;               /* joystick interrupt enables (CTSI status-2 bits) */
     uint16_t joy_regs[16];
@@ -202,6 +222,9 @@ static uint64_t gpio_read(void *opaque, hwaddr a, unsigned size)
 
     if ((a & ~3) == 0x04) {
         v |= 1u << 19;
+        if (k->rm51) {
+            v |= 1u << 20;              /* 3230 switch line (0xAB/0xAD): not asserted [I] */
+        }
         if (kpd_cols(k) & 0x20) {
             v &= ~(1u << 19);
         }
@@ -310,14 +333,20 @@ static const QemuInputHandler ngage_key_handler = {
     .event = ngage_key_event,
 };
 
-void ngage_keys_init(MemoryRegion *sys, qemu_irq irq, bool nhl10)
+void ngage_keys_init(MemoryRegion *sys, qemu_irq irq, NgageKpdLayout layout)
 {
     QemuInputHandlerState *s;
+    bool nhl10 = layout == NGAGE_KPD_NHL10;
 
     kpd.irq = irq;
     kpd.nhl10 = nhl10;
-    kpd.keys = nhl10 ? nhl10_keys : ngage_keys;
-    kpd.nkeys = nhl10 ? ARRAY_SIZE(nhl10_keys) : ARRAY_SIZE(ngage_keys);
+    kpd.rm51 = layout == NGAGE_KPD_RM51;
+    kpd.keys = nhl10 ? nhl10_keys : kpd.rm51 ? rm51_keys : ngage_keys;
+    kpd.nkeys = nhl10 ? ARRAY_SIZE(nhl10_keys) : kpd.rm51 ? ARRAY_SIZE(rm51_keys) : ARRAY_SIZE(ngage_keys);
+    if (kpd.rm51) {
+        memory_region_init_io(&kpd.gpio_mr, NULL, &gpio_ops, &kpd, "rm51.gpio", 0x20);
+        memory_region_add_subregion(sys, 0x0c120c00, &kpd.gpio_mr);
+    }
     if (nhl10) {
         memory_region_init_io(&kpd.gpio_mr, NULL, &gpio_ops, &kpd, "nhl10.gpio", 0x20);
         memory_region_add_subregion(sys, 0x0c120c00, &kpd.gpio_mr);

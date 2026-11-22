@@ -215,6 +215,25 @@ class ModemCoreReplies(unittest.TestCase):
         self.assertEqual(len(f), 1, f)
         return f[0]
 
+    # recorded from the N95's own modem firmware (tools/cmt/isirecord.py, 2026-11-22): requests that table mode left
+    # unanswered (tools/isi.py log of a table boot: PN_CALL AA, GPDS 06, 02 06, INFO 0B), now answered as the real
+    # modem does (docs/research/n95-cmt-recorded-isi.md)
+    def test_recorded_answers_for_requests_table_mode_left_unanswered(self):
+        self.assertEqual(self.one('1B,0B,00,02,00,00,00,00')[1:], (0x0C, 0x42, [0x00, 0x01, 0x4E, 0x08, 0x00, 0x01,
+                                                                                0x00, 0x00, 0x00, 0x00]))
+        self.assertEqual(self.one('01,AA,00,00,07,04,01,01')[1], 0xAB)
+        self.assertEqual(self.one('02,06,01,01,0D,08,07,00,00,00,00,00')[1:], (0x07, 0x42, [0x00, 0x00]))
+        self.assertEqual(self.one('02,25,01,55')[1:], (0x26, 0x42, [0x00, 0x00]))
+        self.assertEqual(self.one('31,06,FE,21,00,00')[1:], (0x07, 0x42, [0xFE, 0x01]))
+
+    def test_recorded_audio_route_release_completes(self):
+        # 77 07 (route release): the real modem sends 08 {00 55} then 09; the table gives the releasing 09 only
+        self.assertEqual(self.one('77,07,00,00')[1:], (0x09, 0x42, [0x00, 0x00]))
+
+    def test_recorded_sim_de_no_card(self):
+        # the N95 modem's no-card answer to 09 DE is DF {01 FB} (the shared table's long form is the N8's)
+        self.assertEqual(self.one('09,DE,01,00,00,00,00,01,01,90,00,00')[1:], (0xDF, 0x42, [0x01, 0xFB]))
+
     # 1. MTC_RF_STATUS_QUERY 15 16 -> 79 {x, rf}: rf = 1 in NORMAL (section 2)
     def test_mtc_rf_status_on_in_normal(self):
         self.assertEqual(self.one('15,16')[1:], (0x79, 0x42, [0x00, 0x01]))
@@ -370,6 +389,89 @@ class GeneratedN95ReplyTable(unittest.TestCase):
         self.assertEqual(lines[('17', '0A')], '0B 0A 01 02 15 04 01 00 16 04 07 07')
         self.assertNotIn(('15', '16'), lines)            # answered by the core from the MTC state
 
+
+
+class ModemCoreLink(unittest.TestCase):
+    """Link mode (2026-11-21): the core routes ISI between the guest and a real modem (the n95-cmt machine running
+    the N95's own modem firmware) instead of answering from tables (docs/research/n95-cmt-emulation.md)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp()
+        cls.exe = os.path.join(cls.tmp, 'core')
+        core = os.path.join(ROOT, 'src/qemu-syborg/hw/arm')
+        subprocess.run(['gcc', '-std=gnu11', '-O1', '-Wall', '-Wno-unused-function', '-DSYBMODEM_HOSTED',
+                        '-I', core, '-I', os.path.join(ROOT, 'src/hosted/include/board'), '-o', cls.exe, HARNESS,
+                        os.path.join(core, 'syborg_ccpu.c')], check=True)
+
+    def run_core(self, *args):
+        r = subprocess.run([self.exe, 'harness.link=1', '-', '-1'] + list(args), capture_output=True, text=True,
+                           check=True)
+        return r.stdout.splitlines(), r.stderr
+
+    def test_request_goes_to_the_link_with_its_header_completed(self):
+        out, _ = self.run_core('15,02')                  # MTC_STATE_QUERY_REQ on channel 7
+        self.assertEqual(out, ['LINK 00 00 6C 15 04 00 00 07 42 02'])   # rdev modem, sdev APE, sobj = channel 7
+
+    def test_no_table_answer_in_link_mode(self):
+        out, _ = self.run_core('15,02', '17,0A,03,00')
+        self.assertTrue(all(ln.startswith('LINK ') for ln in out))     # nothing answered locally
+
+    def test_response_routed_by_receiver_object(self):
+        out, _ = self.run_core('<00,6C,00,15,08,00,07,00,42,65,01,01,00,00')
+        self.assertEqual(out, ['15 65 42 01 01 00 00'])
+
+    def test_indication_routed_by_subscription(self):
+        out, err = self.run_core('<00,6C,00,15,06,00,00,00,00,C0,01,03')   # MTC_STATE_INFO_IND, object 0
+        self.assertEqual(out, [])                          # nobody subscribed: dropped (and said so)
+        self.assertIn('no channel', err)
+        out, _ = self.run_core('S,15,C0', '<00,6C,00,15,06,00,00,00,00,C0,01,03')
+        self.assertEqual([ln for ln in out if not ln.startswith('LINK ')], ['15 C0 00 01 03'])
+
+    def test_subscription_forwarded_to_the_modem(self):
+        # bug (2026-11-21): the guest's indication subscriptions never reached the real modem, which sends
+        # MTC_STATE_INFO_IND after a state change only to subscribers (n95-cmt-normal-state.md): the phone waited
+        # for NORMAL forever. Now the union of the subscribed resources goes out as PN_COMMGR 10/10 from object 0
+        out, _ = self.run_core('S,15,C0,15,C2')
+        self.assertEqual(out, ['LINK 00 00 6C 10 06 00 00 00 00 10 01 15'])
+        out, _ = self.run_core('S,15,C0', 'S,15,C0')       # the same set again: nothing new sent
+        self.assertEqual(out, ['LINK 00 00 6C 10 06 00 00 00 00 10 01 15'])
+
+    def test_message_for_a_closed_channel_dropped(self):
+        out, err = self.run_core('<00,6C,00,15,08,00,09,00,42,65,01,01,00,00')    # object 9: not open
+        self.assertEqual(out, [])
+        self.assertIn('no channel', err)
+
+    def run_core_ch(self, *args):
+        r = subprocess.run([self.exe, 'harness.link=1;harness.showch=1', '-', '-1'] + list(args), capture_output=True,
+                           text=True, check=True)
+        return [ln for ln in r.stdout.splitlines() if not ln.startswith('LINK ')], r.stderr
+
+    def test_reply_goes_to_the_object_that_asked_on_a_shared_channel(self):
+        # bug (2026-11-22): the N95's audio server and Aamm's resource-0x77 client both open ISC channel 36. A
+        # modem reply names only the channel number, and the core gave it to the object opened last, so the real
+        # modem's 77/09 "route done" reached the audio server's object (no 0x77 handler there), the key tone never
+        # finished, the key sound server blocked and Idle was killed (ViewSrv 11). Now it goes to the object that
+        # sent a request to that resource last
+        out, _ = self.run_core_ch('@1,24', '0B,00', '@2,24', '77,01,00,02', '@3,24',
+                                  '<1B,6C,00,77,06,00,24,3B,00,09,00,00',
+                                  '<1B,6C,00,0B,06,00,24,3A,00,01,04,00')
+        self.assertEqual(out, ['h2 77 09 00 00 00', 'h1 0B 01 00 04 00'])
+
+    def test_reply_to_the_last_asker_of_the_resource(self):
+        # two objects asked the same resource: the later request's object gets the reply
+        out, _ = self.run_core_ch('@1,24', '0B,00', '@2,24', '0B,00', '<1B,6C,00,0B,06,00,24,3A,00,01,04,00')
+        self.assertEqual(out, ['h2 0B 01 00 04 00'])
+
+    def test_reply_nobody_asked_goes_to_the_object_opened_last(self):
+        out, _ = self.run_core_ch('@1,24', '@2,24', '<1B,6C,00,0B,06,00,24,3A,00,01,04,00')
+        self.assertEqual(out, ['h2 0B 01 00 04 00'])
+
+    def test_indication_reaches_every_subscribed_object_on_a_shared_channel(self):
+        # subscriptions of every object count (not only the object opened last on a number)
+        out, _ = self.run_core_ch('@1,24', 'S,1C,37', '@2,24', 'S,15,C0',
+                                  '<1B,6C,00,1C,06,00,00,3A,00,37,00,00', '<1B,6C,00,15,06,00,00,00,00,C0,01,03')
+        self.assertEqual(out, ['h1 1C 37 00 00 00', 'h2 15 C0 00 01 03'])
 
 if __name__ == '__main__':
     unittest.main()

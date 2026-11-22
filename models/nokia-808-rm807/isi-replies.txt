@@ -5,3 +5,14 @@
 # NET_MODEM_REG_STATUS_GET on PN_NETWORK: moved here from platform/isi/replies-bb5.txt on 2026-11-18: it is not true
 # of every BB5 phone (the 9.1 TSYs of the N73 and E61 panic USER 21 in ISIMSG on it; they get no reply)
 reply 0A 00 01 00 02 00 04 06 02 09 18 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  # NET_MODEM_REG_STATUS_GET (S60 3rd/5th, no SIM): OK, NET_REG_INFO_COMMON {NOSERV_NOSIM 6, automatic} + a zero 24-byte NET_GSM_REG_INFO 0x09 (a common-only reply panicked NOKIATSY 'IsiMessage OFFS -9'; the TSY reads 0x09 up to +0x16). Unanswered, the Connection Monitor server waited forever and every app connecting to it hung: Messaging, Music player, Games (2026-11-17). With [sim] present syborg_modem_core.c answers it first
+
+# Haptics 1C 9E -> 9F (hapticsadaptation.dll for hwrmhapticsserver / EwSrv's FeedbackPlayerThread, task
+# vibra-qemu-device step 1, 2026-11-19): a SUCCESS reply, overriding the family's failure status (H-haptics-fail,
+# kept for the N8 and 701 until verified there). docs/research/haptics-isi-808.md 3-4: the adaptation reads
+# [0x0A] == 0 (status), [0x0B] != 0 (sub-blocks), [0x11] == 0, the packet length at [0x14..0x15] and hands the
+# packet to hwrmhapticsvibepacketizerplugin, which switches on the packet's u16 LE opcode and reads the status at
+# packet[2]; an empty packet makes it leave -2 and the client's request never completes (the N8 UI freeze).
+# Data bytes start at ISI offset 0x0A: 00 01 (status OK, 1 sb), 64 00 (sb id 100, filler), 00 14 (sb length
+# 0x20 - 0x0C), 00 00 00 00 00 (0x10..0x14), 07 (packet length), then the 7-byte packet {op 0x12 LE, status 0,
+# device handle 1 LE}: "OpenDevice OK, handle 1", accepted by the decoder for every opcode the plugin sends.
+reply 1C 9E 9F len=22 00 01 64 00 00 14 00 00 00 00 00 07 12 00 00 01 00 00 00   # haptics OK: sb 64, packet 7 bytes {op 0x12, status 0, device handle 1}

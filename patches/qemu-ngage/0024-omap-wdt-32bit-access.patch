@@ -1,0 +1,28 @@
+--- a/hw/arm/omap1.c
++++ b/hw/arm/omap1.c
+@@ -257,6 +257,9 @@
+ {
+     struct omap_watchdog_timer_s *s = opaque;
+ 
++    if (size == 4) {
++        size = 2;       /* qembian: see omap_wd_timer_write */
++    }
+     if (size != 2) {
+         qemu_log_mask(LOG_GUEST_ERROR, "%s: read at offset 0x%" HWADDR_PRIx
+                       " with bad width %d\n", __func__, addr, size);
+@@ -284,6 +287,15 @@
+ {
+     struct omap_watchdog_timer_s *s = opaque;
+ 
++    /*
++     * qembian: 32-bit accesses reach the 16-bit registers (low half). The Nokia 6630's bootstrap disables
++     * the watchdog with two 32-bit writes of TIMER_MODE (0xF5, 0xA0); dropped, the watchdog kept running
++     * and reset the board ~40 s into the boot (MMU off, CPU in empty memory).
++     */
++    if (size == 4) {
++        size = 2;
++        value &= 0xffff;
++    }
+     if (size != 2) {
+         qemu_log_mask(LOG_GUEST_ERROR, "%s: write at offset 0x%" HWADDR_PRIx
+                       " with bad width %d\n", __func__, addr, size);

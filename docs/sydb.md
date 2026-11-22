@@ -3,7 +3,7 @@
 adb-like bridge. Its main user is an LLM (through the MCP server); the CLI is the human interface.
 Design and roadmap: [devtools-bridge.md](devtools-bridge.md). Status 2026-11-06: phase 0/1 work, and
 phase 3's basic debugger works. Done: session daemon, agent (files, processes, apps, UI, keyguard,
-P&S), CLI, MCP server (43 tools), live agent update, persistent gdb with kernel DWARF and app ELF
+P&S), CLI, MCP server (46 tools), live agent update, persistent gdb with kernel DWARF and app ELF
 symbols placed from the kernel's `SYBCODE:` line. IPC strace via the kernel's KIPC trace works. Not yet:
 exec-call strace (phase-2 LDD), XIP
 symbol ELFs for Nokia code in gdb backtraces, snapshots. SIS install: `sydb sis install` (below).
@@ -15,11 +15,12 @@ symbol ELFs for Nokia code in gdb backtraces, snapshots. SIS install: `sydb sis 
 | daemon | `tools/sydb/daemon.py` | one per session dir (an instance's directory, or any `--session DIR`). It starts QEMU (`run-modern.sh -name sydb`; syb_run/syb_gdb kill only `sybtool` QEMUs, so they don't collide with it) and serves JSON on `ctl.sock`. The session dir holds: serial0 → `serial.log` (timestamped), serial1 → `agent.sock`, QMP → `qmp.sock`, gdbstub → tcp port in `gdb.port`, and the phone drives in `drives/` |
 | CLI | `tools/sydb/sydb.py` | `sydb <cmd>`; `--json` for raw replies; `--instance NAME` or `--session DIR` picks the phone (below) |
 | instances | `tools/instance.py` | the user's phones: create, clone, rename, delete, set, list (below) |
-| MCP | `tools/sydb/mcp.py` | stdio JSON-RPC, 43 tools (`session_*`, `log_tail`, `events`, `fs_*`, `app_*`, `proc_*`, `ui_*`, `sys_*`, `dbg_*`, `qemu_hmp`); registered for Claude Code in `.mcp.json` |
+| MCP | `tools/sydb/mcp.py` | stdio JSON-RPC, 46 tools (`session_*`, `log_tail`, `events`, `fs_*`, `app_*`, `proc_*`, `ui_*`, `sys_*`, `dbg_*`, `qemu_hmp`); registered for Claude Code in `.mcp.json` |
 | agent | `src/n95apps/devagent/devagent.cpp` | `devagent.exe`, All-TCB, serial unit 1 (`RBusDevComm`), line protocol (header of the file) |
 | TCB helper | `src/n95apps/devagent/dafs.cpp` | `dafs.exe`, ALL caps, EUSER/EFSRV only. Moves files into `\sys\`/`\resource\`, and does the agent self-update |
 
-Build the agent pair with `src/n95apps/devagent/build.sh` (`--debug` = `-O0 -g`).
+Build the agent pair with `src/n95apps/devagent/build.sh` (`--debug` = `-O0 -g`), the UI probe with
+`src/n95apps/uiprobe/build.sh` (`sydb install` / `start --seed` / `update-agent` deploy both).
 
 ## Which phone: instances and sessions
 
@@ -73,6 +74,7 @@ sydb wg | fg WGID                                     # window groups, focus mar
 sydb unlock | lock | keylock | keepawake on|unlocked|off
 sydb prop get 101f8766 41 | prop set CAT KEY VALUE
 sydb key menu down ok 1.5 back | type hello | screenshot [OUT] --scale 0.5 --changed
+sydb record | record start [OUT.mp4] | record stop | record status   # screen + sound to MP4 (docs/recording.md)
 sydb text 'Hello, мир! @(x)'                         # any characters straight into the focused app (agent key events
                                                       # with that code); digits, * and # are keypad keys to the FEP: use key
 sydb view 0x10005A32 3                                # one view of an app (view server), as the Help app's app://vsa links:
@@ -152,6 +154,20 @@ install server still refuses packages without a trusted signature (result -10254
 All our on-phone programs (`src/n95apps/devagent`) construct drtaeabi's `TCppRTExceptionsGlobals` in
 their thread entry, as the SDK's EXE startup does: without it the first leave in any thread of the
 process died in `__cxa_allocate_exception` (seen in the installer's `!UISS` thread).
+
+## Real modem firmware: `--modem real` (N95)
+
+`sydb start --modem real` / `sydb phone NAME --modem real` (or once: `tools/instance.py set NAME settings.modem
+real`, then plain `sydb phone NAME`) runs the phone's own modem firmware on an emulated modem CPU instead of the
+fake modem's reply tables: the daemon starts `tools/cmt/probe.py --secs 0` (the n95-cmt machine, map from the
+profile's `[modem_cpu]`, modem firmware from the core flash file of the session's own firmware in the ROM store,
+`tools/device.py` `firmware_file`) with a unix socket `<session>/cmt.sock` and links syborg-modem to it. Only devices with
+`[modem_cpu]` (the N95 8GB). Logs: `<session>/modem/` (access.log has every ISI message both ways; probe.log).
+`sydb stop` and closing the window stop the modem too; Switch off on the phone powers the modem off (Retu
+watchdog), which ends the session. Offline without a SIM works (docs/research/n95-cmt-emulation.md 10); there is
+no SIM card model yet, and the first boot takes about 5 s longer. Snapshots/forks do not cover the modem.
+To compare the fake modem with recordings: `tools/cmt/isirecord.py <session>/modem/access.log`
+(docs/research/n95-cmt-recorded-isi.md).
 
 ## Host GPU settings
 
@@ -238,7 +254,7 @@ blanking, ~60 frames/s, pixel-identical to QEMU's screendump; sessions serve no 
 switcher, hold Power = switch off), the host keyboard (its keys show pressed on the phone while held), and a side toolbar: Power, Vol +/-,
 **Landscape (media slide)** (taps F13, the phone switches its layout, the view turns so it stays
 upright; Ctrl+Left/Right toggles it too), **Keypad slide** (shows the number keys; no slide event to
-the phone yet), Shot, Snapshot, Pause, Reset. **Multimedia** (F20), **Gallery** (F21) and the media
+the phone yet), **Record** (Ctrl+R: screen + sound to `~/Videos/*.mp4`, [recording.md](recording.md)), Shot, Snapshot, Pause, Reset. **Multimedia** (F20), **Gallery** (F21) and the media
 keys send the N95's own key codes. The N95 that `scripts/run-gui.sh` and the old `sydb --device`
 ran is the instance `n95-gui` (ROM variant `audio-exp`, which plays the startup jingle; `--install`
 adds the sydb agent to its C:). `sydb phone` starts a session if none is running, with sound on the
@@ -253,6 +269,18 @@ GPU by default (`--gl soft` for the software rasteriser, H-gles-host). Details:
 window groups, live events, and the serial log tail (`:log REGEX` filters it). Its command line
 takes any sydb command. Tab switches to key mode: arrows, Enter = OK, F5/F7/F8 and digits go to
 the phone; Esc leaves. `q` quits.
+
+## UI tree: `sydb ui`
+
+`sydb ui` prints the focused app's controls as data: title, softkeys, open menu + selection, the focused
+list/grid's items + current index, editor text, and the control tree with screen rectangles. By default
+the app answers itself: `uiprobe.dll`, an ECom plugin every Eikon app loads, walks its controls on the
+UI thread and replies through the agent (`sydb agent ui`, ~0.15 s; [ui-probe.md](ui-probe.md)). `--gdb`
+reads the same from the frozen phone's memory instead ([ui-dump.md](ui-dump.md)), and is the fallback
+for apps without the probe.
+`sydb ui select TEXT [--open]` moves the highlight by keys until the dump shows TEXT selected;
+`sydb ui wait TEXT` waits until TEXT is visible. MCP: `ui_tree`, `ui_select`, `ui_wait`. Method,
+guide: [ui-automation.md](ui-automation.md); internals: [ui-probe.md](ui-probe.md), [ui-dump.md](ui-dump.md).
 
 ## IPC strace
 

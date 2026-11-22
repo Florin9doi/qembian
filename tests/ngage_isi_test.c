@@ -236,6 +236,64 @@ static void test_reply_len_above_64(void)
     assert(n == 10 + 70);
 }
 
+/*
+ * reply_plus: "reply+" lines queue further frames after the request's reply, in table order, and never
+ * answer a request on their own (the Nokia 3230's DevSound: E8 20 -> 21 started, then 2B ended).
+ */
+static void test_reply_plus(void)
+{
+    static const uint8_t play[] = { 0x00, 0x00, 0x00, 0xe8, 0x06, 0x00, 0x00, 0x55, 0x00, 0x20, 0x82, 0x02 };
+    static const uint8_t lone[] = { 0x00, 0x00, 0x00, 0xe8, 0x06, 0x00, 0x00, 0x55, 0x00, 0x30, 0x00, 0x00 };
+
+    load("reply E8 20 21\n"
+         "reply+ E8 20 2B 00 00\n"
+         "reply+ E8 30 31\n");
+    ngage_isi_isa_send(play, sizeof(play));
+    assert(fetch());
+    assert(got[9] == 0x21 && got[6] == 0x55);
+    assert(fetch());
+    assert(got[9] == 0x2b && got[6] == 0x55 && gotlen == 12);
+    assert(!fetch());
+    ngage_isi_isa_send(lone, sizeof(lone));       /* a reply+ alone answers nothing */
+    assert(!fetch());
+}
+
+/*
+ * Regression rm84_estart_waits_channel_open (Nokia N70, ISC): the channel open 00 01 {channel, 00} (media 01,
+ * objects 0) is answered by the ISC peer as a control message: media 0, from the peer object, data {channel,
+ * object}. "rq10" puts the request's byte 10 there, "media=" / "sobj=" override the mirrored bytes.
+ */
+static void test_isc_channel_open(void)
+{
+    static const uint8_t req[] = { 0x01, 0x00, 0x00, 0x00, 0x06, 0x00, 0x01, 0x00, 0x00, 0x01, 0x41, 0x21 };
+    uint8_t out[512];
+    uint32_t n;
+
+    load("reply 00 01 02 rq10 rq10 media=00 sobj=01   # ISC\n");
+    ngage_isi_isa_send(req, sizeof(req));
+    n = ngage_isi_isa_take(out, sizeof(out));
+    assert(n == 12);
+    assert(out[0] == 0x00);                     /* media overridden */
+    assert(out[7] == 0x01);                     /* sender = the peer object */
+    assert(out[6] == 0x00);                     /* receiver = the request's sender object, as always */
+    assert(out[9] == 0x02);
+    assert(out[10] == 0x41 && out[11] == 0x41); /* {channel, object = channel} */
+    assert(out[4] == 6);                        /* length counts the two rq10 bytes */
+}
+
+/* without media= / sobj= a reply still mirrors the request's media and its receiver object */
+static void test_isc_defaults_mirror(void)
+{
+    static const uint8_t req[] = { 0x01, 0x00, 0x00, 0x00, 0x06, 0x00, 0x10, 0x37, 0x00, 0x05, 0x00, 0x00 };
+    uint8_t out[512];
+
+    load("reply 00 05 06 20 00 00 01 01\n");
+    ngage_isi_isa_send(req, sizeof(req));
+    assert(ngage_isi_isa_take(out, sizeof(out)) == 15);
+    assert(out[0] == 0x01 && out[7] == 0x10 && out[6] == 0x37);
+    assert(out[10] == 0x20 && out[12] == 0x00 && out[13] == 0x01 && out[14] == 0x01);
+}
+
 int main(void)
 {
     shim_log = g_string_new(NULL);
@@ -256,6 +314,9 @@ int main(void)
     test_ngage_frame_unchanged();
     test_nhl10_als_line();
     test_reply_len_above_64();
+    test_reply_plus();
+    test_isc_channel_open();
+    test_isc_defaults_mirror();
     printf("ngage_isi_test: all passed\n");
     return 0;
 }

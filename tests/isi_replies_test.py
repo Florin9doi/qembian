@@ -265,5 +265,59 @@ class LintCrashedOnSonyEricsson(unittest.TestCase):
             self.assertEqual(isi.cmd_lint(), 0)
 
 
+class EmptyOkPacketFrozeHapticsPlugin(unittest.TestCase):
+    """Bug (N8, H-haptics-fail; fixed for the 808 on 2026-11-19, task vibra-qemu-device step 1): an "OK with an
+    empty packet" reply to the haptics request ISI 1C 9E froze the UI. hapticsadaptation.dll accepts a reply with
+    [0x0A] == 0, [0x0B] != 0, [0x11] == 0 and hands the packet at [0x16..] (length u16 BE at [0x14..0x15]) to
+    hwrmhapticsvibepacketizerplugin, which switches on the packet's u16 LE opcode and reads the status at
+    packet[2]; an empty packet makes it leave -2 and EwSrv's FeedbackPlayerThread waits for good
+    (docs/research/haptics-isi-808.md 3). The 808's table now answers success with a decodable packet
+    (OpenDevice OK, handle 1, verified 2026-11-19: taps, Calendar open/close, no stall); the N8 and 701 keep
+    the family's failure status until verified there."""
+
+    def fields(self, data, n):
+        # table data bytes start at ISI offset 0x0A; pad to the declared length as the modem core does
+        isi = [0] * 0x0A + list(data) + [0] * (n - len(data))
+        return isi
+
+    def test_808_haptics_reply_is_success_with_decodable_packet(self):
+        rep = reply_of('nokia-808-rm807', 0x1C, 0x9E)
+        self.assertIsNotNone(rep, 'haptics 1C 9E unanswered: every touch feedback waits 3 s')
+        p, n, data = rep
+        self.assertEqual(p, 0x9F)
+        self.assertGreaterEqual(n, len(data))
+        isi = self.fields(data, n)
+        self.assertEqual(isi[0x0A], 0, 'status must be OK (else the point of the override is lost)')
+        self.assertNotEqual(isi[0x0B], 0, 'sub-block count must be non-zero (adaptation returns -2 otherwise)')
+        self.assertEqual(isi[0x11], 0)
+        plen = (isi[0x14] << 8) | isi[0x15]
+        self.assertGreaterEqual(plen, 3, 'the packet needs an opcode and a status: an empty packet froze the plugin')
+        self.assertLessEqual(0x16 + plen, len(isi), 'packet length field must not exceed the reply')
+        packet = isi[0x16:0x16 + plen]
+        opcode = packet[0] | (packet[1] << 8)
+        self.assertIn(opcode, (0x04, 0x05, 0x17, 0x1C, 0x1D, 0x12, 0x13, 0x1B, 0x11, 0x09, 0x07, 0x08, 0x10,
+                               0x16, 0x18, 0x19, 0x1A, 0x1E, 0x1F, 0x20), 'opcode the decoder handles')
+        self.assertEqual(packet[2], 0, 'VibeTonz status 0 = success')
+        if opcode in (0x04, 0x05, 0x17, 0x1C, 0x1D, 0x12):
+            self.assertEqual(plen, 7, 'these opcodes carry a 4-byte handle after the status')
+            self.assertNotEqual(packet[3:7], [0xFF] * 4, 'handle -1 means "closed"')
+
+    def test_808_haptics_reply_sub_block_length_matches(self):
+        p, n, data = reply_of('nokia-808-rm807', 0x1C, 0x9E)
+        isi = self.fields(data, n)
+        total = len(isi)
+        self.assertEqual(total % 4, 0, 'ISI messages are 4-byte aligned')
+        self.assertEqual((isi[0x0E] << 8) | isi[0x0F], total - 0x0C, 'sub-block length = total - 12')
+
+    def test_n8_and_701_keep_the_failure_status_until_verified(self):
+        for dev in ('nokia-n8-rm596', 'nokia-701-rm774'):
+            if dev not in BB5:
+                continue
+            with self.subTest(dev=dev):
+                p, n, data = reply_of(dev, 0x1C, 0x9E)
+                self.assertEqual(p, 0x9F)
+                self.assertEqual(data[0], 1, 'failure status: the adaptation completes -2 at once, no packet decoded')
+
+
 if __name__ == '__main__':
     unittest.main()

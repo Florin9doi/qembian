@@ -1,0 +1,101 @@
+# OSE replies for the Sony Ericsson P800 (-M p800,isi=THIS FILE): seeded from p910i-ose-replies.txt (the same
+# Ericsson GSM side generation); every line [I] for the P800 until its swbp stub is read or a run confirms it
+# (docs/devices/se-p800/bring-up.md).
+# Sony Ericsson P910i: what the fake GSM side answers on the OSE link (UART unit 2).
+# Format: src/qemu-ngage/hw/arm/p910i_gsm_peer.h. Evidence: docs/research/p910i-gsm-link.md,
+# docs/devices/se-p910i/bring-up.md (stalls). [V] = layout read from the phone's code, [I] = guessed.
+#
+# reply SIGNO RSIGNO DATA...      (hex)
+# unasked MS SIGNO DATA...        (MS decimal, after the sync)
+
+# StartSignal: ereq.dll hands OSE 0xC384 to EStart's observer (slot 48) -> StartUp [V]; payload not
+# read [V]; sent twice, EStart ignores repeats [V]
+unasked 1000 C384 00
+unasked 3000 C384 00
+
+# P800: 4398 waits for 0x4E86 and 4397 for 0x4E85 (swbp 0x506F1FC8, wait list 0x50701130; eka1/tools/swbp_waits.py) [V];
+# the P910i numbers below are its own. startuphandler.lsu (P910i stub 0x508B0C10): request 0x4398 (no data), waits for 0x4F4E
+# {value, status}: value 0..4 (else -11), 2 sets startuphandler's flag +0x1C; status 0 = OK [V];
+# value 0 chosen [I]
+reply 4398 4E86 00 00
+
+# docs/research/p910i-gsm-link.md s. 6.6 (swbp request stubs, ereq callers):
+# 0x0A3C {00 4B} (stub 0x508A93EC): send-only, no reply [V]
+# 0x42CC (stub 0x508AD790): waits for 0x2134; sig[6] = status, 0 OK; sig[2..5] not read [V]
+reply 42CC 2134 00 00 00 00 00
+# 0x4FB0 (stub 0x508AC554): waits for 0x5014; sig[2..6] copied out, always OK; meaning unknown [I: zeros]
+reply 4FB0 5014 00 00 00 00 00
+# 0x13A0 (stub 0x508AC2C8): waits for 0x13A1; 22 bytes copied out, always OK; meaning unknown [I: zeros]
+reply 13A0 13A1 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+# 0x4FB4 (stub 0x508AC7FC, 8 data bytes) waits for 0x5018; 0x4FB5 (stub 0x508AC898, 102 bytes) waits
+# for 0x5019. Both decoders (0x508AC868 / 0x508AC904) copy sig[2..3] = length L, then max(L, 1) bytes
+# from sig[4] [V]; what the blocks hold is unknown: an empty block [I]
+reply 4FB4 5018 00 00 00
+reply 4FB5 5019 00 00 00
+# after the Language dialog (Setup): 0x137D {74 93 90} (stub 0x508A8644) waits for 0x137E; the decoder
+# 0x508A86B4 returns sig[2] (status [I: 0 = OK]) and hands back sig[3], sig[4] [V]; values [I]
+reply 137D 137E 00 00 00
+# 0xC39F {04 4F 04} (E2 -> 6B, stub 0x508A67C4): send-only, no reply [V]
+# after the set up wizard (Power menu): to GSM process 0x74, 0x49D4 {FF 64 02} (stub 0x508A74A0) waits
+# for 0x4A38 and 0x49D5 {D4 00} (stub 0x508A7534) for 0x4A39; both decoders return sig[2] as the
+# status (0x508A7514 / 0x508A75A4; another signal = 9) [V]; 0 = OK [I]
+reply 49D4 4A38 00
+reply 49D5 4A39 00
+# 0x4FB3 {00} (stub 0x508AC78x) waits for 0x5017; its decoder 0x508AC7F8 ignores the content [V]
+reply 4FB3 5017 00
+# after "Phone on": 0x4397 {00} (stub 0x508B0BA0) waits for 0x4F4D, decoder 0x508B0C0C returns sig[2]
+# (status [I: 0 OK]) [V]
+reply 4397 4E85 00
+# 0x413F {PLMN, 3 BCD bytes} (stub 0x508A9F80): the TSY's SIM emergency numbers (ETel IPC 0x858, handler
+# 0x50916A3C -> ereq 0x508CC038) waits for 0x22C9: status, count (0..13), 13 entries of 3 BCD bytes (low
+# nibble first, F-filled) + 1 byte the TSY does not read [V: docs/research/p910i-tsy-link.md]. Count 0 made
+# Gsmadv leave KErrNotFound and Tele.app panic (stall 14). Numbers 112 and 911 [I: a SIM's usual list]
+reply 413F 22C9 00 02 11 F2 FF 00 19 F1 FF 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+# 0x0533 is a generic request to GSM process 0x49 with a sub-command in its first data byte. Sub 0x18
+# {18 00 00 00 00 00} (stub 0x508B3074, sent after "Phone on") waits for 0x1681; decoder 0x508B30F0:
+# sig[3] != 0 = OK (else error 8), hands back sig[5], sig[6], sig[7] [V]; values [I: 0], sig[2] echo [I]
+reply 0533/18 1681 18 01 00 00 00 00
+# 0x0533 sub 0x73 (26 bytes, carries a 0x0533/18 frame inside; stub 0x508B4660 area) waits for 0x16A3;
+# decoder 0x508B46F4: sig[3] != 0 = OK, hands back sig[6] and a block of sig[7] bytes from sig[8] [V];
+# meaning [I: a SIM access]; empty block [I]
+reply 0533/73 16A3 73 01 00 00 00 00
+# 0x4331 {} (to 0x62, stub 0x508B0FC8) waits for 0x173D; decoder 0x508B1034 copies sig[2..8] (7 bytes)
+# and always succeeds [V]; meaning unknown [I: zeros]
+reply 4331 173D 00 00 00 00 00 00 00
+# 0x4339 {} (to 0x62, stub 0x508B1054) waits for 0x173E; decoder 0x508B10C0 hands back sig[2] [V]: the SIM
+# presence [I, strong: 0 gives the "No SIM card" screen, 1 goes on to read the SIM (0533/5E)]
+reply 4339 173E 01
+# with a SIM present (4339 -> 173E 01): 0x0533 sub 0x5E (47 bytes, stub 0x508AF0B0 area) waits for
+# 0x16B8; decoder 0x508AF128: sig[3] != 0 = OK, a 43-byte block from sig[6] [V]; contents [I: zeros]
+reply 0533/5E 16B8 5E 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+# on the home screen: 0x09AD (stub 0x508A8400) waits for 0x0966, content not read [V]
+reply 09AD 0966 00
+# 0x12FA (to 0x69, stub 0x508B0794) waits for 0x1281; decoder 0x508B07FC: sig[3] != 0 = OK, 3 bytes from
+# sig[5] [V]; values [I: zeros]
+reply 12FA 1281 00 01 00 00 00 00
+# 0x0533 sub 0x0C (stub 0x508B4170) waits for 0x169E; decoder 0x508B41DC: sig[3] != 0 = OK, 10 bytes from
+# sig[6] [V]; zeros [I]
+reply 0533/0C 169E 0C 01 00 00 00 00 00 00 00 00 00 00 00 00
+# 0x4CF4 (stub 0x508B7190 area): send-only [V]
+# 0x0533 sub 0x52 (66 bytes, stub 0x508AEB00) waits for 0x16AA; decoder 0x508AEB6C: sig[3] != 0 = OK,
+# 62 bytes from sig[6] [V]; zeros [I]
+reply 0533/52 16AA 52 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+# 0x0533 sub 0x9A (22 bytes, stub 0x508B47C0 area) waits for 0x16CD; decoder 0x508B482C: sig[3] != 0 = OK,
+# sig[6] = length of the block from sig[7] (and sig[23]) [V]; empty [I]
+reply 0533/9A 16CD 9A 01 00 00 00
+
+# battery: the baseband reports the level as indication 0xC39C {percent 0..100, charger: 0 = not charging,
+# 1 = charging [I which is which]}: ereq -> batpwr.lsu (subscribes C39C, C390/1, C393/4, C39B, C389, C411)
+# -> event 0x10202 -> LSBLib (status bar, 11 steps) [V: docs/research/p910i-battery.md]. No request asks
+# for it: a periodic report, every 10 s; the status bar subscribes late and ignores an unchanged level [V].
+every 10000 C39C 64 00
+
+# P800 numbers [V: eka1/tools/swbp_waits.py on the P800 ROM]: the P910i's 0x4FBx requests are 0x4EEx here and
+# their replies 0x4F4x (both shifted by -0xC8, as 4398 -> 4E86); payloads as the P910i's [I: decoders not read]
+reply 4EE8 4F4C 00 00 00 00 00
+reply 4EEB 4F4F 00
+# 0x0533 sub 0xA6 (22 bytes, stub 0x506F5B5C, sent after "Phone on") waits for 0x16D3 [V: sigsel 0x50701514];
+# decoder 0x506F5BC8: sig[3] != 0 = OK (else sig[4] = error), count = sig[6], then count * 3 bytes from sig[7]
+# [V]. The 3-byte entries look like the P910i's SIM emergency numbers (0x413F there: BCD, low nibble first,
+# F-filled; a count of 0 crashed Tele.app) [I]: 112 and 911. sig[2] = the sub-command echoed [I].
+reply 0533/A6 16D3 A6 01 00 00 02 11 F2 FF 19 F1 FF

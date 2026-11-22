@@ -1,0 +1,15 @@
+{
+ "_comment": "Readable labels for pictures in `sydb ui` (docs/ui-probe.md): \"File.mif#id\" (as sydb ui prints it) or a pixel hash -> label. Case does not matter. Add entries when you identify an icon on screen.",
+ "Calcsoft.mif#16414": "+",
+ "Calcsoft.mif#16416": "-",
+ "Calcsoft.mif#16418": "*",
+ "Calcsoft.mif#16420": "/",
+ "Calcsoft.mif#16422": "+/-",
+ "Calcsoft.mif#16424": "=",
+ "Calcsoft.mif#16426": "sqrt",
+ "Calcsoft.mif#16458": "+/- (dimmed)",
+ "Calcsoft.mif#16460": "sqrt (dimmed)",
+ "Calcsoft.mif#16462": "% (dimmed)",
+ "Calcsoft.mif#16454": "scroll up (dimmed)",
+ "Calcsoft.mif#16456": "scroll down (dimmed)"
+}

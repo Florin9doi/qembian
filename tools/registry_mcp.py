@@ -14,6 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import registry as R            # noqa: E402
 import import_index as II       # noqa: E402
+import ipc_index as IPC         # noqa: E402
 
 PROTO = '2024-11-05'
 STR, INT, BOOL = {'type': 'string'}, {'type': 'integer'}, {'type': 'boolean'}
@@ -51,6 +52,11 @@ TOOLS = [
      'name (from the device SDK; unnamed ordinals stay null).', obj({'module': STR, 'device': STR}, ['module'])),
     ('imports_dll', 'What ordinal N of a DLL is, and which modules import it (or all of its ordinals).',
      obj({'dll': STR, 'ordinal': INT, 'grep': STR, 'device': STR}, ['dll'])),
+    ('ipc_server', "A named IPC server ('!Windowserver', or part of a name): the module that starts it and the "
+     'modules that connect to it, from the IPC index (tools/ipc_index.py).', obj({'name': STR, 'device': STR},
+                                                                                ['name'])),
+    ('ipc_module', 'What one module serves and which named servers it connects to.',
+     obj({'module': STR, 'device': STR}, ['module'])),
 ]
 
 
@@ -66,6 +72,11 @@ class Server:
         self.db = db
 
     def tool(self, name, a):
+        if name.startswith('ipc_'):
+            idx = IPC.load(a.get('device'))
+            if name == 'ipc_server':
+                return _printed(IPC.command_server, idx, a['name'])
+            return _printed(IPC.command_module, idx, a['module'])
         if name.startswith('imports_'):
             idx = json.load(open(II.index_path(a.get('device'))))
             if name == 'imports_module':

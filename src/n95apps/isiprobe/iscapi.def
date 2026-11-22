@@ -1,0 +1,35 @@
+; import library for IscApi.dll (N95 RIscApi, 32 exports) by ordinal: the used ones under isiprobe's own
+; C names (member functions called with `this` first, the EABI calling convention); the rest are placeholders
+EXPORTS
+	IscUnused1 @ 1 NONAME
+	IscUnused2 @ 2 NONAME
+	IscUnused3 @ 3 NONAME
+	IscUnused4 @ 4 NONAME
+	IscReceiveCancel @ 5 NONAME
+	IscUnused6 @ 6 NONAME
+	IscUnused7 @ 7 NONAME
+	IscUnused8 @ 8 NONAME
+	IscUnused9 @ 9 NONAME
+	IscUnused10 @ 10 NONAME
+	IscUnused11 @ 11 NONAME
+	IscUnused12 @ 12 NONAME
+	IscUnused13 @ 13 NONAME
+	IscUnused14 @ 14 NONAME
+	IscUnused15 @ 15 NONAME
+	IscUnused16 @ 16 NONAME
+	IscUnused17 @ 17 NONAME
+	IscUnused18 @ 18 NONAME
+	IscUnused19 @ 19 NONAME
+	IscUnused20 @ 20 NONAME
+	IscOpen @ 21 NONAME
+	IscUnused22 @ 22 NONAME
+	IscSend @ 23 NONAME
+	IscUnused24 @ 24 NONAME
+	IscClose @ 25 NONAME
+	IscReceive @ 26 NONAME
+	IscUnused27 @ 27 NONAME
+	IscUnused28 @ 28 NONAME
+	IscCtor @ 29 NONAME
+	IscUnused30 @ 30 NONAME
+	IscUnused31 @ 31 NONAME
+	IscUnused32 @ 32 NONAME

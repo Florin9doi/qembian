@@ -11,25 +11,46 @@
 @ The interfaces are added as the boot asks for them; each names its evidence in
 @ docs/devices/nokia-6600-nhl10/bring-up.md. ekern addresses were ported from the N-Gage's by
 @ code matching (eka1/tools/port_addr.py; unique full-score hits) [I until a run confirms].
+@ The Nokia 3230 (RM-51, -M nokia3230) uses this stub too: build.sh assembles a second copy with its
+@ addresses as --defsym (the same ekern export ordinals, its NOS bss, enosdriver export 2).
 
         .equ    DEV,            0x581f0000
+        .ifndef KERN_VARIANT
         .equ    KERN_VARIANT,   0x50322260      @ export 426 (N-Gage 469): Kern::Variant()
+        .endif
+        .ifndef SET_POWER_MODEL
         .equ    SET_POWER_MODEL,0x5032b33c      @ export 344 (N-Gage 394): Power::SetPowerModel()
+        .endif
+        .ifndef POWER_MODEL_CTOR
         .equ    POWER_MODEL_CTOR,0x5032aff8     @ export 451 (N-Gage 493): DPowerModel::DPowerModel()
+        .endif
+        .ifndef KERN_ADD_DFC
         .equ    KERN_ADD_DFC,   0x503361d8      @ export 7: Kern::Add(TDfc&)
+        .endif
+        .ifndef RAM
         .equ    RAM,            0x80006d44      @ the NOS's bss (zeroed by nosstarter): free
+        .endif
         .equ    PM_OBJ,         RAM + 0x100     @ the power model object
         .equ    HW_OBJ,         RAM + 0x300     @ DPlatChunkHw (0x2C bytes), H-nhl10-hwchunk
+        .ifndef HWCHUNK_CTOR
         .equ    HWCHUNK_CTOR,   0x5031d374      @ export 454: DPlatChunkHw::DPlatChunkHw() (ecust's import)
+        .endif
+        .ifndef HWCHUNK_CREATE
         .equ    HWCHUNK_CREATE, 0x5031d3ec      @ export 93: DPlatChunkHw create(this, phys, size, attribs)
+        .endif
         .equ    NMETHODS,       64
+        .ifndef HWCHUNK_SIZE
+        .equ    HWCHUNK_SIZE,   0x46000         @ H-nhl10-hwchunk: address space the NOS's chunks took [I]
+        .endif
         .equ    RTC_DONE,       RAM + 0x1f0     @ the RTC hand-over was made (N-Gage Q49)
         .equ    RX_FLAG,        RAM + 0x1f8     @ board: a delivery waits (ngage.c nos_rx_flag)
         .equ    RX_DFC,         RAM + 0x200     @ the delivery TDfc (ngage.c nos_rx_dfc)
         .equ    RX_RING_IDX,    RAM + 0x2f0     @ next ring slot
         .equ    RX_RING,        RAM + 0x1000    @ 32 frame buffers of 0x220 bytes (kernel memory)
         .equ    RX_SLOT,        0x220
+        .ifndef ENOS_DELIVER
         .equ    ENOS_DELIVER,   0x5040f164      @ enosdriver.ldd export 2: frame up to isa_if_driver [V]
+        .endif
 
         .text
         .arm
@@ -78,7 +99,7 @@ _start:
         bx      ip
         ldr     r0, =HW_OBJ
         mov     r1, #0x0c000000
-        ldr     r2, =0x46000
+        ldr     r2, =HWCHUNK_SIZE
         mov     r3, #0x13
         ldr     ip, =HWCHUNK_CREATE
         mov     lr, pc

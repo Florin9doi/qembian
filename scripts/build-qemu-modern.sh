@@ -35,6 +35,7 @@ for p in patches/qemu-modern/*.patch; do
   basename "$p" >> "$SRC/.syborg-patches"
 done
 cp src/qemu-syborg/hw/arm/syborg*.{c,h,inc} "$SRC/hw/arm/"
+cp src/qemu-syborg/ui/avrec.c "$SRC/ui/"      # screen + sound recorder (docs/recording.md; patch 0010)
 # the host EGL/OpenVG (the Khronos RI built for the host, C++): a static library linked into the device
 scripts/build-syvg.sh > build/logs/syvg-build.log 2>&1 || { tail -20 build/logs/syvg-build.log; exit 1; }
 cp src/syvg/syvg.h src/syvg/vg2_fn.h "$SRC/hw/arm/"

@@ -14,6 +14,13 @@
 #define P910_SRAM_BASE 0x68000000
 #define P910_SRAM_SIZE (64 * KiB)
 
+/* one phone on this board: the P910i, or the P800 (UIQ 2.0; same SoC, NOR instead of DiskOnChip) */
+typedef struct {
+    const char *machine;            /* "p910i", "p800" */
+    bool doc;                       /* DiskOnChip window at 0xB0000000 (p910i_soc.c doc_init) */
+} P910Phone;
+extern const P910Phone *p910_phone;
+
 uint32_t p910_pc(void);
 const char *p910_images(void);
 const char *p910_isi_file(void);

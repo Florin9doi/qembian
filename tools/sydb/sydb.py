@@ -8,7 +8,7 @@ Which phone: --instance NAME (a device instance, tools/instance.py: build/instan
   sydb phone [NAME] [--fresh] [--scale 2]   emulator window of instance NAME: screen, phone keys (long
                                      presses), reset/pause/screenshot/snapshot, slider; starts the
                                      session if none runs and ends it when the window closes
-  sydb start [--seed DIR] [--fresh] [--gui] [--rom ROM] [--audio wav|host|DRIVER] [--paused | --catch-panics]
+  sydb start [--seed DIR] [--fresh] [--gui] [--modem table|real] [--rom ROM] [--audio wav|host|DRIVER] [--paused | --catch-panics]
                                               boot a session, wait for idle
   sydb stop | status | wait idle|agent|REGEX [--timeout S]
   sydb install | uninstall           agent on/off C: incl. its Starter startup-list record (session stopped)
@@ -26,6 +26,11 @@ Which phone: --instance NAME (a device instance, tools/instance.py: build/instan
   sydb wg | fg WGID | unlock | lock | keepawake on|off|unlocked
   sydb prop get CAT KEY | prop set CAT KEY VALUE              (hex category/key)
   sydb key KEY... [--delay S] | type TEXT | text TEXT (any characters, straight to the app) | view APP VIEW [MSGUID MSG] (an app's view, Help-app links: tools/helplinks.py) | screenshot [OUT.png] [--scale F] [--changed]
+  sydb record [start [OUT.mp4] | stop | status]   screen + sound to MP4 (H.264/AAC, ~/Videos; docs/recording.md)
+  sydb ui [--all] [--json] | ui select TEXT [--open] | ui wait TEXT [--timeout S]
+                                     the focused app's controls (title, softkeys, list/grid/menu items,
+                                     highlight): the app answers through uiprobe (docs/ui-probe.md); --gdb
+                                     reads the frozen phone's memory instead (docs/ui-dump.md)
   sydb gl [get] | gl set NAME=V... [--save]   host GPU settings (msaa, filter, compose; thread at next start), stats
   sydb sms TPDU_HEX... | sms-provision [--apn APN]   incoming SMS on the virtual SIM ([sim] present); sms-provision
                                      = the operator's settings message (OMA CP): creates the Internet access point
@@ -121,6 +126,17 @@ SIS_ERRORS = {   # Software Install results (appinstall swi/inc/swi/sisinstaller
     -10251: 'signature scheme not supported', -10252: 'digest not supported', -10253: 'bad hash',
     -10254: 'security error (signature / certificate)', -10263: 'bad usage'}
 HOOK_EXE = os.path.join(ROOT, 'build', 'n95apps', 'boothook.exe')  # the boot hook (docs/agent-autostart.md)
+# the in-app UI probe (src/n95apps/uiprobe, docs/ui-probe.md): an ECom plugin every Eikon app loads
+UIPROBE_DLL = os.path.join(ROOT, 'build', 'n95apps', 'uiprobe.dll')
+UIPROBE_RSC = os.path.join(ROOT, 'build', 'n95apps', 'uiprobe.rsc')
+
+
+def uiprobe_fits():
+    """the probe imports Avkon: only phones whose UI is Avkon (profile platform.ui s60-* / symbian3) may get it.
+    On a phone without avkon.dll the plugin would fail to load and CEikonEnv construction would leave in
+    every app (docs/ui-automation.md "Platforms")"""
+    ui = str(devmodel.get(devmodel.load(), 'platform.ui', '') or '')
+    return ui.startswith('s60') or ui.startswith('symbian3')
 
 
 def hook_name(required=True):
@@ -216,6 +232,15 @@ def cmd_install(sdir, a):
         print('sydb: no boot hook for %s (its EStart starts none of %s by bare name): the agent is on C: but does '
               'not start at boot; agent commands (ps, wg, strace) are unavailable' % (DEVICE_ID, ', '.join(devmodel.BOOT_HOOK_NAMES)),
               file=sys.stderr)
+    if not uiprobe_fits():
+        drive_rm(drives, '/sys/bin/uiprobe.dll')
+        drive_rm(drives, '/resource/plugins/uiprobe.rsc')
+        print('sydb: no uiprobe for %s (not an Avkon UI): `sydb ui` reads memory instead' % DEVICE_ID, file=sys.stderr)
+    elif os.path.exists(UIPROBE_DLL) and os.path.exists(UIPROBE_RSC):
+        drive_put(drives, UIPROBE_DLL, '/sys/bin')
+        drive_put(drives, UIPROBE_RSC, '/resource/plugins')
+    else:
+        print('sydb: no uiprobe (src/n95apps/uiprobe/build.sh): `sydb ui` falls back to reading memory', file=sys.stderr)
     data = drive_read(drives, '/' + startlist.PATH)      # an older install's Starter record: the agent
     if data:                                             # would start twice
         new = startlist.remove(data, AGENT_PATH)
@@ -237,9 +262,10 @@ def cmd_uninstall(sdir, a):
             drive_write(drives, '/' + startlist.PATH, new)
         else:
             drive_rm(drives, '/' + startlist.PATH)
-    for f in ('devagent.exe', 'dafs.exe') + devmodel.BOOT_HOOK_NAMES:
+    for f in ('devagent.exe', 'dafs.exe', 'uiprobe.dll') + devmodel.BOOT_HOOK_NAMES:
         drive_rm(drives, '/sys/bin/' + f)
-    print('removed devagent.exe, dafs.exe and the boot hook from C:')
+    drive_rm(drives, '/resource/plugins/uiprobe.rsc')
+    print('removed devagent.exe, dafs.exe, uiprobe and the boot hook from C:')
 
 
 def mt(drives, *args):
@@ -378,6 +404,16 @@ def cmd_start(sdir, a):
         made = (src and os.path.exists(src) and os.environ.get('SYBORG_UDA', '1') != '0') or (d and d[0].get('format'))
         if made and not os.path.exists(os.path.join(drives, name)):
             print(devmodel.drive_image(prof, kind, os.path.join(drives, name)))
+    # the profile's drive files (e.g. the N95's WLAN-off runtimefeatures.txt) also on drives made before they were
+    # declared; a file already there is left alone
+    for d in devmodel.get(prof, 'board.drives', []):
+        img = d.get('image') and os.path.join(drives, d['image'])
+        if img and os.path.exists(img):
+            try:
+                for path in devmodel.add_drive_files(prof, d['letter'], img, missing_only=True):
+                    print('added %s:\\%s (profile drive file)' % (d['letter'], path.replace('/', '\\')))
+            except devmodel.DeviceError as e:
+                print('drive files: %s' % e)
     if a.seed or a.fresh or a.install:
         if os.path.exists(os.path.join(drives, 'nvmemory.img')):
             cmd_install(sdir, a)
@@ -387,7 +423,8 @@ def cmd_start(sdir, a):
                       '--audio', getattr(a, 'audio', None) or 'wav', '--gl', getattr(a, 'gl', None) or 'host']
                      + (['--gui'] if a.gui else [])
                      + (['--paused'] if getattr(a, 'paused', False) or getattr(a, 'catch_panics', False) else [])
-                     + (['--owner', str(a.owner)] if getattr(a, 'owner', None) else []),
+                     + (['--owner', str(a.owner)] if getattr(a, 'owner', None) else [])
+                     + (['--modem', a.modem] if getattr(a, 'modem', None) else []),
                      stdout=log, stderr=log, stdin=subprocess.DEVNULL,
                      start_new_session=True, cwd=ROOT)
     for _ in range(100):
@@ -504,8 +541,10 @@ def main():
         ap.add_argument('--audio', default='wav'); ap.add_argument('--gl', default='host')
         ap.add_argument('--paused', action='store_true')
         ap.add_argument('--owner', type=int, help='stop the session when this process is gone (sydb phone)')
+        ap.add_argument('--modem', default='table', choices=['table', 'real'])
         x = ap.parse_args(rest)
-        daemon.serve(sdir, x.rom, x.drives, x.gui, ['-S'] if x.paused else [], x.restore, x.audio, x.gl, x.owner)
+        daemon.serve(sdir, x.rom, x.drives, x.gui, ['-S'] if x.paused else [], x.restore, x.audio, x.gl, x.owner,
+                     x.modem)
         return
     if cmd == 'phone':                 # emulator window: screen + phone keys + machine controls
         ap = argparse.ArgumentParser(prog='sydb phone')
@@ -519,7 +558,10 @@ def main():
         ap.add_argument('--no-uda', action='store_true', help="new drives start blank, without the firmware's user data layer")
         ap.add_argument('--restart', action='store_true', help='restart a running session first (fresh boot, current ROM)')
         ap.add_argument('--gl', choices=['host', 'soft'], help="GLES on the host GPU or the software rasteriser (default: the instance's settings.gl, else host)")
+        ap.add_argument('--modem', choices=['table', 'real'], help="modem of a session it starts: table (reply tables) or "
+                        "real (the phone's own modem firmware; N95); default: the instance's settings.modem, else table")
         x = ap.parse_args(rest)
+        x.modem = x.modem or setting('modem', 'table')
         x.audio = x.audio or setting('audio', 'host')
         x.gl = x.gl or setting('gl', 'host')
         x.scale = x.scale or setting('scale', 1.0)
@@ -544,7 +586,7 @@ def main():
             subprocess.run([sys.executable, os.path.abspath(__file__), '--session', sdir, 'start', '--no-wait',
                             '--audio', x.audio, '--gl', x.gl] + (['--rom', x.rom] if x.rom else [])
                            + (['--install'] if x.install else []) + (['--fresh'] if x.fresh else [])
-                           + (['--no-uda'] if x.no_uda else [])
+                           + (['--no-uda'] if x.no_uda else []) + ['--modem', x.modem]
                            + ([] if x.keep else ['--owner', str(os.getpid())]), check=True)
             started = True
         import phone
@@ -554,6 +596,10 @@ def main():
             print('stopping the session %s (--keep leaves it running)' % sdir)
             Client(sdir).call({'op': 'stop'})
         sys.exit(rc)
+    if cmd == 'ui':                    # the focused app's control tree; select/wait on it (tools/sydb/uidump.py)
+        import uidump
+        uidump.main(['--session', sdir] + rest)
+        return
     if cmd == 'tui':
         import tui
         tui.main(sdir)
@@ -588,7 +634,11 @@ def main():
         ap.add_argument('--catch-panics', action='store_true', help='start stopped, arm a freeze+snapshot catch '
                         'on the first panic, resume, wait for idle; on a timeout print what was caught')
         ap.add_argument('--owner', type=int, help=argparse.SUPPRESS)	# sydb phone: the session ends with it
+        ap.add_argument('--modem', choices=['table', 'real'], help="table: the fake modem's reply tables; real: the "
+                        "phone's own modem firmware on an emulated modem CPU (devices with [modem_cpu], the N95; "
+                        "logs in <session>/modem); default: the instance's settings.modem, else table")
         a = ap.parse_args(rest)
+        a.modem = a.modem or setting('modem', 'table', sdir)
         a.rom = a.rom or session_rom(sdir)
         a.audio = a.audio or setting('audio', 'wav', sdir)
         a.gl = a.gl or setting('gl', 'host', sdir)
@@ -822,6 +872,12 @@ def main():
         x = ap.parse_args(rest)
         out(c.call({'op': 'screenshot', 'path': os.path.abspath(x.out) if x.out else None, 'scale': x.scale,
                     'only_if_changed': x.changed}))
+    elif cmd == 'record':
+        # record [start [OUT.mp4] | stop | status]: screen + sound to MP4 (docs/recording.md); bare = toggle
+        sub = rest[0] if rest else 'toggle'
+        if sub not in ('start', 'stop', 'status', 'toggle'):
+            sys.exit('sydb record [start [OUT.mp4] | stop | status]')
+        out(c.call({'op': 'record', 'sub': sub, 'path': os.path.abspath(rest[1]) if sub == 'start' and len(rest) > 1 else None}, 20))
     elif cmd == 'log':
         ap = argparse.ArgumentParser(); ap.add_argument('--grep'); ap.add_argument('--since', type=float, default=0)
         ap.add_argument('--max', type=int, default=40); ap.add_argument('--head', action='store_true')
@@ -963,6 +1019,9 @@ def main():
         need(c.call({'op': 'put', 'local': AGENT_EXE, 'remote': 'C:\\data\\sydb\\devagent.new', 'stamp': True}))
         need(c.call({'op': 'put', 'local': DAFS_EXE, 'remote': 'C:\\sys\\bin\\dafs.exe', 'stamp': True}))
         need(c.call({'op': 'put', 'local': HOOK_EXE, 'remote': 'C:\\sys\\bin\\' + hook_name(), 'stamp': True}))
+        if uiprobe_fits() and os.path.exists(UIPROBE_DLL) and os.path.exists(UIPROBE_RSC):   # apps started from now on load it
+            need(c.call({'op': 'put', 'local': UIPROBE_DLL, 'remote': 'C:\\sys\\bin\\uiprobe.dll', 'stamp': True}))
+            need(c.call({'op': 'put', 'local': UIPROBE_RSC, 'remote': 'C:\\resource\\plugins\\uiprobe.rsc'}))
         need(agent('upgrade', ['C:\\data\\sydb\\devagent.new']))
         time.sleep(1.5)
         r = need(c.call({'op': 'wait', 'what': 'agent', 'timeout': 30}))

@@ -23,6 +23,15 @@ hand-made QEMU/gdb command lines:
 - `sydb dbg ...` is the persistent gdb: hw breakpoints (`dbg cmd 'condition N $r0 == -4'`),
   bt/regs/mem/eval, app ELF symbols from `SYBCODE:` lines. `sydb strace MATCH` traces IPC.
 - `sydb log --grep RE` / `events` read the session's serial log (`<session>/serial.log`).
+- `sydb ui` (MCP `ui_tree`) gives the foreground app's UI as data (title, softkeys, list/menu items and
+  selection, control tree), and `ui select TEXT --open` / `ui wait TEXT` drive it. Prefer it to a
+  screenshot for "where am I / what is selected / what does the screen say" (docs/ui-automation.md:
+  summary keys, recipes, platform status). The app answers itself through uiprobe.dll, an ECom plugin
+  in every Avkon app; `--gdb` reads memory instead.
+- Real modem (N95 8GB): `sydb start/phone ... --modem real` runs the phone's own modem firmware on an emulated
+  modem CPU instead of the reply tables (logs in `<session>/modem/`; docs/sydb.md, docs/research/n95-cmt-emulation.md).
+- Video: `sydb record` / the phone window's Record button (Ctrl+R) = screen + sound to MP4 (`docs/recording.md`;
+  `src/qemu-syborg/ui/avrec.c`, identical copy in ../k750i).
 - Crashes and races: `sydb catch add ...` (freeze/dump/snapshot when a thread dies as described,
   call stack included), `sydb snap save` / `sydb fork SNAP` (resume a saved machine as a separate
   session, again and again). Prefer this to breakpoints on hot paths, which change the timing.
@@ -73,16 +82,21 @@ Read `docs/devices.md` (schema, layering) before touching `models/`, `src/standi
   instance in `tools/instance.py list`, or `run-gui.sh`, which boots one): clone it
   (`tools/instance.py clone NAME NAME-test`) or use a `--session build/sydb-<name>` session.
 
-## EKA1 phones (N-Gage QD, 7650, 6600, 9500, P910i): their own kernel, separate boards
+## EKA1 phones (N-Gage QD, 7650, 6600, 3230, 6630, N70, 9210, 9500, 7710, P800, P910i): their own kernel, separate boards
 
 Symbian 6.1-7.0s phones run their own EKA1 kernel on QEMU boards in `src/qemu-ngage/` (built by
 `scripts/build-qemu-ngage.sh` into `build/qemu-ngage/`), outside the device model and sydb: `-M ngage`
-(N-Gage QD), `nokia7650`, `nokia6600` (DCT4 variants of ngage.c), `nokia9500` (QEMU's OMAP1510), `p910i`
+(N-Gage QD), `nokia7650`, `nokia6600`, `nokia3230` (DCT4 variants of ngage.c), `nokia9500` and `nokia7710` (QEMU's OMAP1510, one board with a per-phone description), `nokia6630` (the same board file,
+QEMU's OMAP1510 made an OMAP1610 by patches 0021-0027; its devices in `nokia6630_soc.c`), `nokian70` (the 6630's board with the
+N70's phone description: OMAP1710 IDs, ISC modem replies), `nokia9210` (Symbian 6.0; its own board modelled
+from the phone's code, `nokia9210.c`), `p910i` and `p800`
 (a PNX4000 board modelled from the phone's code). Start with `docs/eka1-ngage.md` (tools, running,
 debugging) and the phone's `docs/devices/<id>/bring-up.md`; overview in `docs/device-matrix.md` 2.2b; the
 method for a new SoC and an unknown modem protocol: `docs/devices/se-p910i/how-it-was-done.md`.
-Window: `python3 eka1/tools/ngage_phone.py --model M`; debug sessions: `eka1/tools/ngage_sess.py` (own
-sessions only, never `phone-*` unasked). After changing shared code (ngage*.c, patches/qemu-ngage/, the
+Window: `python3 eka1/tools/ngage_phone.py --model M` (a fresh phone's first boot shows a blank/white screen while
+C: is formatted: up to ~150 s on the 3230, not a hang; docs/eka1-ngage.md "First boot is slow"); debug sessions: `eka1/tools/ngage_sess.py`; to reproduce
+an owner's report, boot their phone directly (`-s phone-NAME --flash build/ngage/phones/NAME.flash`) once no window or
+session uses it (two emulators on one flash file corrupt it). After changing shared code (ngage*.c, patches/qemu-ngage/, the
 build script) run `tests/ngage-boot-check.py --model ngage / nokia7650 / nokia6600 --idle`.
 
 ## Hosted EKA2: the kernel as a Linux process

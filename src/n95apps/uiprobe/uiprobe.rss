@@ -1,0 +1,26 @@
+// uiprobe's ECom registration (uiprobe.cpp): one implementation of the Uikon library interface
+// (CEikLibrary2, 0x10004cc1) that CEikonEnv loads into every Eikon/Avkon app.
+#include <ecom/registryinfo.rh>
+
+RESOURCE REGISTRY_INFO r_registry
+	{
+	dll_uid = 0xE0001DD0;
+	interfaces =
+		{
+		INTERFACE_INFO
+			{
+			interface_uid = 0x10004cc1;
+			implementations =
+				{
+				IMPLEMENTATION_INFO
+					{
+					implementation_uid = 0xE0001DD1;
+					version_no = 1;
+					display_name = "uiprobe";
+					default_data = "";
+					opaque_data = "";
+					}
+				};
+			}
+		};
+	}

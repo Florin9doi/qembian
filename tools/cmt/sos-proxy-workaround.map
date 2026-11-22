@@ -1,0 +1,8 @@
+# Workaround (H-cmt-sos-proxy, docs/research/n95-cmt-emulation.md): register the modem's SOS proxy with the SSI
+# driver by hand at 500 ms. The firmware does it on MTC_STATE_INFO_IND (15 C0, action 0x0c), which MTC sends only
+# after its 0 -> 8 state transition; that stalls because the WCDMA stack tasks are never started (radio layer 1
+# on the DSP is not emulated). Same writes as the proxy's own path (FUN_f01e6054 -> FUN_f01e5fc0, FUN_f012cfb8):
+pokev 500 0xd801a570 1 1            # FUN_f01e5fc0: proxy flag (DAT_f01e5fe8 - 4)
+pokev 500 0xd80104c4 0xf01e5f99 4   # SSI driver: proxy callback (the proxy's receive function)
+pokev 500 0xd80104cd 2 1            # SSI driver: proxy/BREAK state 2 = registered
+pokev 500 0xd801a6dd 1 1            # proxy: registered (DAT_f01e630c + 1)

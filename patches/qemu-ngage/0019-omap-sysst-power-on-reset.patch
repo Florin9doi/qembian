@@ -1,0 +1,16 @@
+--- a/hw/arm/omap1.c	2026-11-18 23:26:09.251950089 +0100
++++ b/hw/arm/omap1.c	2026-11-18 23:26:09.252950129 +0100
+@@ -1873,7 +1873,12 @@
+     s->clkm.arm_idlect2 = 0x0100;
+     s->clkm.dsp_idlect1 = 0x0002;
+     omap_clkm_reset(s);
+-    s->clkm.cold_start = 0x3a;
++    /*
++     * qembian: a power-on reset reports POR (bit 5) only. QEMU's 0x3a also set EXT_RST, ARM_MCRST and
++     * GLOB_SWRST (bit 1); the Nokia 7710's bootstrap reads bit 1 as a software restart and the kernel
++     * then takes the warm-start path (startup type 4: security data from before the reset, none here).
++     */
++    s->clkm.cold_start = 0x20;
+ 
+     memory_region_add_subregion(memory, mpu_base, &s->clkm_iomem);
+     memory_region_add_subregion(memory, dsp_base, &s->clkdsp_iomem);

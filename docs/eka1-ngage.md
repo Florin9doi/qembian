@@ -14,9 +14,11 @@ values are an `NgageModel` in `ngage.c`; the tools take `--model nokia6600`. Its
 [devices/nokia-6600-nhl10/bring-up.md](devices/nokia-6600-nhl10/bring-up.md). Run
 `python3 tests/ngage-boot-check.py [--model nokia6600]` after every board change.
 The EKA1 tree also holds boards of their own: the **Nokia 9500 Communicator** (`-M nokia9500`, QEMU's
-OMAP1510: [devices/nokia-9500-ra2/bring-up.md](devices/nokia-9500-ra2/bring-up.md)) and the **Sony Ericsson
+OMAP1510: [devices/nokia-9500-ra2/bring-up.md](devices/nokia-9500-ra2/bring-up.md)), the **Nokia 7710** (`-M nokia7710`,
+the same board, S90 Desk: [devices/nokia-7710-rm12/bring-up.md](devices/nokia-7710-rm12/bring-up.md)), the **Sony Ericsson P800**
+(`-M p800`, the P910i's board, UIQ 2.0 home screen: [devices/se-p800/bring-up.md](devices/se-p800/bring-up.md)) and the **Sony Ericsson
 P910i** (`-M p910i`, a PNX4000 board modelled from the phone's code, UIQ 2.1 home screen:
-[devices/se-p910i/bring-up.md](devices/se-p910i/bring-up.md)). All five phones: `docs/device-matrix.md` 2.2b.
+[devices/se-p910i/bring-up.md](devices/se-p910i/bring-up.md)). All eight phones (+ the 3230, `-M nokia3230`: [devices/nokia-3230-rm51/bring-up.md](devices/nokia-3230-rm51/bring-up.md), and the 6630, `-M nokia6630`, S60 FP2 on an OMAP1610: [devices/nokia-6630-rm1/bring-up.md](devices/nokia-6630-rm1/bring-up.md), and the N70, `-M nokian70`, S60 FP3 on the 6630's board: [devices/nokia-n70-rm84/bring-up.md](devices/nokia-n70-rm84/bring-up.md), and the 9210 Communicator, `-M nokia9210`, Symbian 6.0 on its own board: [devices/nokia-9210-rae3/bring-up.md](devices/nokia-9210-rae3/bring-up.md)): `docs/device-matrix.md` 2.2b.
 
 Related documents:
 
@@ -27,6 +29,7 @@ Related documents:
 | [eka1-ngage-roadmap.md](eka1-ngage-roadmap.md) | the original plan (phases P0-P6), with status |
 | [../eka1/README.md](../eka1/README.md) | the firmware files, extraction and analysis tools |
 | [research/eka1-ngage-feasibility.md](research/eka1-ngage-feasibility.md) | the first feasibility study |
+| [eka1-ngage-handoff.md](eka1-ngage-handoff.md) | a historical hand-off prompt (2026-11-10) |
 
 ## State (2026-11-11)
 
@@ -59,6 +62,27 @@ Related documents:
   (screendump-limited; ~18% of a host core since H-ngage-idle), the kart drives (key 5 accelerates). No sound.
 
 Not working or not modelled yet: see "Next" below.
+
+## First boot is slow (expected): a blank or white screen for minutes
+
+A factory-fresh phone (no flash file yet, or `--fresh`) formats C: before anything is drawn, so the screen stays
+blank or white for a long time. **That is not a hang.** It happens once: the phone's flash file
+(`build/ngage/phones/NAME.flash`, `--flash`) keeps C:, and later boots are fast.
+
+| Phone | First boot (blank/white screen, then) | Later boots | Why |
+|---|---|---|---|
+| N-Gage QD | ~40 s to the logo, ~95 s to the UI | ~7 s | EStart formats C: |
+| Nokia 6600 | ~60 s format, then the time query | ~20 s | EStart formats C: |
+| Nokia 3230 | **~150 s** white screen, then the NOKIA splash | ~30 s to the time query | C: is formatted **twice**: EStart, then the restore-factory-settings script (`FORMAT C:` in RfsServer), ~0.7 s per 64 KB sector |
+| Nokia 6630 | **~3.5 min** logo / white screen, then the home-city list | (a kept NAND: open, stall 26) | mednand formats the NAND's user area (C:) |
+| Nokia N70 | **~3.5 min** NOKIA logo (C: formatted), then the city list; ~5 min to the home screen | (a kept NAND: not checked yet) | as the 6630 |
+| Nokia 9210 | ~95 s to the Home city query (the DataFlash driver scans all 8192 pages and writes its reserve table) | under a minute, straight to the Desk | |
+| Nokia 7710 / 9500 | a few seconds (the C: image is ready-made) | same | |
+
+How to tell it is formatting, without disturbing the phone: `ngage_sess.py -s SESSION status` shows `hit: null` and a
+growing uptime. `objects` (it pauses briefly) shows only EKern, EFile, EStart (3 processes) until the format ends. For
+proof, a one-shot run with `-- -trace 'pflash_*'` (ngage_run.py) shows the sector erases advancing. Look at it again only
+after the times above. The time and date queries then come at every boot (no RTC hand-over yet).
 
 ## Running it
 

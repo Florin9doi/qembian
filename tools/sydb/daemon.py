@@ -780,6 +780,28 @@ def handle(sess, req):
         sess.qmp('input-send-event', events=[{'type': 'key', 'data': {'down': bool(req['down']),
                                               'key': {'type': 'qcode', 'data': k}}} for k in keys])
         return {'ok': True}
+    if op == 'record':                    # screen + sound to MP4: QEMU's avrec object (docs/recording.md)
+        sub = req.get('sub', 'toggle')
+        try:
+            on, exists = bool(sess.qmp('qom-get', path='/objects/avrec', property='recording')), True
+        except AgentError:
+            on = exists = False
+        if sub == 'status':
+            return {'ok': True, 'recording': on, 'path': getattr(sess, 'rec_path', None) if on else None}
+        if exists:                        # stop (ffmpeg finishes the file), or clear a failed one before a start
+            sess.qmp('object-del', id='avrec')
+        if sub == 'stop' or (sub == 'toggle' and on):
+            return {'ok': True, 'recording': False, 'path': getattr(sess, 'rec_path', None)}
+        path = req.get('path')
+        if not path:
+            d = os.environ.get('AVREC_DIR') or os.path.expanduser('~/Videos')
+            d = d if os.path.isdir(d) else sess.sdir
+            parts = os.path.abspath(sess.sdir).split(os.sep)
+            name = parts[parts.index('instances') + 1] if 'instances' in parts[:-1] else parts[-1]
+            path = os.path.join(d, '%s-%s.mp4' % (name, time.strftime('%Y%m%d-%H%M%S')))
+        sess.qmp('object-add', **{'qom-type': 'avrec', 'id': 'avrec', 'path': os.path.abspath(path)})
+        sess.rec_path = os.path.abspath(path)
+        return {'ok': True, 'recording': True, 'path': sess.rec_path}
     if op == 'qmp':                       # raw QMP command (e.g. input-send-event)
         return {'ok': True, 'return': sess.qmp(req['cmd'], **(req.get('args') or {}))}
     if op == 'hmp':
@@ -794,7 +816,40 @@ def _die_with_parent():
     ctypes.CDLL(None).prctl(1, signal.SIGKILL)     # PR_SET_PDEATHSIG = 1
 
 
-def serve(sdir, rom, drives, gui, extra, restore=None, audio='wav', gl='host', owner=None):
+def start_real_modem(sdir):
+    """--modem real: the phone's own modem firmware on its emulated modem CPU (profile [modem_cpu], the
+    n95-cmt machine run by tools/cmt/probe.py until it powers off), linked to syborg-modem through a unix
+    socket in the session. Returns (process, the phone's extra QEMU arguments). Its logs (access.log: every ISI
+    message both ways) are in <session>/modem; the probe and its QEMU die with this daemon."""
+    m = devmodel.get(DEVICE, 'modem_cpu.map')
+    if not m:
+        raise SystemExit('%s has no [modem_cpu] in its profile: only --modem table' % DEVICE['_id'])
+    out = os.path.join(sdir, 'modem')
+    os.makedirs(out, exist_ok=True)
+    sock = os.path.join(sdir, 'cmt.sock')
+    if os.path.exists(sock):
+        os.unlink(sock)
+    p = subprocess.Popen([sys.executable, os.path.join(ROOT, 'tools', 'cmt', 'probe.py'), '--secs', '0',
+                          '--map', os.path.join(ROOT, m), '--link', sock, '--out', out, '--device', DEVICE['_id']],
+                         stdout=open(os.path.join(out, 'probe.log'), 'w'), stderr=subprocess.STDOUT,
+                         stdin=subprocess.DEVNULL, cwd=ROOT, preexec_fn=_die_with_parent)
+    for _ in range(300):
+        if os.path.exists(sock) or p.poll() is not None:
+            break
+        time.sleep(0.1)
+    if not os.path.exists(sock):
+        raise SystemExit('the modem machine did not come up, see %s' % os.path.join(out, 'probe.log'))
+    return p, ['-chardev', 'socket,id=cmt,path=%s' % sock, '-global', 'syborg-modem.link=cmt']
+
+
+def serve(sdir, rom, drives, gui, extra, restore=None, audio='wav', gl='host', owner=None, modem='table'):
+    # $SYDB_QEMU_EXTRA: more QEMU arguments (shell words)
+    import shlex
+    extra = list(extra) + shlex.split(os.environ.get('SYDB_QEMU_EXTRA', ''))
+    modem_proc = None
+    if modem == 'real':
+        modem_proc, margs = start_real_modem(sdir)
+        extra += margs
     sess = Session(sdir, rom, drives, gui, extra, restore, audio, gl)
     sess.start()
     if owner:                          # sydb phone: the session ends with its window, however that goes
@@ -843,3 +898,5 @@ def serve(sdir, rom, drives, gui, extra, restore=None, audio='wav', gl='host', o
     signal.signal(signal.SIGTERM, lambda *a: (sess.stop(), os._exit(0)))
     srv.serve_forever()
     sess.stop()
+    if modem_proc and modem_proc.poll() is None:
+        modem_proc.terminate()

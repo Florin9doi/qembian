@@ -52,50 +52,186 @@ source = "docs/research/gcerenderstage-808.md; WsRenderStage.h (EPL); wsgraphicd
 [[contract]]
 key = "surface-update-server-provider"
 component = "surface-update"
-title = "surfaceupdateserver ord1 (StartSurfaceUpdateServer) and the MCompositionSurfaceUpdate hand-off"
+title = "surfaceupdateserver ord1 (StartSurfaceUpdateServer), MSurfaceUpdateServerProvider::Register and the MCompositionSurfaceUpdate hand-off"
 kind = "abi"
-status = "partial"
-participants = "compositionbackend.dll (only importer on the 808), our src/gcebe (replacement), surfaceupdateclient.dll users"
-args = "TInt StartSurfaceUpdateServer(MSurfaceUpdateServerProvider*& aProvider)   [signature verified]"
-completion = """
-VERIFIED: the compositor is asked for MCompositionSurfaceUpdate with CBase::Extension_(0x10286498, &out, NULL)
-and is then called on vtable slot 2 (offset 8) with the batch argument list - that is the content hand-off.
-NOT ESTABLISHED: what completes a client's pending update notification, and in what order relative to that
-slot-2 call.
+status = "known"
+participants = """
+compositionbackend.dll (the 808's only importer of ord1; src/gcebe replaces it): calls Start, then Register with
+itself (a CBase) as the per-screen receiver and is called back on its MCompositionSurfaceUpdate interface;
+surfaceupdateserver.dll: the server object, its own thread and the CUpdateReceiverNotification CActives that own
+every status handed to the receiver; surfaceupdateclient.dll sessions (contract surface-update-client-session) at
+the other end. Server side read in the code (808, surfaceupdateserver.dll XIP base 0x80dda8a8); the run that
+observes the ordering on the phone is still missing (docs/research/surface-update-808.md).
 """
-cancellation = "NOT ESTABLISHED. The client has two entries that return KErrNotSupported (-5) and one that sends opcode 7 then reports KErrCancel (-3); their meaning is unverified."
-errors = "KErrAlreadyExists (-11) from Start when a server named !SURFACE_UPDATE_SERVER already exists; -6 (KErrArgument) on bad server-side arguments; -5 (KErrNotSupported) from two client entries"
-source = "decompilation: build/roms/nokia-808-rm807/.../ghidra/SurfaceUpdateServer.dll.c (+ .elf), module-relative ord1 0x4de, thread entry 0x41e"
-
+args = """
+TInt StartSurfaceUpdateServer(MSurfaceUpdateServerProvider*& aProvider)   [signature verified; ord1 = module
+offset 0x4de, thread entry 0x41e; the first caller's provider is handed to every later caller].
+Provider vtable (secondary vtable 0x80ddbdf8): slot 0 TInt Register(TInt aScreen, CBase* aReceiver, TInt
+aPriority) (thunk 0x80ddaf2c; cross-thread: stores the three arguments, completes the provider CActive with 1,
+waits on a semaphore, returns the server thread's result, server +0x28); slot 1 Terminate() is empty.
+In the server thread (RunL 0x80ddb068 -> 0x80ddaf3c) Register asks aReceiver's primary vtable slot 2 (offset 8,
+CBase::Extension_) with (0x10286498, &out, NULL) and stores the result per screen (server +0x68) and as a
+(priority, interface) pair in the array at +0x80, kept sorted by RPointerArray::InsertIsq on the priority; index 0
+is "the first receiver" of every batch [inferred: the highest priority]. A NULL aReceiver unregisters the screen.
+Per update (SubmitUpdate, 0x80ddb684 -> 0x80ddb612 -> 0x80ddb520), for EVERY registered receiver (the client's
+screen is never transmitted): interface vtable slot 3 (offset 0xc, Extension) called with (0x10286498, &out, NULL)
+- it must return >= 0 and set out, a negative result leaves out NULL and the server calls through NULL - then
+out->vtable slot 2 (offset 8): ContentUpdated(const TSurfaceId& aSurface, TInt aBuffer, const TRegion* aRegion,
+TRequestStatus* aConsumed, TRequestStatus* aDisplayed, TUint32* aTimeStamp, TRequestStatus* aDispXTimes, TInt*
+aCount). aRegion is NULL when the client sent no rects; each status pointer is NULL when that notification was not
+armed by the client; aTimeStamp is non-NULL only with aDisplayed; aCount (the client's X, >= 1) only with
+aDispXTimes.
+"""
+ownership = """
+Every non-NULL status is the iStatus of a CUpdateReceiverNotification (CActive, 0x2c bytes) that lives in the
+server thread and belongs to the server: it is SetActive before the call and is never cancelled (its DoCancel
+panics, reason 4), so the receiver must complete each one exactly once, in the server thread
+(User::RequestComplete inside ContentUpdated or later from the server thread's own active objects) or from another
+thread with RThread::RequestComplete on the server thread. The receiver owns nothing else: aSurface, aRegion and
+aCount are the server's and are only guaranteed during the call [inferred]; aTimeStamp points at the
+notification's +0x1c and must be written BEFORE aDisplayed is completed (the server copies it in the
+notification's RunL). A receiver that completes synchronously may do so inside ContentUpdated (gcebe does).
+"""
+completion = """
+Verified in the code; the ordering is inferred from the paths, not yet observed on the phone.
+1. The client's NotifyWhenAvailable/Displayed/DisplayedXTimes (opcodes 3/4/5) arm one batch each; SubmitUpdate
+   (opcode 6) creates, per registered receiver, one CUpdateReceiverNotification per armed batch (CActive added in
+   the order available, displayed, displayedXTimes; an allocation failure completes that batch's message with
+   KErrNoMemory -4), calls ContentUpdated once per receiver, clears the three slots and completes the opcode-6
+   message with KErrNone in the same handler (0x80ddb740).
+2. When the receiver completes a status, the notification's RunL (0x80ddb318 -> 0x80ddb238) removes it from the
+   batch, ranks it (0x80ddab98: KErrNone best, then KErrOverflow -9, then -222 and one other table entry, anything
+   else, KErrNotReady-class worst; the best so far in batch +0x5c) and completes the client's message:
+   Available (state 2) when the last receiver has answered, with the best status; Displayed (state 3) at once on
+   KErrNone from the first receiver (index 0), otherwise when the last receiver has answered, after writing the best
+   timestamp (batch +0x58 <- notification +0x1c) to the client's arg0 (TBuf8<4> + RMessagePtr2::Write(0), 0x80ddb238);
+   DisplayedXTimes (state 4) like Displayed without the timestamp. The batch returns to state 1 (free) and is reused
+   by the session's next notify.
+3. [inferred ordering] The RunLs run in the server thread's next active-scheduler pass, i.e. after the opcode-6
+   message is completed, so the kernel completes 6 first and then 3/4/5 even for a receiver that completed inside
+   ContentUpdated; what the client sees when SubmitUpdate returns depends on thread priorities (usually all
+   three already completed). The one-run cross-check (sydb) was skipped on instruction, not done.
+4. A completion whose message is no longer pending (cancelled, session closing) only frees or deletes the batch.
+"""
+cancellation = """
+Nothing is ever cancelled towards the receiver: the server never cancels a status it handed out and the
+notification's DoCancel panics (reason 4). Client cancel (opcode 7, 0x80ddb41c) and session close (dtor
+0x80ddb45e) complete the client messages with KErrCancel (-3) and leave the per-receiver notifications
+outstanding; on close each batch is deleted (0x80ddb364) and an outstanding notification is marked self-delete
+(+0x24 = 1) and deletes itself in its RunL when the receiver finally completes it. Surface destruction is unknown
+to the server: a receiver holding a status for a destroyed surface must still complete it [inferred: never
+pending with a synchronous receiver]. Terminate() does nothing.
+"""
+errors = """
+Start: KErrAlreadyExists (-11) when a server named !SURFACE_UPDATE_SERVER already exists (pointer untouched).
+Register: KErrArgument (-6) when Extension_(0x10286498) leaves out NULL, KErrNoMemory (-4) on OOM.
+SubmitUpdate: aBuffer < 0 -> Leave(KErrArgument), completed to the client by ServiceError [inferred: default
+CSession2]; notification OOM -> that batch KErrNoMemory (-4). Receiver status ranking: KErrNone > KErrOverflow (-9)
+> -222/table entry > other > KErrNotReady-class; the best of all receivers is what the client gets (Available) or
+the first KErrNone (Displayed/DisplayedXTimes). Two NotifyWhenX without a SubmitUpdate in between: all three
+pending batches completed with KErrCancel and the client panicked with reason 4 (0x80ddb4b0 + 0x80ddb822).
+"""
+source = "docs/research/surface-update-808.md (claims 96-99); decompilation: build/roms/nokia-808-rm807/RM-807_113.010.1508_04.01+C00.01/ghidra/SurfaceUpdateServer.dll.c and .full.c (ServiceL 0x80ddb8da, provider RunL 0x80ddb068, Register 0x80ddaf3c, SubmitUpdate 0x80ddb684/0x80ddb612/0x80ddb520, notification RunL 0x80ddb318/0x80ddb238, ranking 0x80ddab98, cancel 0x80ddb41c, dtor 0x80ddb45e); absolute = module-relative + 0x80dda8a8"
 [[contract]]
 key = "surface-update-client-session"
 component = "surface-update"
 title = "surfaceupdateclient session to !SURFACE_UPDATE_SERVER"
 kind = "ipc"
-status = "partial"
-participants = "63 importer modules (camctrlgeneral, ngapostprochwdevice, alf...), the server inside the compositor process"
-args = "RSessionBase::CreateSession(name=!SURFACE_UPDATE_SERVER, version, count); message setters pack fields at +1..+5; ord5 sends opcode 7"
-completion = "NOT ESTABLISHED - opcode 7 is observed, its completion path is not"
-cancellation = "NOT ESTABLISHED"
-errors = "connect returns -11 when already connected; two entries return -5"
-source = "decompilation: ghidra/SurfaceUpdateClient.dll.c (ord1..ord11, ord7 = CreateSession)"
-
+status = "known"
+participants = """
+RSurfaceUpdateSession users (63 importer modules on the 808: camctrlgeneral, ngapostprochwdevice, alf, ...) through
+surfaceupdateclient.dll (XIP base 0x80dda348); CSurfaceUpdateSession in surfaceupdateserver.dll inside the
+compositor process (server thread; ServiceL 0x80ddb8da). Server side read in the code; the one phone run of the
+acceptance is still missing (docs/research/surface-update-808.md).
+"""
+args = """
+Client object: 6 words (+0 session handle; +1/+2/+3 TRequestStatus* for Available/Displayed/DisplayedXTimes; +4
+TTimeStamp* (4 bytes, written back); +5 the X count); ord9 ctor zeroes it, ord7 Connect = CreateSession
+("!SURFACE_UPDATE_SERVER", version 1.4.1), ord6 Close, ord2/ord3/ord4 only record pointers, ord1 SubmitUpdate
+sends, ord5 CancelAllUpdateNotifications, ord10/ord11 unimplemented (-5).
+Opcodes (ServiceL switches on iFunction-3; 0..2 and > 7 -> RMessagePtr2::Panic(client, 1)):
+3 NotifyWhenAvailable: no args, async (the client's own TRequestStatus is the IPC status);
+4 NotifyWhenDisplayed: arg0 = TDes8 (flags 4), 4 bytes, the TTimeStamp written back before completion;
+5 NotifyWhenDisplayedXTimes: arg0 = TInt count (>= 1);
+6 SubmitUpdate (synchronous, sent after 3/4/5): arg0 = TDesC8 8 bytes (two zero words, never read by the server),
+  arg1 = TDesC8 16 bytes TSurfaceId, arg2 = TInt buffer, arg3 = TDesC8 rect list (16 bytes per TRect, only when the
+  region has > 0 rects); flags 0x36 / 0xC36; the client's screen argument is never transmitted;
+7 CancelAllUpdateNotifications (synchronous): no args.
+"""
+ownership = """
+The three TRequestStatus and the TTimeStamp the client recorded with ord2/3/4 must stay valid until completed or
+cancelled: they are the IPC statuses of opcodes 3/4/5 (server writes the 4-byte timestamp to opcode 4's arg0 before
+completing it). The server copies the message (RMessage2, 0x28 bytes) into a per-session batch
+(CUpdateReceiverNotificationBatch, 0x60 bytes; states 1 free, 2 available, 3 displayed, 4 displayed X times); one
+batch per kind per session is armed at a time and reused. The surface and buffer belong to the client; the server
+keeps nothing about surfaces.
+"""
+completion = """
+Verified in the code (ordering inferred, not yet observed on the phone):
+- opcode 6 is completed with KErrNone right after the content was handed to every registered receiver
+  (ContentUpdated; contract surface-update-server-provider), in the same handler;
+- opcode 3 completes when the last receiver has answered its "consumed" status, with the best status seen (KErrNone
+  > KErrOverflow -9 > -222/table entry > other > KErrNotReady-class);
+- opcode 4 completes at once on KErrNone from the first (index 0) receiver, else when the last receiver has
+  answered, after the best timestamp was written to arg0;
+- opcode 5 as opcode 4, no timestamp;
+- [inferred ordering] the completions of 3/4/5 are performed by the server thread's notification RunLs, which run
+  after the handler that completes 6; with a receiver that completes synchronously (gcebe) SubmitUpdate normally
+  returns with all three completed, but the kernel order is 6 then 3/4/5. Not observed on the phone this time.
+- ord1 refuses an all-zero surface id and an X count < 1 itself (KErrArgument -6 to every recorded status) before
+  sending anything; the server never checks the surface id.
+"""
+cancellation = """
+ord5 CancelAllUpdateNotifications: opcode 7 (server 0x80ddb41c) completes every pending notification message of
+the session with KErrCancel (-3) and clears the three slots, the opcode-7 message itself is completed with
+KErrNone, then the client (0x80dda46e) completes any recorded-but-not-yet-submitted status with KErrCancel. The
+receiver-side notifications stay outstanding (never cancelled). Session close (ord6 -> CSession2 dtor 0x80ddb45e):
+the same KErrCancel sweep, then the batches are deleted. ord10/ord11 are NOT cancels: they complete the recorded
+statuses with KErrNotSupported (-5) and return -5. Surface destruction completes nothing by itself.
+"""
+errors = """
+Connect: -11 when already connected. Any entry on an unconnected session panics (category at 0x80dda6cc, reason
+27). ord1: KErrArgument (-6) to every recorded status for an all-zero surface id or an X count < 1 (also the server's
+answer, via ServiceError [inferred default CSession2], for buffer < 0); KErrNoMemory (-4) to a batch whose
+notification could not be allocated. Two NotifyWhenX of the same kind without a SubmitUpdate: all pending batches
+KErrCancel and client panic reason 4. Unknown opcode: client panic reason 1. ord10/ord11: KErrNotSupported (-5).
+"""
+source = "docs/research/surface-update-808.md (claims 96-99); decompilation: ghidra/SurfaceUpdateClient.dll.c (ord1..ord11, ord7 = CreateSession) and SurfaceUpdateServer.dll.c/.full.c (ServiceL 0x80ddb8da, handlers 0x80ddb8bc/0x80ddb8c6/0x80ddb8d0/0x80ddb740, cancel 0x80ddb41c)"
 [[contract]]
 key = "content-ready-for-composition"
 component = "gce-render-stage"
 title = "MContentReadyForComposition / MWsContentReadyForComposition"
 kind = "abi"
 status = "partial"
-participants = "render stage (user), compositor (provider); WS type id 37 / KUidContentReadyForComposition 0x2002E6D5"
-args = "NotifyContentReady(const TSurfaceId&, TUint64 aContentUpdate, TRequestStatus&); NotifyContentReadyCancel(const TSurfaceId&)"
-completion = """
-Completed when the requested content update has been delivered to the compositor; aContentUpdate is 1-based
-and counts updates per surface per screen.
+participants = """
+User: gcerenderstage.dll (thunks 0x83B4 primary / 0x83C8 the +0x14 MWsContentReadyForComposition sub-object /
+0x83DC cancel) on behalf of an alfcompositorrs active object reached through WS type id 37
+(KMWsContentReadyForComposition). Provider: the GCE object's Extension(0x2002E6D5), i.e. gce.dll and behind it
+compositionbackend.dll (src/gcebe on our side). Status partial: the 808 provider side (gce.dll /
+compositionbackend.dll) has not been read; the surface update server takes no part in this interface
+(docs/research/surface-update-808.md).
 """
-cancellation = "NotifyContentReadyCancel completes a pending request with KErrCancel (-3)"
-errors = "KErrArgument for an unregistered surface; the notification can also be completed by surface destruction"
-source = "graphicscomposition/surfaceupdate/inc/contentreadyforcomposition.h; wscontentreadyforcomposition.h"
-
+args = """
+slot 0 NotifyContentReady(const TSurfaceId&, TUint64 aContentUpdate, TRequestStatus&), called with 5 args: the
+TUint64 travels as two words (1, 0) = update number 1 in the render stage's use; slot 1
+NotifyContentReadyCancel(const TSurfaceId&). aContentUpdate is 1-based and counts updates per surface per screen
+(EPL header).
+"""
+ownership = """
+The TRequestStatus is the iStatus (+4) of the caller's active object (alfcompositorrs, surface id at +0x1C), which
+SetActive()s after the request; the provider holds the pointer until it completes or until slot 1 cancels it, and
+must complete it exactly once. The surface id is copied by the provider [inferred].
+"""
+completion = """
+Completed with KErrNone when the aContentUpdate-th content update of the surface has been delivered to the
+compositor (EPL header). On the 808 that count can only be the compositor's own count of ContentUpdated calls for
+the surface (contract surface-update-server-provider); the surface update server knows nothing about this
+interface [inferred: provider side not read]. The caller's RunL calls its observer once on KErrNone and does not
+ask again.
+"""
+cancellation = "NotifyContentReadyCancel completes a pending request with KErrCancel (-3) [EPL header; 808 provider side not read]."
+errors = "KErrArgument for an unregistered surface; the notification can also be completed by surface destruction [EPL header; 808 provider side not read]"
+source = "graphicscomposition/surfaceupdate/inc/contentreadyforcomposition.h; wscontentreadyforcomposition.h; docs/research/gcerenderstage-808.md (0x83B4/0x83C8/0x83DC); src/gcebe/gcebe.c vtSurfaceNotify comment"
 [[contract]]
 key = "gce-factory"
 component = "gce"
@@ -477,3 +613,25 @@ effort_limit = "1 day"
 objective = "bt-hci-transport"
 dependencies = ["bt-controller-minimal"]
 state = "blocked"
+
+# ---------------------------------------------------------------------------------------------------
+# UI toolkit source assessment (qt, avkon): the "undecided" components' first and only task
+# ---------------------------------------------------------------------------------------------------
+
+[[task]]
+key = "ui-toolkit-source-assessment"
+components = ["qt", "avkon"]
+contracts = []
+title = "Source/compatibility assessment for the shipped Qt and the Avkon/Uikon/CONE stack"
+question = """
+Which Qt revision does Belle FP2 ship, which Avkon/Uikon/CONE revision, and can either be rebuilt from the
+source at hand with an ordinal set that the firmware's importers accept? Retain, build, adapt or replace?
+"""
+acceptance = """
+docs/research/belle-qt-avkon-source-assessment.md: per DLL the importer count, the ordinals used and the
+maximum, the version strings; what source is local and its relation; an ordinal-compatibility verdict per DLL
+and a recommendation per component with the reason. The strategy itself stays the owner's decision.
+"""
+effort_limit = "half a day"
+objective = "wserv-replaceability"
+dependencies = []

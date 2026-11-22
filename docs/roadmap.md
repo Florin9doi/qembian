@@ -309,3 +309,11 @@ E71 (rm346), N81 8GB (rm179), N73 (rm132), 6720 (rm424). Their logs had 0-3 ctl 
 after a minute of UI use; steady calls -> add `config = { panel = 1 }` to the profile's d_display entry and the
 device to tests/device_py_test.py. Caution: with the panel on, a phone whose WSERV does not post with ctl 9 would
 keep showing its first frame. GPU phones (N8, 701, 808) compose on the host and stay off.
+
+## UI as data (`sydb ui`): platform sweep (planned, owner 2026-11-20)
+
+`sydb ui` (in-app probe + gdb reader, [ui-automation.md](ui-automation.md)) works on the N95 8GB. Next: run
+`tests/uiprobe_smoke.py --device ID` on every S60/Symbian^3 profile and fill in the table in
+ui-automation.md "Platforms", working through its assumption checklist where a device fails (first suspects:
+imports on 9.1, the Avkon icon record and the drawing path on Symbian^3). UIQ (P1i, P990i) needs a Qikon
+variant of the probe; the gdb reader needs the moving and flexible memory models.

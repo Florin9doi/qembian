@@ -50,6 +50,15 @@ TOOLS = [
     ('ui_key', 'Press keys: QKeyCode names (up, down, left, right, ret, 0-9, a-z) or aliases lsk rsk ok menu '
      'star hash clear back; chords with "-"; a number in the list = pause seconds.', obj({'keys': {'type': 'array'}, 'delay': NUM}, ['keys'])),
     ('ui_type', 'Type text (US keyboard).', obj({'text': STR}, ['text'])),
+    ('ui_tree', 'The focused app\'s UI as data, no screenshot: title, softkeys, focused control, the open menu\'s '
+     'items + selection, the focused list/grid\'s items + current index, and the control tree (class, screen '
+     'rect, texts). The app answers itself (uiprobe, ~0.2 s), else read from the frozen phone. tree=false: '
+     'summary only; all = hidden controls too.', obj({'tree': BOOL, 'all': BOOL})),
+    ('ui_select', 'Move the highlight of the open menu, or of the focused list/grid, to the item labelled text '
+     '(exact, prefix, then substring; case-insensitive) with arrow keys, checking ui_tree after each batch. '
+     'open = press OK on it. Returns the summary.', obj({'text': STR, 'open': BOOL}, ['text'])),
+    ('ui_wait', 'Wait until text is visible (labels, title, softkeys, list and menu items). Returns the summary.',
+     obj({'text': STR, 'timeout': NUM}, ['text'])),
     ('ui_screenshot', 'Screenshot (240x320). inline = return the image; only_if_changed = skip when identical to the last one.',
      obj({'scale': NUM, 'only_if_changed': BOOL, 'inline': BOOL, 'path': STR})),
     ('sys_keylock', "Keypad lock: op 'off' (unlock without note), 'on', 'query'.", obj({'op': STR})),
@@ -236,6 +245,23 @@ class Server:
             return self.call({'op': 'key', 'keys': a['keys'], 'delay': a.get('delay', 0.3)})
         if name == 'ui_type':
             return self.call({'op': 'type', 'text': a['text']})
+        if name in ('ui_tree', 'ui_select', 'ui_wait'):
+            import uidump
+            base = [sys.executable, os.path.join(HERE, 'sydb.py'), '--session', self.sdir]
+            try:
+                if name == 'ui_select':
+                    return {'summary': uidump.select(base, a['text'], a.get('open', False))}
+                if name == 'ui_wait':
+                    return {'summary': uidump.wait_for(base, a['text'], a.get('timeout', 10))}
+                st = uidump.capture(base)
+            except SystemExit as e:
+                raise RuntimeError(str(e))
+            if st.get('error'):
+                raise RuntimeError(st['error'])
+            r = {'summary': st['summary']}
+            if a.get('tree', True):
+                r['tree'] = uidump.tree_json(st['roots'], a.get('all', False))
+            return r
         if name == 'ui_screenshot':
             r = self.call({'op': 'screenshot', 'path': a.get('path'), 'scale': a.get('scale', 1.0),
                            'only_if_changed': a.get('only_if_changed', False)})

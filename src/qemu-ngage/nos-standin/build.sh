@@ -6,8 +6,11 @@
 #   nos_standin.S       -> ../hw/arm/ngage_nos_stub.h        (N-Gage QD, -M ngage)
 #   nos_standin_nhl10.S -> ../hw/arm/ngage_nhl10_nos_stub.h  (Nokia 6600, -M nokia6600)
 #   nos_standin.S (NHL2) -> ../hw/arm/ngage_nhl2_nos_stub.h  (Nokia 7650, -M nokia7650)
+#   nos_standin_nhl10.S (RM-51) -> ../hw/arm/ngage_rm51_nos_stub.h (Nokia 3230, -M nokia3230)
 #   doc_standin_ra2.S    -> ../hw/arm/ngage_ra2_doc_stub.h   (Nokia 9500 TrueFFS stand-in, -M nokia9500)
 #   doc_standin_p910.S   -> ../hw/arm/ngage_p910_doc_stub.h  (P910i TrueFFS dispatcher stand-in, -M p910i)
+#   doc_standin_ra2.S    -> ../hw/arm/ngage_rm12_doc_stub.h  (Nokia 7710: the 9500's stand-in at its DiskOnChip.dll, -M nokia7710)
+#   bal_standin_ra2.S    -> ../hw/arm/ngage_rm12_bal_stub.h  (Nokia 7710: the 9500's Bal stand-in, relocated)
 set -euo pipefail
 cd "$(dirname "$0")"
 T=${CROSS:-$HOME/gcc-builds/gcc-14.2.0/bin/arm-none-symbianelf-}
@@ -40,7 +43,17 @@ PY
 
 build nos_standin.S       0x5149e4c4 ngage       ../hw/arm/ngage_nos_stub.h
 build nos_standin_nhl10.S 0x52882024 ngage_nhl10 ../hw/arm/ngage_nhl10_nos_stub.h
+# Nokia 3230 (RM-51 V 05.07): the 6600's stub at its NOS entry, with its ekern exports (ordinals 426, 344,
+# 451, 7, 454, 93), NOS bss and enosdriver export 2 (docs/devices/nokia-3230-rm51/bring-up.md)
+build nos_standin_nhl10.S 0x528943a4 ngage_rm51 ../hw/arm/ngage_rm51_nos_stub.h \
+      --defsym KERN_VARIANT=0x5034e2ac --defsym SET_POWER_MODEL=0x50357388 \
+      --defsym POWER_MODEL_CTOR=0x50357044 --defsym KERN_ADD_DFC=0x5036221c \
+      --defsym HWCHUNK_CTOR=0x50349380 --defsym HWCHUNK_CREATE=0x503493f8 \
+      --defsym RAM=0x8000755c --defsym ENOS_DELIVER=0x50452484
 build nos_standin.S       0x5148c1c4 ngage_nhl2  ../hw/arm/ngage_nhl2_nos_stub.h --defsym NHL2=1
 build doc_standin_ra2.S   0x500623d8 ngage_ra2_doc ../hw/arm/ngage_ra2_doc_stub.h
 build bal_standin_ra2.S   0x50925ecc ngage_ra2_bal ../hw/arm/ngage_ra2_bal_stub.h
 build doc_standin_p910.S  0x500a27c4 ngage_p910_doc ../hw/arm/ngage_p910_doc_stub.h
+build doc_standin_ra2.S   0x500ac1c8 ngage_rm12_doc ../hw/arm/ngage_rm12_doc_stub.h
+build bal_standin_ra2.S   0x501157dc ngage_rm12_bal ../hw/arm/ngage_rm12_bal_stub.h \
+      --defsym RQCOMPLETE_SLOT=0x50080ab4 --defsym DMS_READY=0x50368dfc

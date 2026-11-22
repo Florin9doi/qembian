@@ -1102,6 +1102,21 @@ def drive_sizes(prof):
 # a sparse image of the file system's size. A new session drive starts as a copy of it; SYBORG_UDA=0
 # (sydb start/phone --no-uda) starts it blank, as before.
 
+def firmware_file(prof, role):
+    """the flash file in the ROM store for a [[firmware.files]] role of the device's firmware (e.g. "core": the
+    N95's C0R, which also carries the modem's own firmware for --modem real). Exactly one file must match"""
+    import glob as globmod
+    store = paths_v2(prof).get('store') or ''
+    for f in get(prof, 'firmware.files', []):
+        if f.get('role') == role:
+            hits = sorted(globmod.glob(os.path.join(store, f.get('glob', ''))))
+            if len(hits) != 1:
+                raise DeviceError('%s: %d files match %s in %s (want one; tools/fw/store.py import)'
+                                  % (prof['_id'], len(hits), f.get('glob'), store))
+            return hits[0]
+    raise DeviceError('%s: no [[firmware.files]] role %r' % (prof['_id'], role))
+
+
 def uda_entries(prof):
     return [f for f in get(prof, 'firmware.files', []) if f.get('role') == 'uda']
 
@@ -1138,6 +1153,38 @@ def sparse_copy(src, dst):
     os.replace(tmp, dst)
 
 
+def add_drive_files(prof, letter, image, missing_only=False):
+    """copy the profile's [[board.drive_files]] for this drive letter into a FAT drive image (mtools):
+    files a phone of this model needs on that drive beyond its factory content, e.g. the N95's
+    C:\\Private\\10205054\\runtimefeatures.txt (docs/devices.md "Drive files"). Returns the paths added.
+    missing_only: leave a file that is already there alone (sydb start does this for drives made before a
+    drive file was declared: the owner's 2026-11-10 N95 had WLAN on and, with its own modem firmware, the Telephone
+    app crashed)"""
+    added = []
+    for f in get(prof, 'board.drive_files', []):
+        if f.get('letter', 'C').upper() != letter.upper():
+            continue
+        if missing_only and shutil.which('mdir'):
+            there = subprocess.run(['mdir', '-b', '-i', image, '::/' + f['path'].replace('\\', '/').strip('/')],
+                                   capture_output=True)
+            if there.returncode == 0:
+                continue
+        src = device_file(prof, f['file'])
+        if not os.path.exists(src):
+            raise DeviceError('drive file %s (for %s:%s) is missing' % (src, letter, f['path']))
+        if not shutil.which('mcopy'):
+            raise DeviceError('mcopy (mtools) is needed to put %s on drive %s:' % (f['path'], letter))
+        parts = f['path'].replace('\\', '/').strip('/').split('/')
+        for i in range(1, len(parts)):          # make the folders (an existing one is fine)
+            subprocess.run(['mmd', '-i', image, '::/' + '/'.join(parts[:i])], capture_output=True)
+        r = subprocess.run(['mcopy', '-o', '-i', image, src, '::/' + '/'.join(parts)], capture_output=True,
+                           text=True)
+        if r.returncode:
+            raise DeviceError('mcopy %s -> %s:%s: %s' % (src, letter, f['path'], r.stderr.strip()))
+        added.append('/'.join(parts))
+    return added
+
+
 def drive_image(prof, kind, out, uda=None):
     """create a new drive image for the drive of this kind (nvmem = C:, nvmem2 = E:, ...): a copy of
     its UDA image when one is declared and the layer is on, else a blank file of the profile's size.
@@ -1151,8 +1198,10 @@ def drive_image(prof, kind, out, uda=None):
     src = uda_image(prof, drv['letter'])
     if uda and src and os.path.exists(src):
         sparse_copy(src, out)
-        return '%s: %s: user data layer %s (%d MB)' % (out, drv['letter'], os.path.relpath(src, ROOT),
-                                                         os.path.getsize(out) >> 20)
+        added = add_drive_files(prof, drv['letter'], out)
+        return '%s: %s: user data layer %s (%d MB)%s' % (out, drv['letter'], os.path.relpath(src, ROOT),
+                                                           os.path.getsize(out) >> 20,
+                                                           ' + ' + ', '.join(added) if added else '')
     with open(out, 'wb') as f:
         f.truncate(size_bytes(drv.get('size', '64M')))
     why = ('off (SYBORG_UDA=0)' if not uda else 'not extracted yet (tools/fw/inventory.py --device %s --uda-only)'

@@ -1,0 +1,74 @@
+# ISI replies for the Nokia N70 (-M nokian70,isi=THIS FILE), over the SSI link (nokia6630_ssi.h). Seeded from
+# isi-replies-rm1.txt (the 6630, S60 2nd FP2): every seeded line is [I] for the N70 until its parser is read or a run
+# confirms it (docs/devices/nokia-n70-rm84/bring-up.md). The N70 has ISC (IscDriver, IscIsiMultiplexer) where the 6630
+# had isa_if_driver. Seed below, as it was for the 6630:
+reply 00 05 06 20 00 00 01 01                             # ISC multiplexer config (IscIsiMultiplexer.ldd, its first message): accepted while unconfigured from media 0, res 0, objects 0, msg 06 [V]; [10..11] BE u16 max message size (len + 6 checked against it), [12..13] BE u16 the ISC peer object (+0xCB4: later control messages are those from this object with media 0, router 0x5014BCE4), [14] a byte (+0x2E); both u16 non-zero or Kern fault [V Ghidra]. Values 0x2000 (the SSI receive limit), object 0x01, 1 [I]
+reply 00 01 02 rq10 rq10 media=00 sobj=01                # ISC channel open (ISA_KERNEL_IF for Custom.ldd, IscApi): request media 01 {channel, 00}; the reply is a control message (media 0, from the peer object of the 06 reply) 02 {channel, object[, status if len 7]}: the multiplexer (0x5014C274) stores the object for the channel and completes the open [V Ghidra]. Object = the channel number [I]. (The 6630 isaapi CheckCrc reply 02 {00 1D} named channel 0: EStart waited for ever [V run])
+# ISI replies for the Nokia 6630 (-M nokia6630,isi=THIS FILE): ISA_IF messages over the SSI link (nokia6630_ssi.h,
+# docs/research/rm1-ssi-xbus.md). Format as src/qemu-ngage/isi-replies.txt. Seeded from isi-replies-rm51.txt (the 3230,
+# S60 2nd FP1, the same ISA_IF generation): every seeded line [I] for the 6630 until its parser is read or a run
+# confirms it (docs/devices/nokia-6630-rm1/bring-up.md). Indications are left out: they name the phone's own objects.
+# 6630 only: reply 00 01 02 00 1d                       # isaapi CheckCrcMsgL (EStart): data[1] compared with 0x1D (Thumb cmp r0, #29 at 0x50142B88; 3230 0xC0, 6600 0x82, 9500 0xA7) [V]
+# Object 0x77 is Nokia.dsy (DosServer): it subscribes to 16 17 21 0A 1E 1C 15 1C 2F 09 EF 09 ED 08 10 15 C0 0B 17
+# (the 9500/3230 DSY list) [V run]; the indications the 3230/9500 send on that subscription [I]
+ind 119 77 15 C0 01 03                                    # MTC_STATE_INFO_IND: NORMAL, START [I]
+ind 119 77 09 EF 05 08 08                                 # SIM_IND [I]
+ind 119 77 08 10 02 01                                    # PN_SECURITY 0x10 {02 01} [I]
+# --- seeded from the 3230 [I]
+reply 00 00 01 00 00 00                                   # isa_if_driver channel open (EStart RIsaApi::Open 0x38) {00 00 00}: EXPERIMENT [I]
+reply 17 08 09 01 01 13 04 01 00                          # N-Gage: BB5: EM op 0x08
+reply 17 0A 0B 01 02 16 04 07 07 15 04 01 00              # N-Gage: BB5: EM battery info
+reply 35 02 03 00 00                                      # N-Gage: BB5: self-test run, status 0 = passed
+reply 35 00 01 00 00                                      # N-Gage: BB5: self-test status 0
+reply 59 01 02 00 00                                      # N-Gage: self-test last step (N95: 59 42 -> 43, any payload) [I]
+reply 59 42 43 00 00                                      # the DSY's self-test (object 0x77, Startup -> RDosSelfTest::PerformSelfTest): unanswered, Startup showed "Phone start-up failed. Contact the retailer." [V run]; 43 with status 00 (the N95 pairing) [I]
+reply 3A 05 06 echo                                       # N-Gage: BB5: PN_LIGHT, echo the request with status 0
+reply 15 0B 6E 00 00                                      # N-Gage: BB5: MTC_STARTUP_SYNQ_REQ -> RESP (MTC replies are id + 0x63)
+reply 15 02 65 01 01 00 00                                # N-Gage: BB5: MTC_STATE_QUERY: current NORMAL, target NORMAL
+reply 15 01 64 00 00                                      # N-Gage: BB5: MTC_STATE_REQ -> OK
+reply 15 04 67 00 00                                      # N-Gage: BB5: MTC_POWER_ON_REQ -> OK
+reply 15 12 75 00 00                                      # N-Gage: BB5: MTC_SHUTDOWN_SYNC_REQ -> OK
+reply 09 19 1A 2F 24                                      # N-Gage: BB5: SIM_NETWORK_INFO read (service 2F): data not available
+reply 0A 00 01 00 01 00 08 05 00 00 00 00 00                # NET_MODEM_REG_STATUS_GET (NOKIATSY and SIMATKTSY, object 0x56): [10] 00 OK, [11] 1 sub-block: 0x00 (common) of 8 bytes, status 05 = no service, not searching [I layout]. SIMATKTSY 0x501C9FFC finds sub-block 0 unchecked (no sub-blocks: USER 21) and wants sub-block 9 for status < 4; the N-Gage 4-byte sub-block made NOKIATSY overread (USER 21) [V runs]
+reply 31 19 1A len=12                                     # N-Gage: GPDS_STATUS_RESP: isimsg reads offsets 10, 11, 20, 21 and a tail from 22 [V]; all 0 [I] ("1A 00 00" made phonetsy panic USER 21, q68)
+reply 1C 10 11 00 00                                      # N-Gage: unknown 1C request, OK [I]
+reply 0B 11 12 @06 06 01 06 08 00 00 00 00 00 00              # N-Gage: audio 0B 11 {06 01} = phonetsy GetHandsfreeMode (IPC 0x2733): subtype 06, exactly 1 sub-block, u16 BE at sb+4 (0x000D = handsfree) [V parser 0x5093d2cc]; 0 = not handsfree [I]
+reply 0B 00 01 01 00                                      # N-Gage: BB5: audio server start, OK
+reply 23 04 05 00 00 D4 00 00 00 00 00 00 00 00 00 00 00 64 00   # DSY (object 0x77) SW start-up reason (permanent data 0xD4): the 9500 form, data[0] 00 OK, data[14..15] LE 100 = normal [V 9500 parser, I for the 6630]; the N-Gage form gave reason 0
+reply 09 60 61 FA 31                                      # N-Gage: phonetsy SIM query {FA 00}: parser 0x5093e5b4 reads [11]: 30 = TRUE, 31 = FALSE, else -19 [V]; 31 [I] (PIN/lock off)
+reply 09 3B 3C FA 2A                                      # N-Gage: DSY SIM IMSI-equal check {FA}: {FA, 2A = equal} (as N73) [I]
+reply 09 3D 3E len=42 FA 01 31 31 32 00 00 00 00 00 39 31 31 # N-Gage: phonetsy SIM emergency numbers {FA 00}: [11] 01 OK, Mid(12,40) = 5 x 8-byte ASCII slots (frame >= 52 or USER 21) [V parser 0x5093eb14]; "112", "911" [I]
+reply 09 21 22 len=38 2C 01                               # N-Gage: phonetsy SIM service {2C}: [10] must be 2C, [11] 01 OK, Mid(12,35) (frame >= 47) [V parser 0x5093de14]; empty name, flag 0 [I]
+reply 09 33 34 len=52 3E 01                               # N-Gage: phonetsy SIM string read {3E}: [10] must be 3E, [11] 01 OK, Mid(12,50) (frame >= 62) [V parser 0x5093dec4]; empty [I]
+reply 1B 02 03 echo                                       # N-Gage: phonetsy product-profile read: [10] status 00, [11] sub-block count, value at sb+5 [V parser 0x5093dc2c]; the request's sub-block echoed [I]
+reply 1F 01 03 00 00                                      # N-Gage: SoundDevice.mda tone play: 1F 03 with [10] != 14 = finished [V receiver 0x505ae7f8; meaning I]
+reply 1F 04 06 0D 00                                      # N-Gage: SoundDevice.mda tone stop: 1F 06 with [10] = 0D = stopped [V receiver; meaning I]
+reply 09 31 32 len=70 3B 01                               # SIM 09 31 {3B 00 00 00 00} (NOKIATSY 0x5042288C): status field 1 must be 01, then isimsg fields 0x7F = Mid(12,4) and 0x84 = Mid(16,60) of the frame (SIM message class, isimsg 0x5013CF64): frame >= 76 bytes; the N-Gage-form 23-byte reply made CTelServer panic USER 22 [V catch + Ghidra]. The 9500 form; zero contents [I]
+reply 09 13 14 @28 28 01 00 00 00 00 00                   # the 6630's TSY asks the SIM service table with sub-types 28 and 74 [V log]: the 11-form answer did not match them (Menu's grid stayed empty: MenuEng waits, N-Gage note) [I]; [11] 01 OK, no services [I]
+reply 09 13 14 @74 74 01 00 00 00 00 00
+reply 09 13 14 len=7 11 01                                # N-Gage: phonetsy SIM service table {11}: [11] 01 OK (else MenuEng blocks), Mid(12,5) = GSM SST (frame >= 17) [V parser 0x5093ee54]; no services [I]
+reply 02 0B 0C 00 00                                      # N-Gage: phonetsy SMS (obj 4C) 02 0B: [10] cause 00 = OK [V handler 0x50947bbc]
+reply 02 14 15 00 00                                      # N-Gage: phonetsy SMS (obj 4C) 02 14 {01 00}: [10] = parameter set count; 0 [I, branch 0x509470ec not traced]
+reply 09 C0 C1 00 01                                      # DSY SIM C0 {00 00}: [11] 01 = OK -> 0x5041a324 + DosSrv(1) [V handler 0x50419f14]; [10] not read
+reply 09 2D 2E 3A 01 00                                   # DSY SIM 2D {3A 00}: [10] 3A, [11] 01, [12] 0A/5A/A0/A5/AA select DosSrv 0x5041c284 (2/3/4), else 0 [V 0x5041a170]; 00 [I]
+reply 09 2B 2C len=16 3A 01 00                            # DSY SIM 2B {3A 00}: [10] 3A, [11] 01, [12] bit 0, a 16-bit field read too (padded) [V 0x5041a1fc; I values]
+reply 08 11 12 05 00                                      # DSY security code state: [10] 05 = start-up OK, no code (c20c(0), c1f4(7), continues) [V handler 0x5041a5a4, meaning I]; [11] 12/13 flags, 00 none [I]
+reply 53 00 01 01 00                                      # DSY 0x53 query {04 00}: handler 0x5041a4d4 reads [10] only [V]; 01 -> DosSrv c278(0) [I meaning]; 00 silent, 02 = retry
+reply 0B 11 12 @05 05 01 02 08 08 00 00 00 00 00 00       # DSY audio query {05 08} (second DSY class, parser 0x504159cc): [10] 05, [11] 1 sub-block, sb {02, 08, 08 (sb+2), 00, u16 sb+4 = 0000} [V]; value [I]; tid echoed
+reply 09 29 2A @35 35 FF 00                               # GetALSLine: [10] 35, [11] FF = no error, line "not available" (SIM without ALS) [V parser MMGSMWCDMA 0x51433018]
+reply 09 23 24 @25 25 01 00                               # MMCUSTOMTSY SIM list count: [11] 01 OK, [12] count 0 = done [V 0x5145D254]
+reply 09 09 0A 01 01                                      # SIM 09 09 {01 00}: 9500 handler reads [1]: 01 = OK [I here]
+reply 09 1D 1E 2D 01 08 09 10 10 00 00 00 00 10           # SIM IMSI {2D 00}: 001010000000001 [I here]
+reply 09 0F 10 len=13 0B 00                               # 3230 SIM service 0B record read (Phone -> vmbx RVmbxNumber::GetAlsLine -> MMGSMWCDMA builder 0x507C1BB8, handler 0x507C1C7C, stall 6): [10] 0B, [11] != 01 = no more records -> the request completes (vmbx ignores the error, ALS line stays 1); 01 = record present -> the TSY asks for location [12..13]+1 (docs/research/rm51-tsy-als.md) [V]
+reply 0B 11 12 @01 01 01 02 08 00 00 00 00 00 00
+reply E8 2A 2B 00 00
+reply E8 20 21
+reply+ E8 20 2B 00 00
+reply E8 23 24 00 00                                      # DevSound "data written" notice (0x5078AF60, sent without waiting); 0x24 only re-arms the receive [V 0x50787102]
+reply 0B 19 1A 00 00
+reply 0B 04 05 00 00
+# asc.dll (object 0x78, the audio server component in DeviceManagementServer): `1C 2D {00 00}` then a synchronous
+# receive; parser 0x501EE2E0 wants resource 0x1C, message >= 0x2E, data[0] 1..2 with (data[0], data[1]) in
+# (1,1) (2,2) (1,3) (1,6) [V Ghidra]; (1,1) chosen [I meaning]
+reply 1C 2D 2E 01 01 00 00 00 01 01 06 00 00 00 00     # asc.dll (DMS, object 0x19) audio 1C 2D {00 00}: the N70 parser (0x5049CEB0) keeps the 6630 fields [10] [11] (accepted 1, 2, 7) [12], then (0x5049D2A8) finds sub-block 01 through isimsg: for messages 2E/2F the count is at frame byte 15 and the sub-blocks start at 16 (isimsg vtable 0x50143AE0 +0x10/+0x14), {id, total length, u16 at +2, u16 at +4} (flags 0x80, 0x800 tested); the 6630 reply `2E 01 01 00` made it read past the frame: DMS panicked USER 21, four times [V catch + Ghidra]. Flags 0 [I]
+# SMS 02 16 {00 00} (NOKIATSY): the 9500's reply `17 00 x13` made CTelServer panic USER 21 here [V run]: left unanswered

@@ -104,6 +104,29 @@ def semc_images(files, out, uda_only=False):
         print('%s: %s -> %s' % (os.path.basename(p), kind, names[role]))
 
 
+def manifest_ours(manifest):
+    """lower-case file names of the OURS rows of a hybrid-manifest.txt (our kernel side), {} when no ROM was built"""
+    if not os.path.exists(manifest):
+        return set()
+    out = set()
+    for line in open(manifest):
+        f = line.split()
+        if len(f) >= 5 and f[3] == 'OURS':
+            out.add(f[4].rsplit('/', 1)[-1].lower())
+    return out
+
+
+def driver_tag(name, have, missing, ours):
+    """the kernel-drivers.txt tag of one firmware .ldd/.pdd: a stand-in of ours, our EPL build of the same module
+    (2026-11-19: ecomm/elocd/pipelib showed as undeclared gaps), a declared gap, or '' = an undeclared omission"""
+    low = name.lower()
+    if low.rsplit('.', 1)[0] in have:
+        return 'stand-in'
+    if low in ours:
+        return 'ours (EPL build)'
+    return 'missing (declared)' if low in missing else ''
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--device'); ap.add_argument('--fw-dir'); ap.add_argument('--out')
@@ -227,11 +250,10 @@ def main():
     drv = sorted(f['path'].split('/')[-1] for f in cj['files'] if f['path'].lower().endswith(('.ldd', '.pdd')))
     have = {s['name'].lower() for s in prof.get('standins', [])}
     missing = {m.lower() for m in devmodel.get(prof, 'kernel.missing_drivers', [])}
+    ours = manifest_ours(devmodel.paths(prof).get('manifest') or os.path.join(out, 'hybrid-manifest.txt'))
     with open(os.path.join(out, 'kernel-drivers.txt'), 'w') as fo:
         for d in drv:
-            base = d.lower().rsplit('.', 1)[0]
-            tag = 'stand-in' if base in have else ('missing (declared)' if d.lower() in missing else '')
-            fo.write('%-32s %s\n' % (d, tag))
+            fo.write('%-32s %s\n' % (d, driver_tag(d, have, missing, ours)))
     print('kernel drivers: %d (%d with a stand-in) -> %s' % (len(drv), sum(1 for d in drv if d.lower().rsplit('.', 1)[0] in have),
                                                           os.path.relpath(os.path.join(out, 'kernel-drivers.txt'), ROOT)))
     # 5. ABI reports (need the SDK's euser.dso and our build)

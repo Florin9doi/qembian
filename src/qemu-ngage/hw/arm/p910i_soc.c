@@ -485,7 +485,9 @@ void p910_board_init(MachineState *machine, MemoryRegion *sys, ARMCPU *cpu)
     memory_region_init_io(&s->mr, NULL, &sys_ops, s, "p910i.sys", 0x1000);
     memory_region_add_subregion_overlap(sys, SYS_BASE, &s->mr, 10);
     qemu_register_reset(sys_reset, s);
-    doc_init(sys);
+    if (p910_phone->doc) {
+        doc_init(sys);
+    }
     p910_gsm_init(sys);
     p910_lcd_init(sys);
     p910_i2c_init(sys);

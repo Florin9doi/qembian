@@ -19,7 +19,7 @@ def rec(payload, kind=1):
 def sub(body, size, comp, load, tag):
     stored = len(body)
     return (struct.pack('<I', x.SUB) + struct.pack('<8I', 1, 2, size, comp, 3, stored, load, load)
-            + tag.encode() + b'\0' + body)
+            + tag.encode().ljust(20, b'\0') + body)   # the tag field is 20 bytes (+36..+55)
 
 
 def container(*records):
@@ -65,6 +65,15 @@ class SubHeader(unittest.TestCase):
     def test_stored(self):
         p = sub(b'hello world', 5, 0, 0, '001D')
         self.assertEqual(x.unpack(p, x.sub_header(p)), b'hello')
+
+    def test_short_tag_data_at_56(self):
+        # rm12_short_tag_field: the 7710's tags ("Tetra v7") are shorter than the 9500's 19 characters;
+        # the data starts at +56 regardless (reading from the tag's NUL gave "invalid stored block lengths")
+        img = b'7710' * 100
+        p = sub(deflate(img), len(img), 1, 0x13B00000, 'Tetra v7')
+        sh = x.sub_header(p)
+        self.assertEqual((sh['tag'], sh['data_offset']), ('Tetra v7', 56))
+        self.assertEqual(x.unpack(p, sh), img)
 
     def test_size_mismatch(self):
         img = b'abc' * 10

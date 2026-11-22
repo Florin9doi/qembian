@@ -99,7 +99,7 @@ class Partitions(unittest.TestCase):
         """Regression c_drive_partition: C: was on partition 2; EFile mounts partition 0 (blank ->
         KErrCorrupt -> EStart's format query waiting for a key)."""
         text = BOARD.read_text()
-        table = text.split('static Ra2Part ra2_parts[] = {', 1)[1].split('};', 1)[0]
+        table = text.split('static Ra2Part ra2_parts_9500[] = {', 1)[1].split('};', 1)[0]
         rows = [r for r in table.splitlines() if r.strip().startswith('{')]
         self.assertIn('RA2n6270.u18', rows[0])
 

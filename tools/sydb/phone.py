@@ -10,7 +10,7 @@ phone's keys and machine controls, talking to a running sydb session (docs/phone
   (daemon op keyev), so long presses work (hold Menu = task switcher, hold Power = switch off).
 - Slides and Turn view come from the profile ([hardware] slides, [skin] turn / [skin.slides.<kind>],
   docs/devices.md; SLIDE_DEFAULTS below). The N95's are described here:
-- Side toolbar: Power, Vol +/-, Landscape (media slide; Ctrl+Left/Right), Keypad slide, Shot,
+- Side toolbar: Power, Vol +/-, Landscape (media slide; Ctrl+Left/Right), Keypad slide, Record (Ctrl+R: MP4), Shot,
   Snapshot, Pause, Reset. Landscape taps F13 (EKeyDeviceA: akncapserver switches the UI to landscape) and turns the view so the
   landscape UI is upright, as when the real phone is turned; closed/keypad tap F14 (EKeyDeviceB,
   portrait). Turn view (Ctrl+T) turns the picture 90 degrees anticlockwise (touch follows); on phones with
@@ -394,6 +394,15 @@ class Phone(QtWidgets.QWidget):
         QtGui.QShortcut(QtGui.QKeySequence('Ctrl+T'), self,
                         activated=lambda: self.turn_dir != 'none' and self.turn(not self.screen.turned))
         side.addSpacing(10)
+        self.rec_btn = QtWidgets.QPushButton('Record\n(Ctrl+R)')
+        self.rec_btn.setToolTip('Record the screen and the sound to an MP4 (H.264 + AAC) in ~/Videos ($AVREC_DIR); '
+                                'press again to stop. Needs ffmpeg on the host. Records the phone\'s own picture '
+                                '(Turn view is not applied).')
+        self.rec_btn.setCheckable(True)
+        self.rec_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.rec_btn.clicked.connect(self.record)
+        side.addWidget(self.rec_btn)
+        QtGui.QShortcut(QtGui.QKeySequence('Ctrl+R'), self, activated=lambda: self.record(not self.rec_btn.isChecked()))
         for label, fn in (('Type text...', self.type_text), ('GPU capture (30 frames)', self.gpu_capture), ('Shot', self.shot), ('Snapshot', self.snap), ('Pause', self.pause), ('Reset', self.reset),
                           ('Operator settings\n(SMS)', self.operator_settings)):
             b = QtWidgets.QPushButton(label)
@@ -646,6 +655,22 @@ class Phone(QtWidgets.QWidget):
         if self.screen.img:
             self.screen.img.save(path)
             self.set_status(note='saved ' + path)
+
+    def record(self, on):
+        self.rec_btn.setChecked(on)
+        def go():
+            try:
+                r = self.c.call({'op': 'record', 'sub': 'start' if on else 'stop'}, 20)
+                if not r.get('ok'):
+                    raise RuntimeError(r.get('error', 'failed'))
+                message = ('recording to ' if on else 'saved (ffmpeg finishing) ') + str(r.get('path'))
+            except Exception as e:
+                message = 'record: %s' % e
+                if on:
+                    QtCore.QMetaObject.invokeMethod(self.rec_btn, 'setChecked', Qt.ConnectionType.QueuedConnection,
+                                                    QtCore.Q_ARG(bool, False))
+            QtCore.QMetaObject.invokeMethod(self, '_note', Qt.ConnectionType.QueuedConnection, QtCore.Q_ARG(str, message))
+        threading.Thread(target=go, daemon=True).start()
 
     def snap(self):
         self.call({'op': 'snap', 'sub': 'save', 'name': time.strftime('phone-%H%M%S')}, timeout=300)

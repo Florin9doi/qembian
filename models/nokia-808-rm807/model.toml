@@ -140,15 +140,18 @@ baseport = "syborgfx"                      # flexible memory model + ARM1176 ker
 place = "after-firmware"                   # our kernel side (to 0x8031xxxx) does not fit below the user side (0x80274B50)
 patchsets = ["platform", "sym92", "policy"]
 omit_baseport = ["epointer.dll"]            # Syborg mouse driver: the exyin stand-in owns the pointer device
-missing_drivers = ["bc02.ldd", "medsd.pdd", "tracecoreostldd.ldd",
-                   "audiopipeldd.ldd", "bc02_uart1.pdd", "camldd.ldd", "d_ftrace.ldd",
-                   "ddc_accessldd.ldd", "dvfs_interface.ldd", "ecomm.ldd", "elocd.ldd", "eusbc.ldd",
-                   "khbridge.ldd", "khegl_ldd.ldd", "khmonitor.ldd",
-                   "magnetometerldd.ldd", "magnetometerpdd.pdd", "medint.pdd", "mednand.pdd",
-                   "mobilecrashdriver.ldd", "otgdi.ldd", "pipelib.ldd", "proximityldd.ldd",
-                   "proximitypdd.pdd", "rebootdriver.ldd", "surfacemanagerdriver.ldd", "tcldd.ldd",
-                   "usbaudiodriver.ldd", "usbdi.ldd", "usbhubdriver.ldd", "vcdispmanldd.ldd",
-                   "vcfilesys.ldd", "wlanldd.ldd", "wlanpdd.pdd"]
+# every firmware .ldd/.pdd without a stand-in (docs/research/808-driver-seams.md; the whole firmware kernel side
+# is replaced, this list is the documented gap). 2026-11-19: tracecoreostldd, d_ftrace, proximityldd/pdd were
+# not in this firmware (its proximity driver is diproldd/dipropdd); ecomm, elocd, pipelib are our EPL builds
+# of the same modules, not gaps (medint.pdd, rm_debug.ldd too); 9 omissions were undeclared.
+missing_drivers = ["bc02.ldd", "bc02_uart1.pdd", "medsd.pdd", "mednand.pdd", "nfe_med_ext.pdd",
+                   "audiopipeldd.ldd", "camldd.ldd", "cec_access.ldd", "ddc_accessldd.ldd",
+                   "dvfs_interface.ldd", "eusbc.ldd", "eusbcsc.ldd", "otgdi.ldd", "usbdi.ldd",
+                   "usbhubdriver.ldd", "khbridge.ldd", "khegl_ldd.ldd", "khmonitor.ldd", "vcdispmanldd.ldd",
+                   "vcfilesys.ldd", "magnetometerldd.ldd", "magnetometerpdd.pdd", "diproldd.ldd",
+                   "dipropdd.pdd", "me_drv.ldd", "me_drv.pdd", "nfcdrv.ldd", "mobilecrashdriver.ldd",
+                   "ostbufferwriter.ldd", "rebootdriver.ldd", "sgdevice.ldd", "tcldd.ldd",
+                   "wlanldd.ldd", "wlanpdd.pdd"]
 
 [kernel.lcd]                               # natively portrait panel: the 5730's LCD HAL build
 target = "lcd_portrait"

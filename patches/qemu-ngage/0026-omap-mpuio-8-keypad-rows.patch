@@ -1,0 +1,47 @@
+--- a/hw/arm/omap1.c
++++ b/hw/arm/omap1.c
+@@ -1934,7 +1934,7 @@
+     uint16_t latch;
+     uint8_t event;
+ 
+-    uint8_t buttons[5];
++    uint8_t buttons[8];     /* qembian: 8 rows (the OMAP1610's keypad; the Nokia 6630 scans 7) */
+     uint8_t row_latch;
+     uint8_t cols;
+     int kbd_mask;
+@@ -1968,7 +1968,7 @@
+     int i;
+     uint8_t *row, rows = 0, cols = ~s->cols;
+ 
+-    for (row = s->buttons + 4, i = 1 << 4; i; row --, i >>= 1)
++    for (row = s->buttons + 7, i = 1 << 7; i; row --, i >>= 1)
+         if (*row & cols)
+             rows |= i;
+ 
+@@ -1979,7 +1979,7 @@
+ /* qembian: press/release a key of the MPUIO keypad matrix (board code; QEMU dropped this API) */
+ void omap_mpuio_key(struct omap_mpuio_s *s, int row, int col, int down)
+ {
+-    if (row < 0 || row > 4 || col < 0 || col > 7) {
++    if (row < 0 || row > 7 || col < 0 || col > 7) {
+         return;
+     }
+     if (down) {
+@@ -2028,7 +2028,7 @@
+         return s->edge;
+ 
+     case 0x20:  /* KBD_INT */
+-        return (~s->row_latch & 0x1f) && !s->kbd_mask;
++        return (~s->row_latch & 0xff) && !s->kbd_mask;
+ 
+     case 0x24:  /* GPIO_INT */
+         ret = s->ints;
+@@ -2149,7 +2149,7 @@
+     s->debounce = 0;
+     s->latch = 0;
+     s->ints = 0;
+-    s->row_latch = 0x1f;
++    s->row_latch = 0xff;
+     s->clk = 1;
+ }
+ 

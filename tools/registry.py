@@ -576,7 +576,7 @@ def _resolves(ref):
     return 1 if os.path.exists(p) else 0
 
 
-def ingest(conn, target, quiet=False, index_path=None, limit=0, ecom_path=None):
+def ingest(conn, target, quiet=False, index_path=None, limit=0, ecom_path=None, ipc_path=None):
     """Rebuild the generated facts for one target. Binaries first, then edges, so destinations resolve;
     regenerated edges replace the previous set (no accumulation, no stale leftovers)."""
     cfg = target['device_py']
@@ -679,7 +679,8 @@ def ingest(conn, target, quiet=False, index_path=None, limit=0, ecom_path=None):
                     for itf in pl['interfaces']:
                         for im in itf['implementations']:
                             detail = 'iface %s impl %s %s' % (itf['uid'], im['uid'], im['name'][:60])
-                            k = 'ingest:ecom:%s:%s:%s' % (name, itf['uid'], im['uid'])
+                            # device+firmware in the key (bug 2026-11-19: the 701's rows collided with the 808's)
+                            k = 'ingest:ecom:%s:%s:%s:%s:%s' % (dev, fw, name, itf['uid'], im['uid'])
                             erows.append((hashlib.sha1(k.encode()).hexdigest(), 'ingest', dev, fw, src, None,
                                           comp_of.get(src), None, 'ecom-plugin', detail, None, None,
                                           'ecom-index', None))
@@ -687,6 +688,35 @@ def ingest(conn, target, quiet=False, index_path=None, limit=0, ecom_path=None):
                               'dst_component,type,detail,ordinal,offset,evidence,n)'
                               ' VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)', erows)
                 stats['ecom'] = len(erows)
+
+        # IPC: named servers (tools/ipc_index.py, <devdir>/ipc.json). One 'serves NAME' row per provider (src =
+        # the module that starts it, no dst) and one 'client of NAME' edge per client module -> provider binary
+        # (dst NULL when no module was seen starting it: run-time names, RootServer-hosted servers).
+        stats['ipc'] = 0
+        ipc_path = ipc_path or (None if index_path else os.path.join(target['devdir'], 'ipc.json'))
+        if ipc_path and os.path.exists(ipc_path):
+            ip = json.load(open(ipc_path))
+            if ip.get('device') == dev and (not ip.get('firmware') or ip['firmware'] == fw):
+                irows = []
+                for name, sv in ip['servers'].items():
+                    prov = by_path.get(sv.get('provider')) if sv.get('provider') else None
+                    if prov is not None:
+                        k = 'ingest:ipc:serves:%s:%s:%s:%s' % (dev, fw, sv['provider'], name)
+                        irows.append((hashlib.sha1(k.encode()).hexdigest(), 'ingest', dev, fw, prov, None,
+                                      comp_of.get(prov), None, 'ipc-client-server', 'serves ' + name, None,
+                                      None, 'ipc-index', None))
+                    for cl in sv.get('clients', []):
+                        src = by_path.get(cl)
+                        if src is None:
+                            continue
+                        k = 'ingest:ipc:client:%s:%s:%s:%s' % (dev, fw, cl, name)
+                        irows.append((hashlib.sha1(k.encode()).hexdigest(), 'ingest', dev, fw, src, prov,
+                                      comp_of.get(src), comp_of.get(prov), 'ipc-client-server',
+                                      'client of ' + name, None, None, 'ipc-index', None))
+                c.executemany('INSERT OR IGNORE INTO edge(key,origin,device,firmware,src,dst,src_component,'
+                              'dst_component,type,detail,ordinal,offset,evidence,n)'
+                              ' VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)', irows)
+                stats['ipc'] = len(irows)
 
         # curated relationships: stand-ins, byte patches, rom overrides (component-scoped, no binaries)
         c.execute("DELETE FROM edge WHERE origin='curated' AND device=? AND firmware=?", (dev, fw))
@@ -783,6 +813,7 @@ def ingest(conn, target, quiet=False, index_path=None, limit=0, ecom_path=None):
               '%d new artifacts, %d refreshed'
               % (dev, fw, stats['binaries'], stats['edges'], stats['missing_dst'], stats['stale'],
                  stats['artifacts'], stats['refreshed']))
+        print('  ecom-plugin edges %d, ipc-client-server edges %d' % (stats.get('ecom', 0), stats.get('ipc', 0)))
     return stats
 
 
@@ -901,12 +932,26 @@ def q_edge_summary(conn, component_id, device=None):
     plugins = [r['detail'] for r in conn.execute(
         "SELECT e.detail FROM edge e WHERE e.type='ecom-plugin' AND e.src_component=?" + dev_sql +
         ' ORDER BY e.detail LIMIT 12', [component_id] + dev_args)]
+    serves = [r['detail'][7:] for r in conn.execute(
+        "SELECT e.detail FROM edge e WHERE e.type='ipc-client-server' AND e.detail LIKE 'serves %'"
+        ' AND e.src_component=?' + dev_sql + ' ORDER BY e.detail LIMIT 12', [component_id] + dev_args)]
+    client_of = [r['detail'][10:] for r in conn.execute(
+        "SELECT DISTINCT e.detail FROM edge e WHERE e.type='ipc-client-server' AND e.detail LIKE 'client of %'"
+        ' AND e.src_component=? AND (e.dst_component IS NULL OR e.dst_component!=e.src_component)' + dev_sql +
+        ' ORDER BY e.detail LIMIT 12', [component_id] + dev_args)]
+    served = [{'server': r['server'], 'clients': r['c']} for r in conn.execute(
+        "SELECT substr(e.detail, 11) AS server, count(DISTINCT e.src) AS c FROM edge e"
+        " WHERE e.type='ipc-client-server' AND e.detail LIKE 'client of %' AND e.dst_component=?"
+        ' AND (e.src_component IS NULL OR e.src_component!=e.dst_component)' + dev_sql +
+        ' GROUP BY server ORDER BY c DESC LIMIT 12', [component_id] + dev_args)]
     out = {'imports': {'top': imports},
            'imported_by': {'modules': by['modules'] or 0, 'ordinals': by['ordinals'] or 0, 'top': top}}
     if curated:
         out['curated'] = curated
     if plugins:
         out['ecom'] = plugins
+    if serves or client_of or served:
+        out['ipc'] = {'serves': serves, 'client_of': client_of, 'served_clients': served}
     return out
 
 
@@ -1565,6 +1610,15 @@ def _context_text(c):
             L += ['  %s: %s' % (x['type'], x['detail'])]
         for x in e.get('ecom', []):
             L += ['  ecom plugin: %s' % x]
+        if e.get('ipc'):
+            ipc = e['ipc']
+            if ipc.get('serves'):
+                L += ['  serves: %s' % ', '.join(ipc['serves'])]
+            if ipc.get('served_clients'):
+                L += ['  clients: %s' % ', '.join('%s (%d modules)' % (x['server'], x['clients'])
+                                                   for x in ipc['served_clients'])]
+            if ipc.get('client_of'):
+                L += ['  client of: %s' % ', '.join(ipc['client_of'])]
         if m.get('mentioned_in'):
             L += ['  mentioned in: %s' % ', '.join(m['mentioned_in'])]
     for k in c['contracts']:

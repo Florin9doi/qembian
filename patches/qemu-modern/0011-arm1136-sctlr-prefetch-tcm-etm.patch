@@ -1,0 +1,120 @@
+diff -ru a/target/arm/cpu.c b/target/arm/cpu.c
+--- a/target/arm/cpu.c	2026-11-21 12:13:26.293797142 +0100
++++ b/target/arm/cpu.c	2026-11-21 12:19:31.777115980 +0100
+@@ -2494,6 +2494,8 @@
+ 
+ static const Property arm_cpu_properties[] = {
+     DEFINE_PROP_UINT64("midr", ARMCPU, midr, 0),
++    DEFINE_PROP_BOOL("x-sctlr-prefetch", ARMCPU, sctlr_prefetch, false),
++    DEFINE_PROP_BOOL("x-arm1136-tcm-etm", ARMCPU, arm1136_tcm_etm, false),
+     DEFINE_PROP_UINT64("mp-affinity", ARMCPU,
+                         mp_affinity, ARM64_AFFINITY_INVALID),
+     DEFINE_PROP_INT32("node-id", ARMCPU, node_id, CPU_UNSET_NUMA_NODE_ID),
+diff -ru a/target/arm/cpu.h b/target/arm/cpu.h
+--- a/target/arm/cpu.h	2026-11-21 12:13:26.291524395 +0100
++++ b/target/arm/cpu.h	2026-11-21 12:19:31.775519051 +0100
+@@ -1145,6 +1145,11 @@
+      * architecture version.
+      */
+     bool cfgend;
++    /* qembian 0011: an SCTLR write does not end the TB (ARM1136 prefetch across an MMU enable) */
++    bool sctlr_prefetch;
++    /* qembian 0011: ARM1136 TCM region registers (no TCM) and the ETM cp14 interface (RAZ/WI) */
++    bool arm1136_tcm_etm;
++    uint32_t etmcr;      /* qembian 0011: the ETM control register (programming bit 10 -> ETMSR bit 1) */
+ 
+     QLIST_HEAD(, ARMELChangeHook) pre_el_change_hooks;
+     QLIST_HEAD(, ARMELChangeHook) el_change_hooks;
+diff -ru a/target/arm/helper.c b/target/arm/helper.c
+--- a/target/arm/helper.c	2026-11-21 12:18:18.164336074 +0100
++++ b/target/arm/helper.c	2026-11-21 12:19:31.779807244 +0100
+@@ -6385,11 +6385,49 @@
+     }
+ };
+ 
++/*
++ * qembian 0011 (x-arm1136-tcm-etm): registers of the ARM1136 that QEMU's model lacks, read by the N95 modem
++ * firmware (docs/research/n95-cmt-emulation.md): the Data/Instruction TCM region registers (c9, c1, 0/1;
++ * 0 = no TCM, writes ignored) and the ETM's coprocessor interface (MRC/MCR p14, 1, Rd, c0, CRm, opc2;
++ * read as zero, writes ignored: no trace macrocell behind it), except ETMCR (c0, c0, 0: kept) and ETMSR
++ * (c0, c4, 0: bit 1 "programming" = ETMCR bit 10), which the firmware polls when it programs the ETM.
++ */
++static uint64_t etmcr_read(CPUARMState *env, const ARMCPRegInfo *ri)
++{
++    return env_archcpu(env)->etmcr;
++}
++
++static void etmcr_write(CPUARMState *env, const ARMCPRegInfo *ri, uint64_t value)
++{
++    env_archcpu(env)->etmcr = value;
++}
++
++static uint64_t etmsr_read(CPUARMState *env, const ARMCPRegInfo *ri)
++{
++    return (env_archcpu(env)->etmcr >> 10 & 1) << 1;
++}
++
++static const ARMCPRegInfo arm1136_tcm_etm_reginfo[] = {
++    { .name = "DTCMRR", .cp = 15, .crn = 9, .crm = 1, .opc1 = 0, .opc2 = 0,
++      .access = PL1_RW, .type = ARM_CP_CONST, .resetvalue = 0 },
++    { .name = "ITCMRR", .cp = 15, .crn = 9, .crm = 1, .opc1 = 0, .opc2 = 1,
++      .access = PL1_RW, .type = ARM_CP_CONST, .resetvalue = 0 },
++    { .name = "ETM", .cp = 14, .crn = 0, .crm = CP_ANY, .opc1 = 1, .opc2 = CP_ANY,
++      .access = PL1_RW, .type = ARM_CP_CONST | ARM_CP_OVERRIDE, .resetvalue = 0 },
++    { .name = "ETMCR", .cp = 14, .crn = 0, .crm = 0, .opc1 = 1, .opc2 = 0,
++      .access = PL1_RW, .type = ARM_CP_NO_RAW, .readfn = etmcr_read, .writefn = etmcr_write },
++    { .name = "ETMSR", .cp = 14, .crn = 0, .crm = 4, .opc1 = 1, .opc2 = 0,
++      .access = PL1_RW, .type = ARM_CP_NO_RAW, .readfn = etmsr_read, .writefn = arm_cp_write_ignore },
++};
++
+ void register_cp_regs_for_features(ARMCPU *cpu)
+ {
+     /* Register all the coprocessor registers based on feature bits */
+     CPUARMState *env = &cpu->env;
+     ARMISARegisters *isar = &cpu->isar;
++    if (cpu->arm1136_tcm_etm) {
++        define_arm_cp_regs(cpu, arm1136_tcm_etm_reginfo);     /* qembian 0011 */
++    }
+ 
+     if (arm_feature(env, ARM_FEATURE_M)) {
+         /* M profile has no coprocessor registers */
+diff -ru a/target/arm/tcg/translate.c b/target/arm/tcg/translate.c
+--- a/target/arm/tcg/translate.c	2026-11-21 12:13:26.298336706 +0100
++++ b/target/arm/tcg/translate.c	2026-11-21 12:19:31.783963885 +0100
+@@ -1969,8 +1969,16 @@
+          * We default to ending the TB on a coprocessor register write,
+          * but allow this to be suppressed by the register definition
+          * (usually only necessary to work around guest bugs).
++         *
++         * qembian 0011 (x-sctlr-prefetch): an SCTLR write lets the TB go on, so the instructions after it
++         * run as already fetched, like the ARM1136's prefetched ones. The N95 modem firmware (MCUSW)
++         * turns its MMU on while running at its physical address and relies on the following
++         * "nop; bx lr" to reach the virtual one (bse_mmu_init; docs/research/n95-cmt-emulation.md).
+          */
+-        need_exit_tb = true;
++        if (!(s->sctlr_prefetch && cpnum == 15 && !is64 && opc1 == 0 && crn == 1 && crm == 0 &&
++              opc2 == 0)) {
++            need_exit_tb = true;
++        }
+     }
+     if (need_exit_tb) {
+         gen_lookup_tb(s);
+@@ -6443,6 +6451,7 @@
+     dc->lse2 = false; /* applies only to aarch64 */
+     dc->cp_regs = cpu->cp_regs;
+     dc->features = env->features;
++    dc->sctlr_prefetch = cpu->sctlr_prefetch;
+ 
+     /* Single step state. The code-generation logic here is:
+      *  SS_ACTIVE == 0:
+diff -ru a/target/arm/tcg/translate.h b/target/arm/tcg/translate.h
+--- a/target/arm/tcg/translate.h	2026-11-21 12:13:26.296000237 +0100
++++ b/target/arm/tcg/translate.h	2026-11-21 12:19:31.781884908 +0100
+@@ -108,6 +108,7 @@
+     int current_el;
+     GHashTable *cp_regs;
+     uint64_t features; /* CPU features bits */
++    bool sctlr_prefetch; /* qembian 0011 */
+     bool aarch64;
+     bool thumb;
+     bool lse2;

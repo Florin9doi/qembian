@@ -1,0 +1,153 @@
+--- a/hw/intc/omap_intc.c
++++ b/hw/intc/omap_intc.c
+@@ -55,7 +55,7 @@
+     int sir_intr[2];
+     int autoidle;
+     uint32_t mask;
+-    struct omap_intr_handler_bank_s bank[3];
++    struct omap_intr_handler_bank_s bank[4];   /* qembian: 4 on the OMAP1610's level 2 */
+ };
+ 
+ static void omap_inth_sir_update(OMAPIntcState *s, int is_fiq)
+@@ -138,9 +138,14 @@
+     int i, offset = addr;
+     int bank_no = offset >> 8;
+     int line_no;
+-    struct omap_intr_handler_bank_s *bank = &s->bank[bank_no];
++    struct omap_intr_handler_bank_s *bank;
+     offset &= 0xff;
+ 
++    if (bank_no >= s->nbanks) {
++        OMAP_BAD_REG(addr);
++        return 0;
++    }
++    bank = &s->bank[bank_no];
+     switch (offset) {
+     case 0x00:  /* ITR */
+         return bank->irqs;
+@@ -215,9 +220,14 @@
+     OMAPIntcState *s = opaque;
+     int i, offset = addr;
+     int bank_no = offset >> 8;
+-    struct omap_intr_handler_bank_s *bank = &s->bank[bank_no];
++    struct omap_intr_handler_bank_s *bank;
+     offset &= 0xff;
+ 
++    if (bank_no >= s->nbanks) {
++        OMAP_BAD_REG(addr);
++        return;
++    }
++    bank = &s->bank[bank_no];
+     switch (offset) {
+     case 0x00:  /* ITR */
+         /* Important: ignore the clearing if the IRQ is level-triggered and
+@@ -357,10 +367,9 @@
+     OMAPIntcState *s = OMAP_INTC(obj);
+     SysBusDevice *sbd = SYS_BUS_DEVICE(obj);
+ 
+-    s->nbanks = 1;
+     sysbus_init_irq(sbd, &s->parent_intr[0]);
+     sysbus_init_irq(sbd, &s->parent_intr[1]);
+-    qdev_init_gpio_in(dev, omap_set_intr, s->nbanks * 32);
++    qdev_init_gpio_in(dev, omap_set_intr, 32);
+     memory_region_init_io(&s->mmio, obj, &omap_inth_mem_ops, s,
+                           "omap-intc", s->size);
+     sysbus_init_mmio(sbd, &s->mmio);
+@@ -373,6 +382,19 @@
+     if (!s->iclk) {
+         error_setg(errp, "omap-intc: clk not connected");
+     }
++    /*
++     * qembian: the OMAP1610's level-2 handler has 4 banks of 32 lines, one per 0x100 bytes
++     * (ITR, MIR, ILRs per bank; SIR and CONTROL in bank 0 only). The Nokia 6630's kernel
++     * dispatches level-2 lines 0..127 as interrupts 32..159.
++     */
++    if (s->nbanks < 1 || s->nbanks > ARRAY_SIZE(s->bank)) {
++        error_setg(errp, "omap-intc: nbanks must be 1..%zu", ARRAY_SIZE(s->bank));
++        return;
++    }
++    if (s->nbanks > 1) {
++        qdev_init_gpio_in(dev, omap_set_intr, (s->nbanks - 1) * 32);
++        memory_region_set_size(&s->mmio, s->nbanks * 0x100);
++    }
+ }
+ 
+ void omap_intc_set_iclk(OMAPIntcState *intc, omap_clk clk)
+@@ -387,6 +409,7 @@
+ 
+ static const Property omap_intc_properties[] = {
+     DEFINE_PROP_UINT32("size", OMAPIntcState, size, 0x100),
++    DEFINE_PROP_UINT8("nbanks", OMAPIntcState, nbanks, 1),
+ };
+ 
+ static void omap_intc_class_init(ObjectClass *klass, const void *data)
+--- a/hw/arm/omap1.c
++++ b/hw/arm/omap1.c
+@@ -3872,8 +3872,8 @@
+     return range_covers_byte(0xe1010000, 0xe1020004 - 0xe1010000, addr);
+ }
+ 
+-struct omap_mpu_state_s *omap310_mpu_init(MemoryRegion *dram,
+-                const char *cpu_type)
++static struct omap_mpu_state_s *omap1_mpu_init(MemoryRegion *dram,
++                const char *cpu_type, bool is_1610)
+ {
+     int i;
+     struct omap_mpu_state_s *s = g_new0(struct omap_mpu_state_s, 1);
+@@ -3909,11 +3909,19 @@
+     sysbus_mmio_map(busdev, 0, 0xfffecb00);
+     s->ih[1] = qdev_new("omap-intc");
+     qdev_prop_set_uint32(s->ih[1], "size", 0x800);
++    if (is_1610) {
++        /* qembian: the OMAP1610's level 2 has 4 banks (128 lines) */
++        qdev_prop_set_uint8(s->ih[1], "nbanks", 4);
++    }
+     omap_intc_set_iclk(OMAP_INTC(s->ih[1]), omap_findclk(s, "arminth_ck"));
+     busdev = SYS_BUS_DEVICE(s->ih[1]);
+     sysbus_realize_and_unref(busdev, &error_fatal);
+     sysbus_connect_irq(busdev, 0,
+                        qdev_get_gpio_in(s->ih[0], OMAP_INT_15XX_IH2_IRQ));
++    if (is_1610) {
++        /* qembian: the 1610's level-2 FIQ goes to level-1 line 2 */
++        sysbus_connect_irq(busdev, 1, qdev_get_gpio_in(s->ih[0], OMAP_INT_1610_IH2_FIQ));
++    }
+     /* The second interrupt controller's FIQ output is not wired up */
+     sysbus_mmio_map(busdev, 0, 0xfffe0000);
+ 
+@@ -4106,3 +4114,17 @@
+ 
+     return s;
+ }
++
++struct omap_mpu_state_s *omap310_mpu_init(MemoryRegion *dram, const char *cpu_type)
++{
++    return omap1_mpu_init(dram, cpu_type, false);
++}
++
++/*
++ * qembian: an OMAP1610 on the 1510 model: the 4-bank level-2 interrupt handler (lines 32..159 by
++ * the Linux/Nokia numbering) and its FIQ output; the rest is the 1510's until a difference shows up.
++ */
++struct omap_mpu_state_s *omap1610_mpu_init(MemoryRegion *dram, const char *cpu_type)
++{
++    return omap1_mpu_init(dram, cpu_type, true);
++}
+--- a/include/hw/arm/omap.h
++++ b/include/hw/arm/omap.h
+@@ -127,6 +127,7 @@
+  * Common OMAP-15xx IRQ numbers for level 1 interrupt handler
+  */
+ #define OMAP_INT_15XX_IH2_IRQ      0
++#define OMAP_INT_1610_IH2_FIQ      2     /* qembian */
+ 
+ /*
+  * OMAP-310 specific IRQ numbers for level 1 interrupt handler
+@@ -440,6 +441,8 @@
+ /* omap1.c */
+ struct omap_mpu_state_s *omap310_mpu_init(MemoryRegion *sdram,
+                 const char *core);
++struct omap_mpu_state_s *omap1610_mpu_init(MemoryRegion *sdram,
++                const char *core);     /* qembian */
+ 
+ #define OMAP_BAD_REG(paddr)        \
+         qemu_log_mask(LOG_GUEST_ERROR, "%s: Bad register %#08"HWADDR_PRIx"\n", \

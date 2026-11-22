@@ -25,6 +25,9 @@
  * the client's descriptor (DThread::Write, ekern export 479) and completes the request
  * (DLogicalChannel::Complete, export 64). Requests without a reply are logged UNANSWERED.
  *
+ * `reply+ RES REQ RESP ...` lines add frames after a request's reply (the Nokia 3230's DevSound wants
+ * "play started" 0x21 then "play ended" 0x2B for one E8 20; tests/ngage_isi_test.c reply_plus).
+ *
  * Indications the modem sends by itself: `ind UNIT OBJ RES MSG BYTES...`, queued when that
  * unit's channel opens (receiver object OBJ, transaction id 0).
  *
@@ -34,7 +37,8 @@
  * docs/devices/nokia-6600-nhl10/bring-up.md]. One pseudo channel (isa_chan) stands for that
  * path: always ready to receive. A frame: media, receiver device, sender device, resource,
  * length (LE, from the receiver object on), receiver object, sender object, transaction id,
- * message id, data [V: isaapi CheckCrcMsgL]. A reply swaps devices and objects [I].
+ * message id, data [V: isaapi CheckCrcMsgL]. A reply swaps devices and objects [I]. A reply's
+ * data byte written `rq10` is the request's byte 10 (the N70's ISC channel open: {channel, object}).
  * Indications (`ind UNIT OBJ RES MSG BYTES`, as for the N-Gage): UNIT is the subscribing object
  * (decimal); the indication goes to object OBJ when UNIT subscribes (resource 0, message 0, to
  * object 0x10: a list of resource/message pairs [I]), from object 0x10.
@@ -61,7 +65,11 @@ typedef struct {
     uint8_t res, req, resp, len;
     bool echo;                  /* "echo": the request's data, first byte 0 (BB5 H-light) */
     int sub;                    /* "@XX": only for requests whose byte 10 (subtype) is XX; -1 any */
+    bool more;                  /* "reply+": an extra frame sent after the request's reply (3230 audio) */
     uint8_t data[200];          /* len= up to 200 (the 9500's SIM 09 31 reply needs a 76-byte frame) */
+    uint8_t rq10[4];            /* "rq10": data positions that take the request's byte 10 (N70 ISC channel) */
+    uint8_t nrq10;
+    int media, sobj;            /* "media=XX", "sobj=XX": override the media byte / sender object; -1 = mirror */
 } NgageIsiReply;
 
 static NgageIsiReply *replies;
@@ -173,7 +181,8 @@ void ngage_isi_open(uint32_t dlc, uint32_t unit)
         for (unsigned i = 0; i < ninds; i++) {
             if (inds[i].unit == unit) {
                 uint8_t hdr[10] = { 0, 0, 0, inds[i].res, 0, 0, 0, inds[i].obj, 0, 0 };
-                NgageIsiReply r = { .res = inds[i].res, .resp = inds[i].msg, .len = inds[i].len };
+                NgageIsiReply r = { .res = inds[i].res, .resp = inds[i].msg, .len = inds[i].len,
+                                    .media = -1, .sobj = -1 };
 
                 memcpy(r.data, inds[i].data, inds[i].len);
                 enqueue(c, hdr, sizeof(hdr), &r);
@@ -247,7 +256,7 @@ void ngage_isi_load(const char *path)
     for (char **l = lines; *l; l++) {
         char *h = strchr(*l, '#');
         g_auto(GStrv) t = NULL;
-        NgageIsiReply r = { .sub = -1 };
+        NgageIsiReply r = { .sub = -1, .media = -1, .sobj = -1 };
         unsigned k = 0, pad = 0;
 
         if (h) {
@@ -282,9 +291,10 @@ void ngage_isi_load(const char *path)
             }
             continue;
         }
-        if (!t[0] || strcmp(t[0], "reply")) {
+        if (!t[0] || (strcmp(t[0], "reply") && strcmp(t[0], "reply+"))) {
             continue;
         }
+        r.more = !strcmp(t[0], "reply+");
         for (char **w = t + 1; *w; w++) {
             if (!**w) {
                 continue;
@@ -299,6 +309,20 @@ void ngage_isi_load(const char *path)
             }
             if (!strncmp(*w, "len=", 4)) {
                 pad = strtoul(*w + 4, NULL, 0);
+                continue;
+            }
+            if (!strncmp(*w, "media=", 6)) {
+                r.media = strtoul(*w + 6, NULL, 16);
+                continue;
+            }
+            if (!strncmp(*w, "sobj=", 5)) {
+                r.sobj = strtoul(*w + 5, NULL, 16);
+                continue;
+            }
+            if (!strcmp(*w, "rq10") && k >= 3 && r.len < sizeof(r.data) && r.nrq10 < sizeof(r.rq10)) {
+                r.rq10[r.nrq10++] = r.len;
+                r.data[r.len++] = 0;
+                k++;
                 continue;
             }
             unsigned v = strtoul(*w, NULL, 16);
@@ -354,6 +378,15 @@ static void enqueue(NgageIsiChan *c, const uint8_t *req, uint32_t reqlen, const 
         m->b[7] = req[6];                       /* sender object = the request's receiver */
     }
     memcpy(m->b + 10, data, dlen);
+    if (c == &isa_chan && r->media >= 0) {
+        m->b[0] = r->media;
+    }
+    if (c == &isa_chan && r->sobj >= 0) {
+        m->b[7] = r->sobj;
+    }
+    for (unsigned i = 0; i < r->nrq10; i++) {
+        m->b[10 + r->rq10[i]] = reqlen > 10 ? req[10] : 0;
+    }
     m->len = 10 + dlen;
     while (*q) {
         q = &(*q)->next;
@@ -373,6 +406,9 @@ static void on_send(NgageIsiChan *c, unsigned unit, const uint8_t *b, uint32_t l
         const NgageIsiReply *r = NULL;
 
         for (unsigned i = 0; i < nreplies; i++) {
+            if (replies[i].more) {
+                continue;                       /* reply+ lines only follow a reply */
+            }
             if (replies[i].res == b[3] && replies[i].req == b[9] && replies[i].sub < 0 &&
                 !(r && r->sub >= 0)) {
                 r = &replies[i];
@@ -387,6 +423,13 @@ static void on_send(NgageIsiChan *c, unsigned unit, const uint8_t *b, uint32_t l
                       r ? "" : "  UNANSWERED");
         if (r && c) {
             enqueue(c, b, len, r);
+            /* reply+ RES REQ RESP ...: further frames for the same request, in table order */
+            for (unsigned i = 0; i < nreplies; i++) {
+                if (replies[i].more && replies[i].res == b[3] && replies[i].req == b[9] &&
+                    (replies[i].sub < 0 || (len > 10 && replies[i].sub == b[10]))) {
+                    enqueue(c, b, len, &replies[i]);
+                }
+            }
         }
         if (c == &isa_chan && b[3] == 0 && b[9] == 0) {
             /* a subscription: the modem's state indications for this object */
@@ -394,7 +437,8 @@ static void on_send(NgageIsiChan *c, unsigned unit, const uint8_t *b, uint32_t l
                 if (inds[i].unit == b[7]) {
                     /* as if the subscriber had asked: the reply swaps devices and objects */
                     uint8_t hdr[10] = { b[0], b[1], b[2], inds[i].res, 0, 0, b[6], inds[i].obj, 0, 0 };
-                    NgageIsiReply ir = { .res = inds[i].res, .resp = inds[i].msg, .len = inds[i].len };
+                    NgageIsiReply ir = { .res = inds[i].res, .resp = inds[i].msg, .len = inds[i].len,
+                                         .media = -1, .sobj = -1 };
 
                     memcpy(ir.data, inds[i].data, inds[i].len);
                     enqueue(c, hdr, sizeof(hdr), &ir);

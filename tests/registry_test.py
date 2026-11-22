@@ -446,6 +446,63 @@ class StoreTest(unittest.TestCase):
         ctx = R.context(self.conn, 'gce-render-stage', budget=20000)
         self.assertIn('iface 0x10285a29 impl 0x20031cba gcerenderstage', ctx['components'][0]['edges']['ecom'])
 
+    def test_ipc_servers_become_edges(self):
+        """tools/ipc_index.py output (2026-11-19): one 'serves NAME' row per provider and one 'client of NAME'
+        edge per client -> provider binary (dst NULL when nobody was seen starting it); the component briefing
+        shows what a component serves, who its clients are and whom it is a client of"""
+        ip = {'device': DEV, 'firmware': FIXTURE['firmware'], 'servers': {
+            '!SURFACE_UPDATE_SERVER': {'provider': 'sys/bin/surfacemanager.dll', 'candidates': [],
+                                       'clients': ['sys/bin/gcerenderstage.dll', 'sys/bin/someapp.exe'],
+                                       'mentions': []},
+            '!SocketServer': {'provider': None, 'candidates': [], 'clients': ['sys/bin/someapp.exe'],
+                              'mentions': []}}}
+        p = os.path.join(self.tmp, 'ipc.json')
+        json.dump(ip, open(p, 'w'))
+        st = R.ingest(self.conn, self.target, quiet=True, index_path=self.fixture, ipc_path=p)
+        self.assertEqual(st['ipc'], 4)
+        rows = {(r['detail'], r['src'], r['dst']) for r in
+                self.conn.execute("SELECT detail, src, dst FROM edge WHERE type='ipc-client-server'")}
+        sm, rs, app = self.bid('sys/bin/surfacemanager.dll'), self.bid('sys/bin/gcerenderstage.dll'), \
+            self.bid('sys/bin/someapp.exe')
+        self.assertEqual(rows, {('serves !SURFACE_UPDATE_SERVER', sm, None),
+                                ('client of !SURFACE_UPDATE_SERVER', rs, sm),
+                                ('client of !SURFACE_UPDATE_SERVER', app, sm),
+                                ('client of !SocketServer', app, None)})
+        ctx = R.context(self.conn, 'gce-render-stage', budget=20000)
+        self.assertEqual(ctx['components'][0]['edges']['ipc']['client_of'], ['!SURFACE_UPDATE_SERVER'])
+        # ingest again: the same set, nothing doubled
+        R.ingest(self.conn, self.target, quiet=True, index_path=self.fixture, ipc_path=p)
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM edge WHERE type='ipc-client-server'").fetchone()[0], 4)
+
+    @unittest.skipUnless(os.path.isdir(os.path.join(ROOT, 'models', 'nokia-701-rm774')), 'needs the 701 profile')
+    def test_second_device_keeps_its_own_ecom_and_ipc_edges(self):
+        """bug 2026-11-19: the ecom-plugin and ipc-client-server edge keys had no device/firmware, so ingesting the
+        701 after the 808 inserted 16 of its 1770 ECom edges and none of its IPC edges (INSERT OR IGNORE)"""
+        ec = {'device': DEV, 'firmware': FIXTURE['firmware'], 'plugins': {'gcerenderstage': {
+            'name': 'gcerenderstage', 'format': 1, 'dll_uid': '0x20031cb9', 'interfaces': [
+                {'uid': '0x10285a29', 'implementations': [{'uid': '0x20031cba', 'version': 1,
+                                                           'name': 'gcerenderstage'}]}]}}}
+        ip = {'device': DEV, 'firmware': FIXTURE['firmware'], 'servers': {
+            '!SURFACE_UPDATE_SERVER': {'provider': 'sys/bin/surfacemanager.dll', 'candidates': [],
+                                       'clients': ['sys/bin/gcerenderstage.dll'], 'mentions': []}}}
+        pe, pi = os.path.join(self.tmp, 'ecom.json'), os.path.join(self.tmp, 'ipc.json')
+        json.dump(ec, open(pe, 'w')); json.dump(ip, open(pi, 'w'))
+        R.ingest(self.conn, self.target, quiet=True, index_path=self.fixture, ecom_path=pe, ipc_path=pi)
+        # the same modules and names in a second device's firmware
+        t2 = R.resolve_target('nokia-701-rm774')
+        t2['store'] = self.db
+        fx2 = dict(FIXTURE, device='nokia-701-rm774', firmware=t2['firmware'])
+        ec2, ip2 = dict(ec, device='nokia-701-rm774', firmware=t2['firmware']), \
+            dict(ip, device='nokia-701-rm774', firmware=t2['firmware'])
+        p2, pe2, pi2 = [os.path.join(self.tmp, n) for n in ('imports2.json', 'ecom2.json', 'ipc2.json')]
+        json.dump(fx2, open(p2, 'w')); json.dump(ec2, open(pe2, 'w')); json.dump(ip2, open(pi2, 'w'))
+        st = R.ingest(self.conn, t2, quiet=True, index_path=p2, ecom_path=pe2, ipc_path=pi2)
+        self.assertEqual((st['ecom'], st['ipc']), (1, 2))
+        n = lambda typ, dev: self.conn.execute('SELECT count(*) FROM edge WHERE type=? AND device=?',
+                                               (typ, dev)).fetchone()[0]
+        self.assertEqual((n('ecom-plugin', DEV), n('ecom-plugin', 'nokia-701-rm774')), (1, 1))
+        self.assertEqual((n('ipc-client-server', DEV), n('ipc-client-server', 'nokia-701-rm774')), (2, 2))
+
     def test_mcp_adapter(self):
         """tools/registry_mcp.py: the agent-facing tools over the same functions; refusals come back as tool
         errors (a submit without the lease token), not as a dead server"""

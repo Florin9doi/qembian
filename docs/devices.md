@@ -185,7 +185,9 @@ serves every variant and never guesses the variant from the arguments it sees.
 `kernel.omit_baseport` lists Syborg baseport files to leave out of this device's kernel side (touch
 phones: `epointer.dll`, the mouse driver, so the `exyin` digitiser owns the pointer device).
 `kernel.missing_drivers` lists the firmware's kernel-side files that have no stand-in (documented
-gaps, read by `tools/fw/inventory.py`'s `kernel-drivers.txt` and the status report).
+gaps, read by `tools/fw/inventory.py`'s `kernel-drivers.txt` and the status report; a file our own EPL build
+replaces under the same name, e.g. `elocd.ldd`, is tagged `ours (EPL build)` from the ROM manifest and does
+not belong in the list; a blank tag is an undeclared omission).
 
 **`[modem]`** `kind` (`isi-fake-peer`), `names` (platform-wide resource/message names),
 `replies` (one file or a list of layers, later ones win per (resource, request); device-relative
@@ -276,6 +278,11 @@ a separate small production-test ROM, not user data.
   boot, so `--fresh` gets the agent on the first boot too. Existing drives and seeds are not touched.
 - Optional, on by default: `SYBORG_UDA=0` or `sydb start|phone --no-uda` start blank drives of the
   profile's `size`, as before; `NVMEM_SIZE`/`NVMEM2_SIZE` force a blank drive of that size.
+- **Drive files**: `[[board.drive_files]] letter, path, file` copies a file from the model directory onto a
+  new drive made from the user data image (mtools; `tools/device.py add_drive_files`), for things a phone
+  of the model needs on that drive beyond its factory content. N95: `C:\Private\10205054\runtimefeatures.txt`
+  (`109 0`: WLAN off, docs/hacks.md H-n95-wlan-off). `sydb start` also adds a declared file that an existing
+  drive lacks (drives made before the file was declared); a file already on the drive is never replaced.
 
 ## 3. Layering: one QEMU binary, per-device guest builds
 

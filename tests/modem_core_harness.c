@@ -9,6 +9,10 @@
  * ("RR QQ PP LEN DATA..", tools/isi.py gen-table) or "-", WALLSECONDS: host UTC for the RTC reply (-1 = no clock).
  * Each REQ is "RES,ID,DATA..." in hex (e.g. "17,0A,03,00"); it is sent with tid 0x42 on ISC channel 7. Every
  * delivered frame is printed as "RES ID TID DATA.." (hex, data = the bytes after the message id).
+ * Link mode (CONFIG contains "harness.link=1"): requests go out through the link (printed "LINK <hex message>"),
+ * "<HEX" delivers a whole PhoNet message from the modem (sybmodem_link_receive), "S,RES,ID" subscribes channel 7.
+ * "@H,N" opens channel object handle H on ISC channel N and makes it the current one (requests and "S" after it);
+ * with "harness.showch=1" in CONFIG every delivered frame starts with "hH " (the handle it went to).
  *
  * Original work for qembian.
  */
@@ -44,6 +48,14 @@ static uint32_t h_pending(void *c, int s, uint64_t t) { return 0; }
 static uint32_t h_ring_size(void *c, int s) { return 0; }
 static void h_beep(void *c, uint32_t hz, uint32_t ms, uint32_t g) {}
 static int64_t h_wall(void *c) { return wall; }
+static void h_link(void *c, const uint8_t *m, size_t n)
+{
+    printf("LINK");
+    for (size_t i = 0; i < n; i++) {
+        printf(" %02X", m[i]);
+    }
+    printf("\n");
+}
 
 int main(int argc, char **argv)
 {
@@ -58,8 +70,15 @@ int main(int argc, char **argv)
     if (wall < 0) {
         host.wall_seconds = NULL;
     }
+    bool link = strstr(argv[1], "harness.link=1") != NULL;
+    if (link) {
+        host.link_send = h_link;
+    }
     sybmodem_init(&s, &host, NULL, argv[1]);
     sybmodem_reset(&s);
+    if (link) {
+        sybmodem_link_enable(&s);
+    }
     if (strcmp(argv[2], "-")) {
         FILE *f = fopen(argv[2], "r");
         if (!f) {
@@ -72,9 +91,41 @@ int main(int argc, char **argv)
         text[n] = 0;
         sybmodem_load_replies(&s, text);
     }
-    const uint32_t ch = 1 << 8 | 7;     /* port 0, handle 1, ISC channel 7 */
+    uint32_t ch = 1 << 8 | 7;           /* port 0, handle 1, ISC channel 7 */
+    s.chan_key[0][7] = ch;              /* channel 7 open (as TX_OPEN records it) */
+    modem_chan(&s, ch)->link_key = ch;
+    bool showch = strstr(argv[1], "harness.showch=1") != NULL;
     for (int a = 4; a < argc; a++) {
         uint8_t m[256] = { 0 };
+        if (argv[a][0] == '@') {        /* open another channel object, as TX_OPEN does */
+            char *p = argv[a] + 1;
+            unsigned h = strtoul(p, &p, 16), num = strtoul(p + (*p == ','), NULL, 16);
+            ch = (h & 0xff) << 8 | (num & 0xff);
+            memset(modem_chan(&s, ch), 0, sizeof(ModemChannel));
+            s.chan_key[0][num & 0xff] = ch;
+            modem_chan(&s, ch)->link_key = ch;
+            continue;
+        }
+        if (argv[a][0] == '<' || argv[a][0] == 'S') {    /* link mode: from the modem / a subscription */
+            unsigned n = 0;
+            for (char *p = argv[a] + 1 + (argv[a][0] == 'S'); *p && n < sizeof(m);) {
+                m[n++] = (uint8_t)strtoul(p, &p, 16);
+                while (*p == ',') {
+                    p++;
+                }
+            }
+            if (argv[a][0] == 'S') {
+                ModemChannel *c = modem_chan(&s, ch);
+                memcpy(c->subs + c->subs_len, m, 2);
+                c->subs_len += 2;
+                if (s.link) {
+                    modem_link_subscribe(&s);    /* as TX_SUBSCRIBE does: the modem gets the resource set */
+                }
+                continue;
+            }
+            sybmodem_link_receive(&s, m, n);
+            goto drain;
+        }
         unsigned v[246], n = 0;
         for (char *p = argv[a]; *p && n < 246;) {
             v[n++] = (unsigned)strtoul(p, &p, 16);
@@ -93,7 +144,12 @@ int main(int argc, char **argv)
         }
         uint32_t len = 10 + n - 2;
         m[4] = (len - 6) & 0xff;
-        modem_request(&s, ch, m, len);
+        if (link) {
+            modem_link_send(&s, ch, m, len);
+        } else {
+            modem_request(&s, ch, m, len);
+        }
+drain:;
         ModemPort *p = &s.port[0];
         while (p->count) {
             ModemFrame *f = &p->fifo[p->head];
@@ -101,6 +157,9 @@ int main(int argc, char **argv)
             p->count--;
             if (f->kind != RX_DELIVER) {
                 continue;
+            }
+            if (showch) {
+                printf("h%X ", CH_HANDLE(f->channel));
             }
             printf("%02X %02X %02X", f->data[3], f->data[9], f->data[8]);
             for (uint32_t i = 10; i < f->len; i++) {

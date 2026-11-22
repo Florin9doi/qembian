@@ -101,6 +101,13 @@ tv_out = true                              # d_display TV-out controls return 0 
 dsp = "ti-dsp-bridge"                      # TI DSP/BIOS bridge (ehwa/ehwaomap)
 gpu = "powervr-mbx"                        # replaced by sygl (H-gles-trampolines)
 
+# The phone's own modem firmware on an emulated modem CPU (n95-cmt machine, tools/cmt/probe.py), linked to
+# syborg-modem instead of the reply tables: `sydb start --modem real` / instance setting modem = "real"
+# (docs/research/n95-cmt-emulation.md). Offline without a SIM works; no SIM card model yet.
+[modem_cpu]
+machine = "n95-cmt"
+map = "tools/cmt/n95-cmt.map"
+
 # ---------------------------------------------------------------------------------------------
 # Guest side: what is built per device.
 [kernel]
@@ -279,3 +286,14 @@ startup = { category = 0x101F8766, state = 0x41, ui_phase = 0x4 }
 level = "L5-gl"                            # boots to idle, UI usable, telephony offline, GL on host; audio partial; no connectivity
 updated = "2026-11-06"
 open = ["keyguard emergency-number check (CALL 0x28)", "game audio rate", "Carousel landscape under strict EGL", "camera stand-in", "slide/accelerometer stand-ins", "networking"]
+
+# Files a new C: drive gets on top of the firmware's user data image (tools/device.py add_drive_files).
+# WLAN off: FeatMgrServer applies C:\Private\10205054\runtimefeatures.txt ("id value" lines, UTF-16; value 0
+# removes the id from the supported list, FUN_838e22bc [V]). The emulated N95 has no WLAN hardware: with the
+# feature on, WlanServer exits -5 and IPWServer (internet telephony) panics when its WLAN client cannot connect
+# (docs/research/n95-cmt-emulation.md 8); the owner's own N95 board has no WLAN either. 109 = 0x6d, the id
+# IPWServer checks (KFeatureIdProtocolWlan [I name]).
+[[board.drive_files]]
+letter = "C"
+path = "Private/10205054/runtimefeatures.txt"
+file = "runtimefeatures.txt"

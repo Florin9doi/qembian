@@ -1,0 +1,26 @@
+diff -ru a/hw/block/pflash_cfi02.c b/hw/block/pflash_cfi02.c
+--- a/hw/block/pflash_cfi02.c	2026-11-19 12:42:10.410905240 +0100
++++ b/hw/block/pflash_cfi02.c	2026-11-19 12:42:10.447906697 +0100
+@@ -1028,3 +1028,9 @@
+     sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, base);
+     return PFLASH_CFI02(dev);
+ }
++
++/* qembian: the array, for boards that load their image themselves (the Nokia 3230's AMD/Samsung NOR) */
++MemoryRegion *pflash_cfi02_get_memory(PFlashCFI02 *fl)
++{
++    return &fl->orig_mem;
++}
+diff -ru a/include/hw/block/flash.h b/include/hw/block/flash.h
+--- a/include/hw/block/flash.h	2026-11-19 12:42:10.411905279 +0100
++++ b/include/hw/block/flash.h	2026-11-19 12:42:10.448906736 +0100
+@@ -30,6 +30,9 @@
+ #define TYPE_PFLASH_CFI02 "cfi.pflash02"
+ OBJECT_DECLARE_SIMPLE_TYPE(PFlashCFI02, PFLASH_CFI02)
+ 
++/* qembian: the array, for boards that load their image themselves (as pflash_cfi01_get_memory) */
++MemoryRegion *pflash_cfi02_get_memory(PFlashCFI02 *fl);
++
+ 
+ PFlashCFI02 *pflash_cfi02_register(hwaddr base,
+                                    const char *name,

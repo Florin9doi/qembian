@@ -1,0 +1,17 @@
+diff -ru a/hw/block/pflash_cfi01.c b/hw/block/pflash_cfi01.c
+--- a/hw/block/pflash_cfi01.c	2026-11-21 13:07:48.768129714 +0100
++++ b/hw/block/pflash_cfi01.c	2026-11-21 13:07:48.804597627 +0100
+@@ -598,7 +598,12 @@
+         switch (pfl->cmd) {
+         case 0xe8: /* Block write */
+             /* FIXME check @offset, @width */
+-            if (pfl->blk_offset == -1 && pfl->counter) {
++            /*
++             * qembian 0012: a one-word buffered write (count 0) starts the buffer too; with "&& counter"
++             * its data was dropped as a programming error and the 0xd0 confirm aborted (the N95 modem's
++             * PMM driver writes record headers word by word, docs/research/n95-cmt-emulation.md)
++             */
++            if (pfl->blk_offset == -1) {
+                 pflash_blk_write_start(pfl, offset);
+             }
+             if (!pfl->ro && (pfl->blk_offset != -1)) {

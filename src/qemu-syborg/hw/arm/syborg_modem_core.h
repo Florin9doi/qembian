@@ -32,6 +32,7 @@ typedef QEMUTimer SybModemTimer;
 
 #define MODEM_PORTS     2
 #define MODEM_CHANNELS  64          /* ISC channel numbers 0..63 */
+#define MODEM_LINK_RES  8           /* link mode: resources remembered per channel object */
 #define MODEM_HANDLES   64          /* guest channel objects per port (handle 0 unused) */
 #define MODEM_MAX_MSG   2048        /* ISI messages (the guest driver's are <= 256) and packet data frames */
 #define MODEM_FIFO      64
@@ -65,6 +66,12 @@ typedef struct ModemChannel {
     uint8_t subs[MODEM_SUBS];
     uint32_t mtc_ind_sent;
     uint32_t ind_sent;              /* [modem].indications already sent (bit per entry) */
+    /* link mode only (not migrated: the linked modem is another process): the channel's key while open (0 =
+       closed), and the resources it sent requests to most recently (sequence numbers), so that a modem reply,
+       which names only the channel number, goes back to the object that asked */
+    uint32_t link_key;
+    uint8_t link_res[MODEM_LINK_RES];
+    uint32_t link_seq[MODEM_LINK_RES];
 } ModemChannel;
 
 typedef struct ModemLate {
@@ -109,6 +116,9 @@ typedef struct SybModemHost {
     uint32_t (*snd_ring_size)(void *ctx, int slot);
     void (*snd_beep)(void *ctx, uint32_t hz, uint32_t ms, uint32_t gain);
     int64_t (*wall_seconds)(void *ctx);                        /* host UTC, seconds since 1970 (RTC 19 0A); may be NULL */
+    /* a real modem behind a link (the n95-cmt machine running the phone's own modem firmware): every ISI
+       message the guest sends goes here, complete with its PhoNet header; may be NULL (no link) */
+    void (*link_send)(void *ctx, const uint8_t *msg, size_t len);
 } SybModemHost;
 
 typedef struct SyborgModemState {
@@ -141,6 +151,11 @@ typedef struct SyborgModemState {
     SybCcpu ccpu;                   /* the P1i's CCPU (syborg_ccpu.c), on port 0 */
     ModemReply *replies;
     unsigned nreplies;
+    bool link;                      /* ISI goes to a real modem (host->link_send), not to the reply tables */
+    uint32_t link_sent, link_received, link_dropped;
+    uint8_t link_subs[32];          /* resources last subscribed at the modem (PN_COMMGR 10/10), sorted */
+    uint32_t link_subs_n;
+    uint32_t link_seq;              /* link mode: requests sent (orders ModemChannel.link_seq) */
 } SyborgModemState;
 
 /* set-up: host and config first, then the host creates the timers (late[i].timer with sybmodem_late_fire
@@ -160,6 +175,11 @@ void sybmodem_sms_fire(void *s);
 /* packet data from the host network (Ethernet frames); receive returns 0 to have the frame kept and retried */
 bool sybmodem_net_can_receive(SyborgModemState *s);
 size_t sybmodem_net_receive(SyborgModemState *s, const uint8_t *buf, size_t size);
+/* link mode (a real modem): turn it on before the guest runs; a message from the modem (PhoNet header + ISI) */
+void sybmodem_link_enable(SyborgModemState *s);
+void sybmodem_link_receive(SyborgModemState *s, const uint8_t *msg, size_t len);
+/* link mode: the open channel object a modem message for channel number obj, resource res, goes to (0 = none) */
+uint32_t sybmodem_link_route(SyborgModemState *s, uint8_t obj, uint8_t res);
 /* an incoming SMS (SMS-DELIVER TPDU in hex): NULL, or why it was refused */
 const char *sybmodem_sms(SyborgModemState *s, const char *hex);
 

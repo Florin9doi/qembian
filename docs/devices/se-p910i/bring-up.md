@@ -2,7 +2,7 @@
 
 Firmware `CXC162041 R5B01 050509` (baseline "layla Inc8_PA4"), customisation `CDA162005/4 R5A02`
 (EAST-EMEA). The phone's own ROM and kernel on a new QEMU board in the EKA1 tree (`src/qemu-ngage/`),
-like the N-Gage, 6600, 7650 and 9500.
+like the N-Gage, 6600, 7650 and 9500. Prompt: [docs/prompts/se-p910i-bringup.md](../../prompts/se-p910i-bringup.md).
 
 Marks: **[V]** verified in the firmware bytes or code, **[I]** inferred.
 

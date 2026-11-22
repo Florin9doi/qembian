@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""ngage_phone: an emulator window for the virtual EKA1 phones (N-Gage QD, 6600, 7650, 9500; like `sydb phone`).
+"""ngage_phone: an emulator window for the virtual EKA1 phones (N-Gage QD, 6600, 7650, 3230, 6630, 7710, 9500, P800, P910i; like `sydb phone`).
 
-  python3 eka1/tools/ngage_phone.py [--model ngage|nokia6600|nokia7650|nokia9500|p910i] [--phone NAME] [--fresh]
+  python3 eka1/tools/ngage_phone.py [--model ngage|nokia6600|nokia7650|nokia7710|nokia9500|p910i] [--phone NAME] [--fresh]
                                     [--scale 2] [--keep]
 
 --model picks the phone (default ngage = N-Gage QD; nokia6600 = Nokia 6600, -M nokia6600); --phone
@@ -11,7 +11,8 @@ One command: it starts the phone (an ngage session, eka1/tools/ngage_sess.py, na
 when it isn't running, shows the screen and the phone's keys, and ends the session when the window
 closes (--keep leaves it running; a session it joined is never stopped).
 The phone keeps its flash (C:, settings) in build/ngage/phones/NAME.flash between boots (Q55);
---fresh starts factory-fresh (the first boot formats C: and restores factory settings, ~75 s more).
+--fresh starts factory-fresh: the first boot formats C: before drawing anything (a blank/white screen: N-Gage ~40 s,
+6600 ~60 s, 3230 ~150 s; not a hang, docs/eka1-ngage.md "First boot is slow"); later boots are fast.
 
 - Screen: QMP screendump of the board's console, i.e. what the board shows (the window server's
   screen chunk, H-ngage-fb, or the panel), refreshed 10 times a second.
@@ -33,6 +34,10 @@ The phone keeps its flash (C:, settings) in build/ngage/phones/NAME.flash betwee
   pads: with the flip closed 0-9, * and # (or \\), F1-F4 the keys above the digits; with it open the
   QWERTY letters, Backspace, Enter, Space, Shift, comma, period; F5-F7 the corner pads, Enter =
   Confirm, Up/Down = the jog dial, F8 = the side key (p910i_input.c; key names partly [I]).
+- Nokia 7710: one 640x320 touch screen; the mouse is the pen (pressed = touching). Keys
+  (nokia7710_input.c, names partly [I]): arrows + Enter = the 5-way key, F1 = Menu, F2 or Home = Desk,
+  F3 = call, F4 = end, Esc or Backspace = back, F5-F7 = the other hardware keys. C: is kept in
+  build/ngage/phones/NAME.flash (the partition image).
 """
 import argparse, os, pathlib, subprocess, sys, time
 
@@ -66,7 +71,8 @@ for i in range(10):
 
 
 TITLES = {'ngage': 'N-Gage QD', 'nokia6600': 'Nokia 6600', 'nokia7650': 'Nokia 7650',
-          'nokia9500': 'Nokia 9500 Communicator', 'p910i': 'Sony Ericsson P910i'}
+          'nokia9500': 'Nokia 9500 Communicator', 'p910i': 'Sony Ericsson P910i', 'nokia7710': 'Nokia 7710', 'p800': 'Sony Ericsson P800', 'nokia3230': 'Nokia 3230',
+          'nokia6630': 'Nokia 6630', 'nokian70': 'Nokia N70', 'nokia9210': 'Nokia 9210 Communicator'}
 
 # Nokia 9500: every host key goes to the board as a qcode (nokia9500_kbd.c RA2_KEYS maps them)
 QWERTY = {getattr(Qt.Key, 'Key_' + c): c.lower() for c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'}
@@ -102,6 +108,40 @@ P910_BUTTONS = [[('Jog ▲', 'up'), ('Jog ▼', 'down'), ('Confirm', 'ret'), ('S
                  ('Back', 'backspace'), ('Space', 'spc')]]
 
 
+# Nokia 7710 (nokia7710_input.c RM12_KEYS maps the qcodes to ekeyp's matrix)
+RM12_KEYS = {Qt.Key.Key_Up: 'up', Qt.Key.Key_Down: 'down', Qt.Key.Key_Left: 'left', Qt.Key.Key_Right: 'right',
+             Qt.Key.Key_Return: 'ret', Qt.Key.Key_Enter: 'ret', Qt.Key.Key_Escape: 'esc',
+             Qt.Key.Key_Backspace: 'backspace', Qt.Key.Key_Home: 'home'}
+RM12_KEYS.update({getattr(Qt.Key, 'Key_F%d' % i): 'f%d' % i for i in range(1, 8)})
+RM12_BUTTONS = [[('Menu', 'f1'), ('Desk', 'f2'), ('Call', 'f3'), ('End', 'f4'), ('Back', 'esc')],
+                [('◀', 'left'), ('▲', 'up'), ('Select', 'ret'), ('▼', 'down'), ('▶', 'right')],
+                [('Key F5', 'f5'), ('Key F6', 'f6'), ('Key F7', 'f7')]]
+
+
+# Nokia 6630 (nokia6630_keys.h maps the qcodes to ekeyp's MPUIO matrix): as the N-Gage's rows, # = f8
+RM1_KEYS = dict(HOST_KEYS)
+RM1_KEYS.update({Qt.Key.Key_NumberSign: 'f8', Qt.Key.Key_Escape: 'esc', Qt.Key.Key_F6: 'f6', Qt.Key.Key_F9: 'f9'})
+RM1_BUTTONS = [row[:] for row in KEY_ROWS]
+RM1_BUTTONS[3] = [('C', 'backspace'), ('▼', 'down'), ('Edit', 'f6')]
+RM1_BUTTONS[7] = [('*', 'kp_multiply'), ('0', '0'), ('#', 'f8')]
+
+# Nokia N70 (nokia6630_keys.h RM84_KEYS): the 6630's keys + F10 (0xE3) and F11 (0xBA), two keys the N70's
+# matrix adds [V ekeyp table; which physical keys: I]
+RM84_KEYS = dict(RM1_KEYS)
+RM84_KEYS.update({Qt.Key.Key_F10: 'f10', Qt.Key.Key_F11: 'f11'})
+RM84_BUTTONS = [row[:] for row in RM1_BUTTONS] + [[('Key E3', 'f10'), ('Key BA', 'f11'), ('Key AA', 'f9')]]
+
+# Nokia 9210 (nokia9210_keys.h RAE3_KEYS maps the qcodes to EKeyb's matrix): the QWERTY as typed, F1-F4 the
+# command buttons beside the screen (F1 = the top one, OK), F9 Menu, F10 Help, F5-F8 / F11 / F12 / Insert /
+# Delete the application keys (Desk, Telephone, ... [I order])
+RAE3_BUTTONS = [[('Cmd 1 (OK)', 'f1'), ('Cmd 2', 'f2'), ('Cmd 3', 'f3'), ('Cmd 4', 'f4'), ('Menu', 'f9'),
+                 ('Esc', 'esc'), ('Enter', 'ret'), ('Help', 'f10')],
+                [('App 1', 'f5'), ('App 2', 'f6'), ('App 3', 'f7'), ('App 4', 'f8'), ('App 5', 'f11'),
+                 ('App 6', 'f12'), ('App 7', 'insert'), ('App 8', 'delete')]]
+RAE3_HOST = dict(QWERTY)
+RAE3_HOST.update({Qt.Key.Key_Delete: 'delete'})
+
+
 class Phone(QtWidgets.QWidget):
     def __init__(self, session, scale, model='ngage'):
         super().__init__()
@@ -111,13 +151,25 @@ class Phone(QtWidgets.QWidget):
         self.setWindowTitle('%s (%s, session %s)' % (TITLES.get(model, model), model, session))
         lay = QtWidgets.QVBoxLayout(self)
         # (label, QMP screendump arguments, size in phone pixels, scale)
-        if model == 'p910i':
+        if model in ('p910i', 'p800'):
             self.views = [('screen', {}, (208, 320), scale)]
             self.host_keys = P910_KEYS
+        elif model == 'nokia7710':
+            self.views = [('screen', {}, (640, 320), max(1, scale // 2 + scale % 2))]
+            self.host_keys = RM12_KEYS
         elif model == 'nokia9500':
             self.views = [('cover', {'device': 'cover'}, (128, 128), scale),
                           ('inner', {}, (640, 200), max(1, scale // 2 + scale % 2))]
             self.host_keys = QWERTY
+        elif model == 'nokia6630':
+            self.views = [('screen', {}, (176, 208), scale)]
+            self.host_keys = RM1_KEYS
+        elif model == 'nokia9210':
+            self.views = [('screen', {}, (640, 200), max(1, scale // 2 + scale % 2))]
+            self.host_keys = RAE3_HOST
+        elif model == 'nokian70':
+            self.views = [('screen', {}, (176, 208), scale)]
+            self.host_keys = RM84_KEYS
         else:
             self.views = [('screen', {}, (176, 208), scale)]
             self.host_keys = HOST_KEYS
@@ -145,7 +197,11 @@ class Phone(QtWidgets.QWidget):
             self.flip.clicked.connect(self.toggle_flip)
             lay.addWidget(self.flip)
             self.labels[0].installEventFilter(self)       # the pen
-        rows = {'nokia9500': RA2_BUTTONS, 'p910i': P910_BUTTONS}.get(model, KEY_ROWS)
+        if model in ('nokia7710', 'p800'):
+            self.labels[0].installEventFilter(self)       # the pen
+        rows = {'nokia9500': RA2_BUTTONS, 'p910i': P910_BUTTONS, 'nokia7710': RM12_BUTTONS, 'p800': P910_BUTTONS,
+                'nokia6630': RM1_BUTTONS, 'nokian70': RM84_BUTTONS,
+                'nokia9210': RAE3_BUTTONS}.get(model, KEY_ROWS)
         for r, row in enumerate(rows):
             for c, (label, code) in enumerate(row):
                 b = QtWidgets.QPushButton(label)
@@ -177,7 +233,7 @@ class Phone(QtWidgets.QWidget):
             self.key(code, False)
 
     def pen(self, e, down=None):
-        """The P910i's touch screen: absolute pointer events on the board's console."""
+        """The P910i's / 7710's touch screen: absolute pointer events on the board's console."""
         l, (w, h) = self.labels[0], self.views[0][2]
         x = min(max(int(e.position().x() * w / l.width()), 0), w - 1)
         y = min(max(int(e.position().y() * h / l.height()), 0), h - 1)
@@ -250,7 +306,7 @@ def main():
     ap.add_argument('--scale', type=int, default=2)
     ap.add_argument('--model', default='ngage', choices=sorted(TITLES),
                     help='which phone model (ngage = N-Gage QD, nokia6600 = Nokia 6600, nokia7650 = Nokia 7650, '
-                         'nokia9500 = Nokia 9500 Communicator, p910i = Sony Ericsson P910i)')
+                         'nokia9500 = Nokia 9500 Communicator, p910i = Sony Ericsson P910i, nokia7710 = Nokia 7710, p800 = Sony Ericsson P800, nokia3230 = Nokia 3230)')
     ap.add_argument('--phone', help="which phone (its flash file); default: the model's name")
     ap.add_argument('--mmc', default='', help='memory card image (E:), made with eka1/tools/ngage_card.py')
     ap.add_argument('--fresh', action='store_true', help='factory-fresh: forget the saved flash')

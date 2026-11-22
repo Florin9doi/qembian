@@ -374,5 +374,76 @@ class InstanceTest(unittest.TestCase):
         self.assertEqual(self.run_i('create', 'x', 'nokia-n95-8gb-rm320', '--replace'), 2)   # not ephemeral
 
 
+
+@unittest.skipUnless(__import__('shutil').which('mformat') and __import__('shutil').which('mtype'), 'needs mtools')
+class DriveFiles(unittest.TestCase):
+    """[[board.drive_files]]: files a new drive gets on top of the firmware's user data image. The N95's
+    C:\\Private\\10205054\\runtimefeatures.txt turns WLAN (feature 109) off: with it on and no WLAN hardware,
+    WlanServer exited and IPWServer panicked (bug 2026-11-21, linked runs with the modem firmware)."""
+
+    def test_n95_runtime_features_on_a_new_drive(self):
+        import subprocess, tempfile
+        prof = D.load('nokia-n95-8gb-rm320')
+        entries = [f for f in D.get(prof, 'board.drive_files', []) if f['path'].endswith('runtimefeatures.txt')]
+        self.assertEqual(len(entries), 1)
+        img = os.path.join(tempfile.mkdtemp(), 'c.img')
+        with open(img, 'wb') as f:
+            f.truncate(8 << 20)
+        subprocess.run(['mformat', '-i', img, '::'], check=True, capture_output=True)
+        self.assertEqual(D.add_drive_files(prof, 'C', img), ['Private/10205054/runtimefeatures.txt'])
+        data = subprocess.run(['mtype', '-i', img, '::/Private/10205054/runtimefeatures.txt'],
+                              capture_output=True, check=True).stdout
+        self.assertEqual(data.decode('utf-16le').split(), ['109', '0'])
+        self.assertEqual(D.add_drive_files(prof, 'E', img), [])      # nothing declared for E:
+
+    def test_drive_made_before_the_file_was_declared_gets_it(self):
+        # bug (2026-11-22): drive files were only written when a drive image was created, so the owner's N95 from
+        # 2026-11-10 kept WLAN on; with its own modem firmware IPWServer panicked and the Telephone app crashed at
+        # every boot. sydb start now adds missing ones (missing_only), and leaves an existing file as it is
+        import subprocess, tempfile
+        prof = D.load('nokia-n95-8gb-rm320')
+        img = os.path.join(tempfile.mkdtemp(), 'c.img')
+        with open(img, 'wb') as f:
+            f.truncate(8 << 20)
+        subprocess.run(['mformat', '-i', img, '::'], check=True, capture_output=True)
+        self.assertEqual(D.add_drive_files(prof, 'C', img, missing_only=True),
+                         ['Private/10205054/runtimefeatures.txt'])
+        self.assertEqual(D.add_drive_files(prof, 'C', img, missing_only=True), [])     # there now: left alone
+        mine = os.path.join(os.path.dirname(img), 'mine.txt')
+        open(mine, 'wb').write('109 1\r\n'.encode('utf-16le'))
+        subprocess.run(['mcopy', '-o', '-i', img, mine, '::/Private/10205054/runtimefeatures.txt'], check=True)
+        self.assertEqual(D.add_drive_files(prof, 'C', img, missing_only=True), [])     # a user's own file kept
+        data = subprocess.run(['mtype', '-i', img, '::/Private/10205054/runtimefeatures.txt'],
+                              capture_output=True, check=True).stdout
+        self.assertEqual(data.decode('utf-16le').split(), ['109', '1'])
+
+
+
+class ModemFirmwareFile(unittest.TestCase):
+    """--modem real: the modem firmware comes from the device's own core flash file (bug 2026-11-22: tools/cmt/nor.py
+    read a hard-wired roms/RM-320/35.0.001 C0R, so any other firmware's phone side would have run with that modem)"""
+
+    def test_core_file_of_the_device_firmware(self):
+        prof = D.load('nokia-n95-8gb-rm320')
+        store = D.paths_v2(prof)['store']
+        if not os.path.isdir(store):
+            self.skipTest('firmware not in the ROM store')
+        f = D.firmware_file(prof, 'core')
+        self.assertEqual(os.path.dirname(f), store)
+        self.assertTrue(f.endswith('.C0R'))
+
+    def test_unknown_role_is_an_error(self):
+        with self.assertRaises(D.DeviceError):
+            D.firmware_file(D.load('nokia-n95-8gb-rm320'), 'no-such-role')
+
+    def test_modem_needs_modem_cpu_in_the_profile(self):
+        import sys
+        sys.path.insert(0, os.path.join(ROOT, 'tools', 'cmt'))
+        import nor
+        with self.assertRaises(SystemExit) as e:
+            nor.device_c0r('nokia-n8-rm596')
+        self.assertIn('[modem_cpu]', str(e.exception))
+
 if __name__ == '__main__':
     unittest.main()
+

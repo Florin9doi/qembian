@@ -50,7 +50,11 @@ const TInt KMaxChannels = 32;
 // subscriptions and open/close. Each object takes a handle 1..KMaxHandles-1; the port sees
 // handle << 8 | channel number and answers the same value.
 const TInt KMaxHandles = 64;
-const TInt KMaxMsg = 256;
+const TInt KMaxMsg = 256;		// one ISI message from a client (Send: a kernel-stack buffer)
+// one ISI message to a client (the per-channel queue; QEMU's modem core allows 2048). Bug (2026-11-21): this
+// was 256 too, and the real modem firmware's 640-byte PN_PERMANENT_DATA reply (WLAN record) reached WlanServer
+// cut to 256 bytes, which panicked "IsiMessage: OFFS -9"
+const TInt KMaxRxMsg = 2048;
 const TInt KQueueLen = 16;
 const TInt KMaxSubs = 128;
 // syborg-modem: port 0 at KHwBaseModem (IRQ EIntModem0), port 1 0x2000 further (EIntModem1); per port
@@ -118,7 +122,7 @@ public:
 	TUint8 iBuf[KMaxData + 4];			// Drain's frame / a DataSend's packet (under iLock)
 	};
 
-struct SMsg { TInt iLen; TUint8 iData[KMaxMsg]; };
+struct SMsg { TInt iLen; TUint8 iData[KMaxRxMsg]; };
 
 
 class DIscPeerChannel : public DLogicalChannelBase
@@ -511,7 +515,7 @@ TInt DIscPeerChannel::Control(TInt aFn, TAny* a1)
 
 void DIscPeerChannel::Queue(const TUint8* aMsg, TInt aLen)
 	{
-	if (iQCount == KQueueLen || aLen > KMaxMsg)
+	if (iQCount == KQueueLen || aLen > KMaxRxMsg)
 		{
 		Kern::Printf("ISCPEER: ch %d queue full, message dropped", iChannel);
 		return;
@@ -555,8 +559,8 @@ void DIscPeerFactory::Drain()
 		{
 		TInt kind = ModemRead(KMRxKind), ch = ModemRead(KMRxChannel), len = ModemRead(KMRxLen);
 		TUint8* m = iBuf;
-		if (len > (kind == KMDataDeliver ? KMaxData : KMaxMsg))
-			len = kind == KMDataDeliver ? KMaxData : KMaxMsg;
+		if (len > (kind == KMDataDeliver ? KMaxData : KMaxRxMsg))
+			len = kind == KMDataDeliver ? KMaxData : KMaxRxMsg;
 		for (TInt i = 0; i < len; i += 4)
 			{
 			TUint32 w = ModemRead(KMRxBuf + i);

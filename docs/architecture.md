@@ -100,3 +100,18 @@ Things to know:
 - gdb: `scripts/run.sh --gdb`, then use addresses from `epoc32/rom/syborg/syborg_tshell_ARMV5_udeb.symbol`.
   Not done yet: `tools/elf4rom` in the QEMU repo converts a ROM image to an ELF with debug info.
 - Crash monitor: `EXMONDEBUG` dumps kernel state to the debug port on a fault.
+
+## Cellular modem: fake or real
+
+The phone's ISC/ISA drivers are stand-ins (`src/standins/_shared/iscpeer.inl`) that pass every ISI message to
+QEMU's `syborg-modem` device. That device answers in one of two ways:
+
+- **Fake modem** (default, every BB5 phone): reply tables (`platform/isi/replies-bb5.txt` + the device's
+  `isi-replies.txt`) and the stateful code in `src/qemu-syborg/hw/arm/syborg_modem_core.c` (MTC states, SIM,
+  network, SMS, packet data). Shared with hosted EKA2.
+- **Real modem** (`--modem real`, devices with `[modem_cpu]`: the N95 8GB): `syborg-modem` forwards the messages
+  over a socket to a second QEMU, the `n95-cmt` machine (`src/qemu-syborg/hw/arm/syborg_cmtprobe.c`), which
+  runs the modem firmware from the phone's own flash file (NOLO -> MCUSW) with its board described in
+  `tools/cmt/n95-cmt.map`. Replies go back to the channel object that asked; the modem's power-off (Retu
+  watchdog) ends the phone. `tools/cmt/isirecord.py` turns recordings of this into fake-modem corrections.
+  Docs: `docs/research/n95-cmt-emulation.md`.

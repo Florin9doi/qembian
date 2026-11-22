@@ -32,6 +32,7 @@
 #include "hw/core/irq.h"
 #include "qemu/timer.h"
 #include "p910i.h"
+#include "p800_nor.h"
 #include "ngage_p910_doc_stub.h"
 
 #define P910_FLASH_BASE  0x90000000
@@ -39,7 +40,13 @@
 #define P910_ROLF_OFF    0x01D00000
 
 static char *p910_dir;              /* -M p910i,ppm=DIR */
+
+static const P910Phone p910_phone_p910i = { .machine = "p910i", .doc = true };
+/* Sony Ericsson P800 (UIQ 2.0): docs/devices/se-p800/bring-up.md */
+static const P910Phone p910_phone_p800 = { .machine = "p800", .doc = false };
+const P910Phone *p910_phone = &p910_phone_p910i;
 static char *p910_isi;              /* -M p910i,isi=FILE (the modem's reply table) */
+static char *p910_flash;            /* flash=FILE: the P910i's C: / the P800's NOR image, kept across boots */
 
 const char *p910_images(void)
 {
@@ -201,14 +208,15 @@ static void p910_cpu_reset(void *opaque)
     cpu->env.regs[15] = P910_FLASH_BASE;
 }
 
-static void p910i_init(MachineState *machine)
+static void p910_board(MachineState *machine, const P910Phone *ph)
 {
     MemoryRegion *sys = get_system_memory();
     MemoryRegion *flash = g_new(MemoryRegion, 1);
     ARMCPU *cpu;
 
+    p910_phone = ph;
     if (!p910_dir) {
-        error_report("p910i: give the extracted images with -M p910i,ppm=eka1/p910i");
+        error_report("%s: give the extracted images with -M %s,ppm=DIR", ph->machine, ph->machine);
         exit(1);
     }
     cpu = ARM_CPU(cpu_create(machine->cpu_type));
@@ -218,8 +226,10 @@ static void p910i_init(MachineState *machine)
     memory_region_init_rom(flash, NULL, "p910i.nor", P910_FLASH_SIZE, &error_fatal);
     memset(memory_region_get_ram_ptr(flash), 0xff, P910_FLASH_SIZE);
     p910_load(flash, "core/ROM.bin", 0);
-    p910_load(flash, "rolf.bin", P910_ROLF_OFF);
-    p910_doc_standin(memory_region_get_ram_ptr(flash));
+    if (ph->doc) {
+        p910_load(flash, "rolf.bin", P910_ROLF_OFF);
+        p910_doc_standin(memory_region_get_ram_ptr(flash));
+    }
     memory_region_add_subregion(sys, P910_FLASH_BASE, flash);
 
     /* SDRAM [I: the bootstrap table's 32 MB at 0xD0000000; the controller at 0x78000000] */
@@ -232,7 +242,21 @@ static void p910i_init(MachineState *machine)
         memory_region_add_subregion(sys, P910_SRAM_BASE, sram);
     }
     p910_board_init(machine, sys, cpu);
+    if (!ph->doc) {
+        /* P800: the LFFS NOR at 0xB0000000 (LNG image + ROLF), the phone's own medint.pdd drives it */
+        p800_nor_init(sys, p910_dir, p910_flash);
+    }
     qemu_register_reset(p910_cpu_reset, cpu);
+}
+
+static void p910i_init(MachineState *machine)
+{
+    p910_board(machine, &p910_phone_p910i);
+}
+
+static void p800_init(MachineState *machine)
+{
+    p910_board(machine, &p910_phone_p800);
 }
 
 static char *p910_get_ppm(Object *obj, Error **errp)
@@ -257,7 +281,6 @@ static void p910_set_isi(Object *obj, const char *value, Error **errp)
     p910_isi = *value ? g_strdup(value) : NULL;
 }
 
-static char *p910_flash;             /* -M p910i,flash=FILE: the phone's C: (kept across boots) */
 
 const char *p910_flash_file(void)
 {
@@ -299,9 +322,33 @@ static const TypeInfo p910i_type = {
     .interfaces = arm_machine_interfaces,
 };
 
+static void p800_class_init(ObjectClass *oc, const void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+
+    object_class_property_add_str(oc, "ppm", p910_get_ppm, p910_set_ppm);
+    object_class_property_set_description(oc, "ppm", "eka1/p800 (core/ROM.bin, lng.bin, rolf.bin)");
+    object_class_property_add_str(oc, "isi", p910_get_isi, p910_set_isi);
+    object_class_property_add_str(oc, "flash", p910_get_flash, p910_set_flash);
+    mc->desc = "Sony Ericsson P800 (PNX4000-class, UIQ 2.0, Symbian 7.0 EKA1) bring-up board";
+    mc->init = p800_init;
+    mc->ignore_memory_transaction_failures = true;
+    mc->default_cpu_type = ARM_CPU_TYPE_NAME("arm926");
+    mc->default_ram_size = 16 * MiB;        /* bootstrap table: 16 MB at 0xD0000000 [V] */
+    mc->default_ram_id = "p800.sdram";
+}
+
+static const TypeInfo p800_type = {
+    .name = MACHINE_TYPE_NAME("p800"),
+    .parent = TYPE_MACHINE,
+    .class_init = p800_class_init,
+    .interfaces = arm_machine_interfaces,
+};
+
 static void p910i_register(void)
 {
     type_register_static(&p910i_type);
+    type_register_static(&p800_type);
 }
 
 type_init(p910i_register)

@@ -1,0 +1,103 @@
+diff --git a/qapi/qom.json b/qapi/qom.json
+index c55776a..f9259fb 100644
+--- a/qapi/qom.json
++++ b/qapi/qom.json
+@@ -1246,6 +1246,34 @@
+   'data': { '*pretty': 'bool',
+             '*close-action': 'MonitorQMPCloseAction' } }
+ 
++##
++# @AvRecProperties:
++#
++# Properties for avrec objects: a screen and sound recorder
++# (ui/avrec.c) that encodes a console's picture and an audiodev's
++# mix into an MP4 file through an ffmpeg child process.
++#
++# @path: the MP4 file to write
++#
++# @fps: frames per second, sampled on the host clock (default: 30)
++#
++# @scale: integer upscaling with sharp pixels (default: 1)
++#
++# @audiodev: the audiodev whose mix is recorded (default: the
++#     machine's)
++#
++# @console: index of the console to record (default: the first
++#     graphic console)
++#
++# Since: 11.1
++##
++{ 'struct': 'AvRecProperties',
++  'data': { 'path': 'str',
++            '*fps': 'uint32',
++            '*scale': 'uint32',
++            '*audiodev': 'str',
++            '*console': 'uint32' } }
++
+ ##
+ # @ObjectType:
+ #
+@@ -1264,6 +1292,7 @@
+     'authz-listfile',
+     'authz-pam',
+     'authz-simple',
++    'avrec',
+     'can-bus',
+     { 'name': 'can-host-socketcan',
+       'if': 'CONFIG_LINUX' },
+@@ -1345,6 +1374,7 @@
+       'authz-listfile':             'AuthZListFileProperties',
+       'authz-pam':                  'AuthZPAMProperties',
+       'authz-simple':               'AuthZSimpleProperties',
++      'avrec':                      'AvRecProperties',
+       'can-host-socketcan':         { 'type': 'CanHostSocketcanProperties',
+                                       'if': 'CONFIG_LINUX' },
+       'colo-compare':               'ColoCompareProperties',
+diff --git a/ui/gtk.c b/ui/gtk.c
+index 7078d89..4e0d9cf 100644
+--- a/ui/gtk.c
++++ b/ui/gtk.c
+@@ -1425,6 +1425,14 @@ static void gd_menu_powerdown(GtkMenuItem *item, void *opaque)
+     qmp_system_powerdown(NULL);
+ }
+ 
++/* avrec (ui/avrec.c): start/stop a screen + sound recording (MP4 in $AVREC_DIR or ~/Videos) */
++void avrec_toggle(void);
++
++static void gd_menu_record(GtkMenuItem *item, void *opaque)
++{
++    avrec_toggle();
++}
++
+ static void gd_menu_quit(GtkMenuItem *item, void *opaque)
+ {
+     qmp_quit(NULL);
+@@ -2296,6 +2304,16 @@ static GtkWidget *gd_create_menu_machine(GtkDisplayState *s)
+     separator = gtk_separator_menu_item_new();
+     gtk_menu_shell_append(GTK_MENU_SHELL(machine_menu), separator);
+ 
++    {
++        GtkWidget *rec = gtk_menu_item_new_with_mnemonic(_("Start/stop _recording"));
++        gtk_menu_item_set_accel_path(GTK_MENU_ITEM(rec), "<QEMU>/Machine/Record");
++        gtk_accel_map_add_entry("<QEMU>/Machine/Record", GDK_KEY_r, HOTKEY_MODIFIERS);
++        g_signal_connect(rec, "activate", G_CALLBACK(gd_menu_record), s);
++        gtk_menu_shell_append(GTK_MENU_SHELL(machine_menu), rec);
++        separator = gtk_separator_menu_item_new();
++        gtk_menu_shell_append(GTK_MENU_SHELL(machine_menu), separator);
++    }
++
+     s->reset_item = gtk_menu_item_new_with_mnemonic(_("_Reset"));
+     gtk_menu_shell_append(GTK_MENU_SHELL(machine_menu), s->reset_item);
+ 
+diff --git a/ui/meson.build b/ui/meson.build
+index d345f6c..2260dd6 100644
+--- a/ui/meson.build
++++ b/ui/meson.build
+@@ -62,6 +62,7 @@ system_ss.add(files(
+ ))
+ system_ss.add(ui)
+ system_ss.add(when: pixman, if_true: files('console-vc.c'), if_false: files('console-vc-stubs.c'))
++system_ss.add(when: pixman, if_true: files('avrec.c'))   # screen + sound recorder (avrec.c)
+ if dbus_display
+   system_ss.add(files('dbus-module.c'))
+ endif

@@ -18,7 +18,8 @@ Format [V on RA-002 v.06.27, 2026-11-18; docs/devices/nokia-9500-ra2/bring-up.md
     +4 [I crc], +8 [I crc], +12 uncompressed size, +16 compression (1 = raw deflate, 0 = stored),
     +20 [I crc], +24 stored size, +28 load address, +32 load address again,
     +36 a NUL-terminated tag ("001C24070606.27(00)": its 4th character names the image: C core, T,
-    L loader, D, S, V variant, E, U), then the data (raw deflate when compressed).
+    L loader, D, S, V variant, E, U; the 7710's: "V4.10.0 0538 RM-12", "Tetra v7", "StartUp Logo"),
+    in a 20-byte field (+36..+55), then the data from +56 (raw deflate when compressed).
   A record with magic 58 34 12 99 carries text ("001T CRC Disabled"...).
 Every record is written as rNN-<offset>.bin; compressed ones also as rNN-<tag>.img (inflated), and a
 manifest.json lists them. Nothing is executed or interpreted beyond this.
@@ -63,8 +64,9 @@ def sub_header(payload):
     if end < 0:
         raise FormatError('sub-header tag not terminated')
     tag = payload[36:end].decode('ascii', 'replace')
+    data = max(end + 1, 56)  # a 20-byte tag field (the 9500's 19-char tags filled it; the 7710's are shorter)
     return {'size': f[2], 'compression': f[3], 'stored': f[5], 'load': f[6], 'load2': f[7],
-            'tag': tag, 'data_offset': end + 1}
+            'tag': tag, 'data_offset': data}
 
 
 def unpack(payload, sh):

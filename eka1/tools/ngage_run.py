@@ -38,6 +38,49 @@ MODELS = {
         containers=0x800003b8,              # ported from users of 0x80000398/0x8000039c (5, 9)
         code=(0x5030ff9c, 0x51600000),
         ttb=0x0A074000),                    # [I]
+    'nokia3230': dict(
+        machine='nokia3230', root=ROOT / 'eka1/rm51',
+        rom=ROOT / 'eka1/rm51/output/rom/ROM.bin', ppm=ROOT / 'eka1/rm51/extracted/RM51PE507170.26',
+        isi=ROOT / 'src/qemu-ngage/isi-replies-rm51.txt',
+        fatal=0x5033eb34,                   # ported from the 6600 (16/16 words) [V]
+        cur_thread=0x800017d4,              # as the 6600 (48 users agree)
+        containers=0x800003b8,              # as the 6600 (17 users agree)
+        code=(0x5033bf9c, 0x51b00000),
+        ttb=0x0A074000),                    # [I] as the 6600
+    'nokia6630': dict(
+        machine='nokia6630', root=ROOT / 'eka1/rm1/core',
+        rom=ROOT / 'eka1/rm1/core/ROM.bin', ppm=ROOT / 'eka1/rm1/core',
+        isi=ROOT / 'src/qemu-ngage/isi-replies-rm1.txt',
+        fatal=0x5001e664,                   # the kernel's fault routine (IRQs off, reason, variant hook +0x210); Kern::Fault 0x5001e65c (reason + 0x10000) falls into it [V]
+        cur_thread=0x800018c8,              # ported from the 3230 (40 users agree)
+        containers=0x8000048c,              # ported from the 3230 (13 users agree)
+        code=(0x50009f9c, 0x50c00000),
+        vectors=0xffff0000,
+        sdram=(0x10000000, 0x04000000),
+        ttb=0x10000000),
+    'nokia9210': dict(
+        machine='nokia9210', root=ROOT / 'eka1/rae3/core',
+        rom=ROOT / 'eka1/rae3/core/ROM.bin', ppm=ROOT / 'eka1/rae3/core',
+        isi=ROOT / 'src/qemu-ngage/isi-replies-rae3.txt',
+        fatal=0x50000000,                   # not found yet (catch pabt/dabt/undef)
+        cur_thread=0x80007214,              # ported from the N-Gage (32 users agree) [V code match]
+        containers=0x80000264,              # ported from the N-Gage (11 users agree) [V code match]
+        code=(0x50000f70, 0x50bd0000),
+        sdram=(0x03000000, 0x01000000),
+        thread_sp=0x160,                    # DThread saved SP (6.0 kernel; +0x158 on 6.1+) [V a thread's saved registers]
+        ttb=0x03000000),
+    'nokian70': dict(
+        machine='nokian70', root=ROOT / 'eka1/rm84/core',
+        rom=ROOT / 'eka1/rm84/core/ROM.bin', ppm=ROOT / 'eka1/rm84/core',
+        isi=ROOT / 'src/qemu-ngage/isi-replies-rm84.txt',
+        fatal=0x5001fa8c,                   # the fault routine after Kern::Fault (export 278, 0x5001fa84: reason + 0x10000, then falls in) [V Ghidra]
+        cur_thread=0x8000295c,              # ported from the 6630 (34 users agree, 1 other)
+        containers=0x8000048c,              # ported from the 6630 (11 users agree)
+        code=(0x50008f9c, 0x50b00000),
+        vectors=0xffff0000,
+        sdram=(0x10000000, 0x08000000),
+        objstride=2,                        # container entries {DObject*, key} (as the 7710's kernel) [V run]
+        ttb=0x10000000),
     'nokia7650': dict(
         machine='nokia7650', root=ROOT / 'eka1/nhl2',
         rom=ROOT / 'eka1/nhl2/output/rom/ROM.bin', ppm=ROOT / 'eka1/nhl2/extracted/NHL23250.677',
@@ -58,6 +101,30 @@ MODELS = {
         vectors=0xffff0000,                 # high vectors (the low catches never hit) [V]
         panic=0x500d9d48,                   # EUser RThread::Panic(cat, reason): r1 = category [V: IsaApi 4]
         ttb=0x10000000),                    # [I]
+    'nokia7710': dict(
+        machine='nokia7710', root=ROOT / 'eka1/rm12/core',
+        rom=ROOT / 'eka1/rm12/core/ROM.bin', ppm=ROOT / 'eka1/rm12/images',
+        isi=ROOT / 'src/qemu-ngage/isi-replies-rm12.txt',
+        fatal=0x50028304,                   # Kern::Fault, export 102 as the 9500's (16/16 words) [V]
+        cur_thread=0x800018bc,              # ported from the 9500 (46 users agree)
+        containers=0x8000042c,              # ported from the 9500 (17 users agree)
+        code=(0x50014f9c, 0x51d00000),      # core + the V extension ROM at 0x51B00000
+        vectors=0xffff0000,                 # [I] as the 9500
+        panic=0x5006a844,                   # EUser RThread::Panic, ported from the 9500 (12/12 words)
+        objstride=2,                        # container entries are {DObject*, key word} [V: process array]
+        ttb=0x10000000),                    # [I] as the 9500
+    'p800': dict(
+        machine='p800', root=ROOT / 'eka1/p800/core',
+        rom=ROOT / 'eka1/p800/core/ROM.bin', ppm=ROOT / 'eka1/p800',
+        isi=ROOT / 'src/qemu-ngage/p800-ose-replies.txt',
+        fatal=0x500221c8,                   # Kern::Fault, export 119 as the P910i's (16/16 words) [V]
+        cur_thread=0x80001e88,              # ported from the P910i (47 users agree)
+        containers=0x800000c4,              # ported from the P910i (18 users agree)
+        code=(0x5000ef9c, 0x51000000),
+        vectors=0xffff0000,                 # [I] as the P910i
+        panic=0x5005788c,                   # EUser RThread::Panic, ported from the P910i (12/12 words)
+        sdram=(0xd0000000, 0x01000000),     # 16 MB (bootstrap table) [V]
+        ttb=0xd0024000),                    # PORT
     'p910i': dict(
         machine='p910i', root=ROOT / 'eka1/p910i/core',
         rom=ROOT / 'eka1/p910i/core/ROM.bin', ppm=ROOT / 'eka1/p910i',
@@ -150,7 +217,8 @@ def print_objects(mon):
         count, arr = hdr[2], hdr[4]
         if not 0 <= count <= 512:
             print('%s: container %08x looks wrong (count %d)' % (kind, con, count)); continue
-        objs = read_words(mon, arr, count) if count else []
+        st = M.get('objstride', 1)
+        objs = read_words(mon, arr, count * st)[::st] if count else []
         print('%s (%d):' % (kind, count))
         for o in objs:
             f = read_words(mon, o, 5)
@@ -162,7 +230,8 @@ def print_objects(mon):
 def container(mon, glob):
     con = read_words(mon, glob, 1)[0]
     hdr = read_words(mon, con, 6)
-    return read_words(mon, hdr[4], hdr[2]) if 0 < hdr[2] <= 512 else []
+    st = M.get('objstride', 1)          # words per container entry: 2 = {DObject*, key} (the 7710's kernel)
+    return read_words(mon, hdr[4], hdr[2] * st)[::st] if 0 < hdr[2] <= 512 else []
 
 
 def rom_namer():
@@ -227,7 +296,7 @@ def print_stack(mon, tname):
     name = rom_namer()
     # the saved SP (DThread +0x158 [V on both kernels]); in the moving model a run address
     # (0x004xxxxx) is at the chunk's home base. Words below it are stale.
-    sp = read_words(mon, tid + 0x158, 1)[0]
+    sp = read_words(mon, tid + M.get('thread_sp', 0x158), 1)[0]
     if run_base is not None and 0x00400000 <= sp < 0x00800000 and not (base <= sp < top):
         sp = base + (sp - run_base)
     print('stack %s (%08x-%08x), saved SP %08x, ROM return-address candidates, deepest first '
