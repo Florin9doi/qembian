@@ -25,6 +25,19 @@ Podman by default, `ENGINE=docker` for Docker. Images build themselves on first 
 toolchain once, about 10-20 min). Nothing proprietary goes into an image: the S60 SDK and firmware
 are mounted at run time. Details: `docs/adding-a-device.md` §8.
 
+## Source patches and line endings: `tools/patch_eol.py`
+
+```
+tools/patch_eol.py lint [--fix]       # each hunk line has its target's ending (pinned source); --fix rewrites
+tools/patch_eol.py apply              # every patch set, in setup order, on clean pinned sources
+tools/patch_eol.py epocroot [--fix]   # patched files in build/epocroot still have the pinned endings
+```
+Many Symbian sources are CR LF, and the patches under `patches/` and `personalities/*/patches` must
+keep each file's own endings (`*.patch -text`). When an epocroot file gets rewritten with LF, diffs made
+from it come out LF and fail on a fresh checkout ("different line endings"; 0003/0013, then
+0019-0028). `scripts/setup-epocroot.sh` runs `lint --fix` before applying and `epocroot --fix` after;
+commit any patch it rewrites. Test: `tests/baseport_patches_crlf_test.py`.
+
 ## Boot, observe, summarise: `tools/syb_run.py`
 
 ```

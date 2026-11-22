@@ -23,7 +23,7 @@ ROM code does unaligned accesses before changing it.
  ;	GBLL    CFG_CPU_CORTEX_A8N
  ;	GBLL	CFG_CPU_ARM1136_ERRATUM_399234_FIXED
  ;	GBLL    CFG_CPU_ARM1136_ERRATUM_411920_FIXED
-+; syborg-pg: run the CPU as the phones' own kernels do - no alignment check (MMUCR_A) and unaligned data
++; qembian: run the CPU as the phones' own kernels do - no alignment check (MMUCR_A) and unaligned data
 +; accesses enabled (MMUCR_U, ARMv6). Nokia's ROM code does unaligned halfword loads on purpose (Hitchcock's
 +; bitmap/command-buffer readers read pairs of 8-bit pixels at odd offsets); the kernel default below
 +; (MMUCR_A, no MMUCR_U) turns the first such load into a data abort -> KERN-EXEC 3 (5800 menu, 2026-11-13).

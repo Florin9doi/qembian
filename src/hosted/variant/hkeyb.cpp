@@ -2,7 +2,7 @@
 // (baseport syborg/keyboard): ID, DATA (pops the FIFO), FIFO_COUNT, INT_ENABLE; interrupt EIntKeyboard while
 // the FIFO holds codes and the interrupt is enabled. Codes are pushed by the host side (HostedKeybPush: the
 // phone window's key ring, hdisplay.cpp). A code is what QEMU's device delivers: bit 31 = released, bit 30 =
-// already a Symbian scan code in bits 0..7 (syborg-pg keyboard patch), else a PC set-1 code. Original work.
+// already a Symbian scan code in bits 0..7 (qembian keyboard patch), else a PC set-1 code. Original work.
 #include <kernel/kern_priv.h>
 
 extern TInt HostedIoAttach(TUint32 aBase, TUint32 aSize, TUint32 (*aRead)(TAny*, TUint32),

@@ -11,7 +11,7 @@ Copy the files into the syborgfx and syborgmv variants as well.
  const TUint KHwSVPWebcameraDevice		= KHwBasePeripherals + 0x0f*KHwLinSeparation;
  const TUint KHwNVMemoryDevice			= KHwBasePeripherals + 0x10*KHwLinSeparation;
  const TUint KHwSVPPlatformDevice		= KHwBasePeripherals + 0x11*KHwLinSeparation;
-+// syborg-pg: the fake BB5 modem (QEMU syborg-modem), after the platform device's 8 pages: two ports of 2 pages
++// qembian: the fake BB5 modem (QEMU syborg-modem), after the platform device's 8 pages: two ports of 2 pages
 +const TUint KHwBaseModem			= KHwBasePeripherals + 0x19*KHwLinSeparation;
  	
  enum TSyborgInterruptId
@@ -22,7 +22,7 @@ Copy the files into the syborgfx and syborgmv variants as well.
    EIntAudio0 = 10,
 -  EIntNVMemoryDevice = 12
 +  EIntNVMemoryDevice = 12,
-+  EIntModem0 = 15,		// syborg-pg: syborg-modem port 0 (ISC channels 0..31, ISA 0..63)
++  EIntModem0 = 15,		// qembian: syborg-modem port 0 (ISC channels 0..31, ISA 0..63)
 +  EIntModem1 = 16		// port 1 (ISC extension channels 32..63)
  };
  
@@ -33,7 +33,7 @@ Copy the files into the syborgfx and syborgmv variants as well.
  KHwBaseWebcamera	EQU     KHwBaseRegisters + 0x0f000
  KHwNVMemoryDevice			EQU		KHwBaseRegisters + 0x10000
  KHwBasePlatform		EQU     KHwBaseRegisters + 0x11000
-+KHwBaseModem		EQU     KHwBaseRegisters + 0x19000	; syborg-pg: fake modem, 4 pages (after the platform's 8)
++KHwBaseModem		EQU     KHwBaseRegisters + 0x19000	; qembian: fake modem, 4 pages (after the platform's 8)
  
  ;-----------------------------------------------------------------------------
  ; Module linear bases
@@ -43,7 +43,7 @@ Copy the files into the syborgfx and syborgmv variants as well.
  		HW_MAPPING		KHwBaseWebcamera,    		1,	HW_MULT_4K
  		HW_MAPPING		KHwNVMemoryDevice,		1,	HW_MULT_4K
  		HW_MAPPING		KHwBasePlatform,    		8,	HW_MULT_4K
-+		HW_MAPPING		KHwBaseModem,    		4,	HW_MULT_4K	; syborg-pg: linear = KHwBasePeripherals + 0x19000
++		HW_MAPPING		KHwBaseModem,    		4,	HW_MULT_4K	; qembian: linear = KHwBasePeripherals + 0x19000
  	
  		DCD     0   ; terminator
  

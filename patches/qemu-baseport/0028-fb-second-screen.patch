@@ -24,7 +24,7 @@ handler. Used by src/standins/lcd/lcd_e90.mmp.
      FB_PIXEL_ORDER      = 11,
      FB_ROW_PITCH        = 12,
      FB_ENABLED          = 13,
-+    FB_BASE1            = 19,	// syborg-pg: a second panel (the E90's cover): its frame buffer, size, blank
++    FB_BASE1            = 19,	// qembian: a second panel (the E90's cover): its frame buffer, size, blank
 +    FB_WIDTH1           = 20,
 +    FB_HEIGHT1          = 21,
 +    FB_BLANK1           = 22,
@@ -77,7 +77,7 @@ handler. Used by src/standins/lcd/lcd_e90.mmp.
  	TInt width = ReadReg(iPortAddr, FB_WIDTH);
  	TInt height = ReadReg(iPortAddr, FB_HEIGHT);
 +#ifdef SYBORG_FB_SCREEN1_W
-+	// syborg-pg two-screen build (E90: inner 800x352 = screen 0 from the board, cover = screen 1 from the macros): each
++	// qembian two-screen build (E90: inner 800x352 = screen 0 from the board, cover = screen 1 from the macros): each
 +	// screen has its own video RAM and its own panel in the fb (screen 1: registers BASE1/WIDTH1/HEIGHT1/BLANK1); which
 +	// panel faces the user is the lid's business (fb property active-panel), not the kernel's
 +	if (iScreen == 1)

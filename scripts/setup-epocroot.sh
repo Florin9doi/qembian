@@ -15,7 +15,12 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 if [ -z "${SYBORG_IN_CONTAINER:-}" ]; then
+  # patches keep their targets' line endings (CR LF Symbian sources); a patch diffed from a file that
+  # was rewritten with LF is fixed here, before it can fail on a clean checkout (tools/patch_eol.py)
+  python3 -I "$ROOT/tools/patch_eol.py" lint --fix
   "$ROOT/scripts/in-container.sh" /work/scripts/setup-epocroot.sh "$@"
+  # ...and the patched epocroot files keep the pinned sources' endings, so new diffs come out right
+  python3 -I "$ROOT/tools/patch_eol.py" epocroot --fix
   # derived baseport variants (one kernel build per memory model, docs/devices.md §4), regenerated
   # from the patched syborg baseport every time so they never drift from it (host python3)
   python3 -I "$ROOT/tools/baseport_variant.py" syborgmv --memmodel moving --cpu arm926

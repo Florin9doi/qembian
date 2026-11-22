@@ -19,7 +19,7 @@ KERN-EXEC 0. An SVC whose caller was not in user mode now takes the native table
  	asm("mov r10, r11 ");					// r10->scheduler
  	asm("ldr r4, [r9, #%a0]" : : "i" _FOFF(NThread,iSlowExecTable));
  	asm("mrs r11, spsr ");					// spsr_svc into r11
-+	// syborg-pg: an SVC from supervisor mode (kernel code: Kern::HalFunction and the like, compiled with
++	// qembian: an SVC from supervisor mode (kernel code: Kern::HalFunction and the like, compiled with
 +	// this kernel's numbering) uses the native table, not the thread's personality table
 +	asm("tst r11, #0x0f ");					// caller's mode: user = 0x10
 +	asm("ldrne r4, __EpocSlowExecEntries ");

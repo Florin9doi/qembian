@@ -12,7 +12,7 @@ and merged; a short device transfer completes the request with KErrCorrupt.
  	TUint32 iAlignmentOverhead;
  	TBool iReadModifyWrite;
  	TDfc iTransactionLaunchDfc;
-+	// syborg-pg: the transfer engine (patches/qemu-baseport/0022): one step = one sector-aligned window of at
++	// qembian: the transfer engine (patches/qemu-baseport/0022): one step = one sector-aligned window of at
 +	// most KNVMemTransferBufferSize bytes at iPos; a partial head or tail sector of a write/format is read first
 +	void StartStep();
 +	enum TPhase { EPhaseIdle, EPhaseRead, EPhaseRmwRead, EPhaseWrite };

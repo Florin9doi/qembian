@@ -21,7 +21,7 @@ bound one ordinal off. ExecExportDirFromOrdinal1 (sym91) now also covers sym92l9
  	return DEpocCodeSeg::Loaded(aInfo);
  	}
  
-+// syborg-pg, personalities sym91/sym92l91 (sexecpers.cpp): a 9.1-style loader allocates iExportDirCount words and
++// qembian, personalities sym91/sym92l91 (sexecpers.cpp): a 9.1-style loader allocates iExportDirCount words and
 +// wants the table from ordinal 1; 9.2 and later take the ordinal-0 word first (count + 1 words). The N81 8GB / E71
 +// loader got count + 1 words into its count-word buffer: a heap overrun on every RAM-loaded DLL, and every import
 +// bound one ordinal off (2026-11-17)

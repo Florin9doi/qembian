@@ -24,7 +24,7 @@ programs the fb ROW_PITCH (as the N95 build does). Used by src/standins/lcd/lcd_
  	
  	TInt vSize = 4*width*height; //*4 as 32bits per pixel
 +#ifdef SYBORG_FB_LINE_PIXELS
-+	// syborg-pg: a screen driver with a fixed hardware line length longer than the width (SE P1i ScDv: 240-pixel
++	// qembian: a screen driver with a fixed hardware line length longer than the width (SE P1i ScDv: 240-pixel
 +	// lines in 256-pixel rows); HAL reports it as the offset between lines and the fb scans out with it
 +	vSize = 4*SYBORG_FB_LINE_PIXELS*height;
 +#endif

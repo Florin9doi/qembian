@@ -13,7 +13,7 @@ Copy the file into the syborgfx and syborgmv variants as well.
  
  TInt DLcdPowerHandler::GetSpecifiedDisplayModeInfo(TInt aMode, TVideoInfoV01& aInfo)
  {
-+  // syborg-pg: the flipped flag (TSurfaceId::TScreenSurfaceUsage::EHalFlippedFlag) asks for the mode
++  // qembian: the flipped flag (TSurfaceId::TScreenSurfaceUsage::EHalFlippedFlag) asks for the mode
 +  // turned by 90 degrees. The screen driver reports 90/270 orientations only if this answers
 +  // (CScreenDeviceHelper::DeviceOrientationsAvailable), and WSERV refuses direct screen access in a turned
 +  // scene otherwise ("Current Rotation Mode not supported by the DSA device": games' intro videos)
