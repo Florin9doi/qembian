@@ -194,6 +194,123 @@ cheapest next steps in section 3.
 | Audio | OMAP DSP bridge (plays, MP3/AAC decoded on the host), RAPIDO ring on the host (N8, 701, 808) | RAPIDO stream formats of the 9.3/9.4 phones (5730, N79, 5800, N97: silent until measured and declared) |
 | RAM | 64 (N73), 128, 256, 512 (701, 808) | - |
 
+### 2.5 Per-phone and feature notes (the README's status text until 2026-11-22)
+
+The README now has a one-table summary; its former per-phone and feature paragraphs are kept here as written.
+
+Tested device (the reference) and the phones that work today (2026-11-18; details per phone in
+`docs/device-matrix.md` section 2.0):
+
+- **Nokia N95 8GB** (RM-320, Symbian 9.2, S60 3rd Edition FP1): start-up, home screen, menus,
+  built-in and installed applications, OpenGL ES on the host GPU, sound (start-up jingle, WAV, AAC,
+  MP3, key tones), a virtual SIM with SMS.
+- **Nokia N8** (RM-596): Symbian^3 011.012 and 013.016, Anna 025.007, Belle Refresh 111.040.1511
+  (stock and the Delight and Reborn custom firmwares): home screen, applications, OpenVG/EGL/GLES and
+  composition on the host GPU, sound, a virtual SIM with 3G registration, mobile data (the browser
+  loads pages through the host network) and an operator settings SMS.
+- **Nokia 701** (RM-774) and **Nokia 808 PureView** (RM-807), Belle FP2: as the N8 (SIM through
+  the UICC protocol, mobile data, settings SMS, sound).
+- Nokia N73 (RM-132, 9.1), 5730 XpressMusic (RM-465, 9.3), N79 (RM-348, 9.3) and 5800 XpressMusic
+  (RM-356, 9.4, touch): home screen and menu; first bring-up steps, mainly to exercise the kernel
+  compatibility layer.
+- Nokia E90 Communicator (RA-6, 9.2): home screen on the inner display (800x352); closing the lid switches to
+  the cover display (240x320, its own panel in QEMU). GLES on the host GPU.
+- Nokia 6720 classic (RM-424, 9.3), E61 (RM-89, 9.1) and E6-00 (RM-609, Belle Refresh, 640x480 touch + QWERTY):
+  home screen after the first-boot queries.
+- Profile drafts that reach the first-boot wizard or less: E52, E72, E5-00, N86, N97, N81 8GB,
+  E71 (`models/registry.toml`).
+- **EKA1 phones (Symbian 6.1-7.0s).** These run their own, unmodified kernel on a QEMU board per chip
+  (`src/qemu-ngage/`, tools in `eka1/tools/`; one command each: `python3 eka1/tools/ngage_phone.py --model M`;
+  overview in `docs/device-matrix.md` 2.2b):
+  - **N-Gage QD** (RH-29, Symbian 6.1, `--model ngage`): home screen, menu, games from a memory card image as E:
+    (`eka1/tools/ngage_card.py`): Snakes plays, Crash Nitro Kart races (`docs/eka1-ngage.md`).
+  - **Nokia 7650** (NHL-2NA, Symbian 6.1, the first S60 phone, `--model nokia7650`) and **Nokia 6600** (NHL-10,
+    Symbian 7.0s, `--model nokia6600`): start-up, first-boot time/date queries, home screen, keypad and joystick.
+  - **Nokia 9500 Communicator** (RA-2, S80 2nd / Symbian 7.0s, `--model nokia9500`, on QEMU's OMAP1510 model):
+    both screens (the cover's idle screen, the inner 640x200 S80 UI), the lid as a real switch, QWERTY and
+    command buttons, lock code and first-start wizard (`docs/devices/nokia-9500-ra2/bring-up.md`).
+  - **Nokia 3230** (RM-51, S60 2nd Edition FP1 / Symbian 7.0s, `--model nokia3230`, the `ngage` board): the S60 home
+    screen and Menu, keys and joystick, no sound or network (`docs/devices/nokia-3230-rm51/bring-up.md`).
+  - **Nokia 6630** (RM-1, S60 2nd Edition FP2 / Symbian 8.0a, the first Symbian 8 phone, `--model nokia6630`, QEMU's
+    OMAP1510 made an OMAP1610): the S60 home screen and Menu grid, keypad and joystick, no sound, network or DRM
+    (`docs/devices/nokia-6630-rm1/bring-up.md`, `how-it-was-done.md`).
+  - **Nokia N70** (RM-84, S60 2nd Edition FP3 / Symbian 8.1a, `--model nokian70`, the 6630's board reporting an
+    OMAP1710): the Active Standby home screen and the Menu grid, keypad and joystick, no sound, network or DRM
+    (`docs/devices/nokia-n70-rm84/bring-up.md`, `how-it-was-done.md`).
+  - **Nokia 9210 Communicator** (RAE-3, Series 80 1st edition / **Symbian 6.0**, `--model nokia9210`, a board
+    modelled from the phone's code): the first-boot wizard and the S80 Desk on the 640x200 screen, QWERTY, command
+    buttons and application keys (Telephone, Messaging, Internet), C: on its DataFlash kept across boots; no network
+    (`docs/devices/nokia-9210-rae3/bring-up.md`, `how-it-was-done.md`).
+  - **Nokia 7710** (RM-12, the only Series 90 phone, Symbian 7.0s, `--model nokia7710`, the 9500's OMAP1510 board):
+    the S90 Desk after the first-boot touch calibration and Setup wizard; the mouse is the pen, the 5-way and
+    hardware keys, C: kept per phone (`docs/devices/nokia-7710-rm12/bring-up.md`, `how-it-was-done.md`).
+  - **Sony Ericsson P800** (UIQ 2.0 / Symbian 7.0, the first UIQ phone, `--model p800`, the P910i's board): the
+    UIQ home screen after the set up wizard; the pen, settings kept across boots (`docs/devices/se-p800/bring-up.md`).
+  - **Sony Ericsson P910i** (UIQ 2.1 / Symbian 7.0, `--model p910i`, a Philips PNX4000 board modelled from the
+    phone's own code: no datasheet exists): the UIQ home screen after the set up wizard and the Power menu; the
+    mouse is the pen, the flip is a switch, a fake GSM side (Ericsson OSE protocol) with a SIM and a full battery,
+    no network or sound (`docs/devices/se-p910i/bring-up.md`, `how-it-was-done.md`).
+
+**3D graphics.** OpenGL ES 1.1/2.0, OpenVG and EGL are forwarded to the host GPU (the N95's GLES
+library is replaced; on Symbian^3/Belle the phone's own libraries talk to our host implementation).
+It renders the applications we tried; correctness elsewhere is not guaranteed. `sydb start --gl
+soft|host` selects the software renderer or the host GPU.
+
+**Audio.** One QEMU sound device (`syborg-snd`) plays every stream the phone's own audio stack
+produces: the DSP bridge streams of the N95 (MP3/AAC are decoded on the host with FFmpeg) and the
+RAPIDO DSP rings of the N8, 701 and 808. Key tones, which BB5 phones make in the cellular modem, are
+generated by the fake modem. By default a session records the sound to a WAV file; `sydb start
+--audio host` plays it through PipeWire, `AUDIO=pa`, `alsa` or `sdl` selects another QEMU audio
+driver.
+
+**Network.** A phone instance with `[overrides.sim] present = true` gets a virtual SIM: network
+registration, packet data bridged to the host network (QEMU user networking) and incoming SMS.
+`sydb sms-provision` (or the "Operator settings (SMS)" button of `sydb phone`) sends the operator's
+settings message that creates the Internet access point. The N8 can also use an Ethernet device on
+the host network (`docs/devices/nokia-n8-rm596/ethernet.md`).
+
+**Hosted EKA2 (experimental, 2026-11-13).** A second way to run a phone: the EKA2 kernel as a
+32-bit ARM Linux process, with the phone's ROM code running natively instead of under CPU emulation
+(`src/hosted/README.md`, `docs/hosted-eka2/`). Today it runs inside a QEMU aarch64 virtual machine;
+the target is a phone or board whose CPU still executes 32-bit ARM code (a Pixel 3a: first-run guide in
+`docs/hosted-eka2/pixel-3a.md`, bundle tool `tools/hosted/device-bundle.py`). The N95 8GB and the Nokia 808
+PureView (Belle FP2) boot to their home screens this way: `python3 tools/hosted/phone.py` (N95) or
+`python3 tools/hosted/phone.py --rom nokia-808-rm807 --gl` (808: composition on the host GPU, the mouse as
+the touchscreen, the phone's keys as buttons). Ctrl+T shows the Linux side (the whole phone is one Linux
+process, each Symbian thread a Linux thread), Ctrl+P writes a who-waits-on-whom diagnosis to the log.
+Offline only; no sound output. UI timing: `tools/hosted/uibench.py`; profiling and tracing on Ctrl+P
+(per-thread CPU, thread switches, GL round trips, IPC latency: `docs/hosted-eka2/roadmap.md`). The 808's home
+screen widgets load (GL requests wait like a GPU, swaps are paced to vsync, phone threads pinned to one CPU).
+
+**Display panel (2026-11-13).** The N95-family phones (N95, N95 8GB, 5800, 5230, N97, E52, E72, E5-00, 5730,
+N79) now show only what the window server posts, as their real display driver: no half-drawn redraws
+(regions blinking black). OpenVG `vgGetMatrix` is answered in the guest (bit-exact with the host).
+
+**Sony Ericsson P1i (UIQ 3.0, first non-Nokia phone, in progress).** Boots to its home screen (Today view, launcher)
+in Flight mode on a host-side fake CCPU (the communications processor link: OPA calls, CCPU->app callbacks, a
+minimal SIM without network), with stand-ins for its LCD controller, DSP, sound and video drivers. One command:
+`python3 tools/sydb/sydb.py phone p1i --fresh` (`docs/devices/se-p1i/bring-up.md`).
+
+**Sony Ericsson P990i (UIQ 3.0, in progress).** The P1i's platform: boots to its home screen in Flight mode. Its
+keypad flip is modelled as the phone reads it (a switch: pen UI on 240x320 when open, softkey UI on the top
+240x256 when closed). `python3 tools/sydb/sydb.py phone p990i --fresh` (`docs/devices/se-p990i/bring-up.md`).
+
+**Research registry (2026-11-17).** `tools/registry.py` (and an MCP server, `tools/registry_mcp.py`) keeps what
+is known about each firmware: modules, imports, ECom plugins, components and claims with evidence
+(`docs/registry/`).
+
+**The N95 8GB on its own modem firmware (2026-11-22).** Instead of the fake modem's reply tables, the phone's
+real modem software (the loader and MCUSW from its flash files) runs on an emulated modem CPU (QEMU machine
+`n95-cmt`: interrupt controller, timers, power chip, SSI link, a minimal DSP) linked to the phone. It boots to the
+Offline idle screen without a SIM; apps, the profile list and Switch off work. One command:
+`python3 tools/sydb/sydb.py phone NAME --modem real` (or the instance setting `settings.modem = real`). The
+modem's traffic is logged, and `tools/cmt/isirecord.py` compares its answers with the fake modem's, which is how
+the fake modem's tables are corrected (`docs/research/n95-cmt-emulation.md`, `docs/research/n95-cmt-recorded-isi.md`).
+
+**UI as data (2026-11-20).** `sydb ui` gives the foreground app's screen as data (title, softkeys, list and menu
+items, the selection, the control tree), like Android's uiautomator; `ui select TEXT` and `ui wait TEXT` drive
+it (`docs/ui-automation.md`).
+
 ## 3. Recommended targets
 
 Ordered by value per effort. "Easy" = an existing family profile copied and the addresses
