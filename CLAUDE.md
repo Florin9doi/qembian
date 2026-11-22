@@ -52,8 +52,9 @@ One QEMU binary serves every phone; everything phone-specific is declared in
 `models/<model>/model.toml` + `models/<model>/firmware/<fw>/firmware.toml` (device model v2,
 `models/README.md`) (+ `keymap.toml`, `isi-replies.txt`, `code-patches.txt`, `ESTARTCOMP.TXT`, `gl/`).
 Read `docs/devices.md` (schema, layering) before touching `models/`, `src/standins/`,
-`personalities/` or the run scripts; `docs/adding-a-device.md` is the flow for a new phone or firmware
-(`tools/fw/identify.py`, `tools/fw/store.py import`, `tools/device.py firmware-add`).
+`personalities/` or the run scripts. For a new phone or firmware load the project skill `adding-a-device`
+(`.claude/skills/adding-a-device/SKILL.md`; full flow in `docs/adding-a-device.md`;
+`tools/fw/identify.py`, `tools/fw/store.py import`, `tools/device.py firmware-add`).
 - No new N95 literal in a script or tool: put it in the profile and read it through `tools/device.py`
   (`list`, `firmwares`, `check`, `show`, `get`, `file`, `paths`, `qemu-args`, `identify`, `build`, `gen`).
   Device: `$SYBORG_DEVICE`, else the instance's (`$SYBORG_INSTANCE`), else `models/registry.toml`
@@ -90,7 +91,8 @@ Symbian 6.1-7.0s phones run their own EKA1 kernel on QEMU boards in `src/qemu-ng
 QEMU's OMAP1510 made an OMAP1610 by patches 0021-0027; its devices in `nokia6630_soc.c`), `nokian70` (the 6630's board with the
 N70's phone description: OMAP1710 IDs, ISC modem replies), `nokia9210` (Symbian 6.0; its own board modelled
 from the phone's code, `nokia9210.c`), `p910i` and `p800`
-(a PNX4000 board modelled from the phone's code). Start with `docs/eka1-ngage.md` (tools, running,
+(a PNX4000 board modelled from the phone's code). For a new board or chip load the project skill
+`new-board-bringup` (`.claude/skills/new-board-bringup/SKILL.md`). Start with `docs/eka1-ngage.md` (tools, running,
 debugging) and the phone's `docs/devices/<id>/bring-up.md`; overview in `docs/device-matrix.md` 2.2b; the
 method for a new SoC and an unknown modem protocol: `docs/devices/se-p910i/how-it-was-done.md`.
 Window: `python3 eka1/tools/ngage_phone.py --model M` (a fresh phone's first boot shows a blank/white screen while
