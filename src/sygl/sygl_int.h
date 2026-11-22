@@ -115,7 +115,7 @@ void sy_gl2_made_current(void* aCtx, SySurface* aDraw);
 int sy_gce_window_new(SySurface* aS);	/* 0 ok: aS->dsa = the window context (eglos) */
 void sy_gce_present(SySurface* aS);		/* the frame to the window (host surface, else aS->color) */
 
-/* ---- host GL backend (hw.c, docs/gpu-roadmap.md "Host GL backend") ---- */
+/* ---- host GL backend (hw.c, docs/research/n95-gles-design.md "Host GL backend") ---- */
 int sy_hw_on(SyThread* aT);								/* 1: the host renders */
 void sy_hw_surface_new(SyThread* aT, SySurface* aS);	/* window and pbuffer surfaces */
 void sy_hw_surface_free(SyThread* aT, SySurface* aS);

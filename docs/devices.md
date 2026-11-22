@@ -3,12 +3,12 @@
 How qembian grows from one hand-built virtual N95 8GB into a platform where any S60 phone is
 added by writing a profile directory, without a QEMU fork or rebuild per phone. Written 2026-11-06
 from the state of the repository (commit 44c48d2). [V] = checked in the code or docs named,
-[I] = inferred or proposed. The ordered refactor is in [refactor-plan.md](refactor-plan.md); the
+[I] = inferred or proposed. The
 flow for a new phone is in [adding-a-device.md](adding-a-device.md).
 
 ## 0. Status (2026-11-07)
 
-Implemented (docs/refactor-plan.md "Status"): profiles + `tools/device.py` (check, show, get, paths,
+Implemented: profiles + `tools/device.py` (check, show, get, paths,
 qemu-args, identify, build, gen keymap-header / key-aliases / qemu-keymap / standins-*), firmware
 identity, `tools/fw/inventory.py`, `src/standins/` composed from `[[standins]]`, `personalities/sym92`
 with `tools/personality/check.py` (driver ABI + exec numbering), key translation in QEMU, RAM size and
@@ -344,7 +344,7 @@ not device-specific [V]), the host tools, the kernel per personality (§4), the 
 2. Stand-ins: `src/standins/<name>` for each entry, with `options` as MACROs. (The fake modem's
    reply table is not built in: `qemu-args` writes `gen/isi-replies.tab` from `platform/isi/names.txt`
    and the `modem.replies` layers at every launch for QEMU's `syborg-modem`.)
-   Build layout (device-model-v2 step 3, 2026-11-10): the firmware's flash files are in the ROM store
+   Build layout (devices.md 7.2, 2026-11-10): the firmware's flash files are in the ROM store
    (`roms/<RM>/<version>[~label]/`, `tools/fw/store.py`), what `inventory.py` extracts from them is in
    `build/firmware/<RM>/<version>/<language>+<customer>/` (shared by every profile on that firmware),
    the profile's build dir, `build/roms/<id>/<firmware key>/` (`tools/device.py paths dir`), holds
@@ -520,3 +520,63 @@ Fake modem replies: one table for every BB5 phone, `platform/isi/replies-bb5.txt
 each phone needed; a reply to a request a firmware never sends is inert). `models/<id>/isi-replies.txt`
 is only for a true conflict (the same resource and request needing other bytes on that phone);
 `tools/isi.py lint` reports device replies that repeat or override the shared table.
+
+## 7. Firmware: identity, ROM store, emulation data, instances
+
+Condensed from the device model v2 design (2026-11-08, migrated 2026-11-10); this is what was built.
+
+### 7.1 Identity, read from the files
+
+A firmware is identified by `(type_code, sw_version, rofs2_id, rofs3_id)`, written
+`RM-596/111.040.1511/02.01+C14.01` (core/language/customer); `RM-320/35.0.001` when there is no language or
+customer pack. Sources, in order of trust:
+
+| Fact | Source |
+|---|---|
+| type code, software version, product code, file roles and ids | the package's `.vpl` (`VariantPackingList`: `TypeDesignator`, `SwVersion`, `FileList/File` with `FileType` Mcu = core, Ppm = ROFS2/ROFS3, Content = UDA) |
+| software version, date, type code (without a `.vpl`) | `Z:\Resource\Versions\sw.txt` in ROFS1; `langsw.txt` in ROFS2 (`tools/device.py` `firmware_facts`); `sw.txt` wins when they disagree |
+| container kind and partitions | FIASCO (`B2`) records: partition names (`SOS+CORE`, `SOS*CORE`, `SOS+ROFS1..3`, `SOS_ROFX`), tag 0x2E = UDA (`tools/fiasco.py`); the header names only the kind of file (CMT/APE, OMAP ALG), never the version |
+| file name | last resort, for display and pre-sorting (`confidence = "name"`) |
+
+The flash-file layout is read from the files, never declared in a profile (`tools/fw/layout.py`: the core
+compressed or not, every ROFS/ROFx image found by record name, then by magic and size). Hashes of every input
+and extracted image are recorded for verification only; nothing in a model refers to them. `tools/fw/identify.py`
+reports a package (`.vpl` first, then the containers, then `sw.txt`, then the name) and picks the model from
+`models/registry.toml` (one model per type code; a known code without a profile is stored and reported).
+
+### 7.2 ROM store and build cache
+
+```
+roms/<type code>/<version>/          the ROM store (git-ignored): original files with their original names,
+  rom.toml                           generated manifest: files, roles, ids, sha256, partitions, version facts
+  package/                           .vpl, .dcp and other package files, kept, not read again
+build/firmware/<RM>/<version>/<combo>/   extracted images: core-flat.img, core.json, rofs*.img, symindex.json,
+                                         abi/, kernel-drivers.txt, uda-c.img (tools/fw/inventory.py)
+build/roms/<id>/<firmware key>/          composed ROM, device tree, generated patches (tools/device.py paths)
+```
+
+`tools/fw/store.py import DIR|ARCHIVE` identifies and copies; an archive is extracted and left where it is.
+A firmware as built is one combination (core + one ROFS2 + one ROFS3, + UDA when the model wants it), chosen in
+the firmware overlay (`firmware-add --rofs2/--rofs3`) and extracted on first use.
+
+### 7.3 Firmware-specific emulation data, keyed to survive versions
+
+| Item | How it stays valid across versions |
+|---|---|
+| byte patches (`code-patches.txt`) | `module+offset` with the original bytes, resolved per firmware from `core.json` (`tools/fw/patches.py`); a mismatch stops the build, nothing is applied by guess |
+| GL and composition glue (`gles-patches`, `gcebe-patches`) | generated per firmware from names (`tools/gen-gles-glue.py`, `tools/blob_glue.py`) |
+| `user_window_start` | from the firmware's ROM header (`inventory.py` prints it for the overlay) |
+| ROFS edits (`rofs_patches`, `rofs_replace`, `file_edits`) | by path, the old text verified |
+| ISI replies, ESTARTCOMP, keymaps | per model and family, not per firmware |
+
+### 7.4 Device instances
+
+An instance is one virtual phone, like a VM: a name, a model, a firmware, its own drives, settings and
+optional overrides. Directory `build/instances/<name>/` (`$QEMBIAN_HOME/instances`), which is also its sydb
+session directory (drives, snapshots, catches, logs). `instance.toml`: `model`, `firmware` (the model's
+overlay name), `rom_variant`, `primary`, `ephemeral`, `[settings]` (gl, audio, scale, modem) and
+`[overrides]` (run-time tables only: board, gl.host, modem, `[[overrides.standins]]` config; anything that
+would change the composed ROM is refused). Instances of the same (model, firmware, variant) share one composed
+ROM. Tool: `tools/instance.py` (create, clone, rename, delete, set, adopt); `sydb phone NAME` opens one, a bare
+`SYBORG_DEVICE=ID sydb` the device's primary instance. Drives are made at the first boot from the UDA image
+(section 2.4) plus the profile's drive files.

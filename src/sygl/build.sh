@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the sygl blob (our GLES 1.1 + EGL behind libgles_cm.dll's entry points; docs/gpu-roadmap.md)
+# Build the sygl blob (our GLES 1.1 + EGL behind libgles_cm.dll's entry points; docs/research/n95-gles-design.md)
 # and the libgles_cm patches that point at it.
 #   src/sygl/build.sh [--device ID] [--debug] [--trace]        (device: $SYBORG_DEVICE / the registry default)
 # Inputs from the device profile ([gl], models/<id>/gl/): blob address, libgles_cm ordinals, the ROM

@@ -13,7 +13,7 @@ Ids: a model's id loads it with its default firmware (`nokia-n8-rm596`); an over
 keeps the profile name it had before (`nokia-n8-rm596-v13` = the N8 on 013.016); `<model>@<firmware>`
 reaches any other overlay. `registry.toml` `default` is the device of a bare command. A type-code variant of the same phone (RM-321, RM-133) is a model that `extends`
 another. The schema and tool contract: [docs/devices.md](../docs/devices.md); a new phone:
-[docs/adding-a-device.md](../docs/adding-a-device.md); the design: [docs/device-model-v2.md](../docs/device-model-v2.md).
+[docs/adding-a-device.md](../docs/adding-a-device.md); the design: [docs/devices.md](../docs/devices.md) section 7.
 Nothing proprietary is committed: flash files are in the ROM store (`roms/`, tools/fw/store.py), what
 is extracted from them in `build/firmware/`, each device's build dir (composed ROM, DTB, generated files,
 the extraction linked in) is `build/roms/<id>/<firmware key>/` (`tools/device.py paths`). The user's

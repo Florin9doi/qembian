@@ -37,7 +37,7 @@ NVMemory media, hostfs, snapshot, sound, ethernet (virtio), webcamera, and estar
 | Item | Source | Status |
 |---|---|---|
 | CodeSourcery `arm-2010q1-190` (the guide's version) | `sourcery.sw.siemens.com` | **Gone.** The host no longer resolves and there is no Wayback capture. [verified] |
-| **CodeSourcery `arm-2009q3-63`** (GCC 4.4.1, binutils 2.19.51) | Wayback capture of `sourcery.mentor.com/public/gnu_toolchain/arm-none-symbianelf/` | **In use**, sha256-pinned. Its symbianelf libgcc **lacks the ARM EABI integer helpers**, which needed a fixup ([build-log §5](build-log.md#5-libgcc-lacks-the-arm-eabi-integer-helpers)). |
+| **CodeSourcery `arm-2009q3-63`** (GCC 4.4.1, binutils 2.19.51) | Wayback capture of `sourcery.mentor.com/public/gnu_toolchain/arm-none-symbianelf/` | **In use**, sha256-pinned. Its symbianelf libgcc **lacks the ARM EABI integer helpers**, which needed a fixup ([build-log §5](../build-log.md#5-libgcc-lacks-the-arm-eabi-integer-helpers)). |
 | CodeSourcery `arm-2012.03-42` (GCC 4.6.3) | archive.org `nokia_sdks_n_dev_tools/Gcce4.6.3.zip` (Linux + MinGW tarballs) | Downloaded and pinned as a fallback. Its libgcc *does* have the helpers. Raptor here has no `gcce4_6_3` variant. |
 | CodeSourcery 2005q1C / 2008q3 | Wayback, and the `Nokia_Symbian3_SDK_v1.0/epoc32/tools/distrib` Windows installers | not used |
 | User's `~/csl-gcc` | CSL **GCC 3.4.3** (S60 3rd FP1 GCCE), i386 | too old for GCC_SURGE |

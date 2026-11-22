@@ -1,5 +1,5 @@
 # Fake-modem replies of the N79 (RM-348) that differ from the shared table: none. All replies live in
-# platform/isi/replies-bb5.txt (one table for every BB5 phone, docs/cleanup-review.md 2.1); a reply here
+# platform/isi/replies-bb5.txt (one table for every BB5 phone; layering checked by tools/isi.py lint); a reply here
 # would override the shared one for the same (resource, request) on this phone only.
 
 # NET_MODEM_REG_STATUS_GET on PN_NETWORK: moved here from platform/isi/replies-bb5.txt on 2026-11-18: it is not true

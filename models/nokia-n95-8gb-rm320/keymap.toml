@@ -388,7 +388,7 @@ group = "hidden"
 evidence = "V"
 
 # slides: today key events only (akncapserver switches the layout on EKeyDeviceA/B); a keypad.dll
-# stand-in would turn these into real slide-state events later (docs/phone-skin.md step 3)
+# stand-in would turn these into real slide-state events later (not built yet)
 [[switches]]
 name = "media-slide"
 positions = ["closed", "open"]

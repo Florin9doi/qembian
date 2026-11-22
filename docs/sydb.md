@@ -1,11 +1,10 @@
 # sydb: qembian's dev/debug bridge to the virtual phone
 
 adb-like bridge. Its main user is an LLM (through the MCP server); the CLI is the human interface.
-Design and roadmap: [devtools-bridge.md](devtools-bridge.md). Status 2026-11-06: phase 0/1 work, and
-phase 3's basic debugger works. Done: session daemon, agent (files, processes, apps, UI, keyguard,
+Done: session daemon, agent (files, processes, apps, UI, keyguard,
 P&S), CLI, MCP server (46 tools), live agent update, persistent gdb with kernel DWARF and app ELF
 symbols placed from the kernel's `SYBCODE:` line. IPC strace via the kernel's KIPC trace works. Not yet:
-exec-call strace (phase-2 LDD), XIP
+exec-call strace (needs a kernel debug LDD), XIP
 symbol ELFs for Nokia code in gdb backtraces, snapshots. SIS install: `sydb sis install` (below).
 
 ## Pieces
@@ -26,7 +25,7 @@ Build the agent pair with `src/n95apps/devagent/build.sh` (`--debug` = `-O0 -g`)
 
 A **session** is a directory the daemon runs a phone in: `drives/` (C: `nvmemory.img`, E: `nvmemory2.img`,
 `rtc-offset`), snapshots, catches, logs, sockets. A **device instance** is a session directory with an
-`instance.toml` (device model v2, [device-model-v2.md](device-model-v2.md) 2.3): one named virtual phone
+`instance.toml` ([devices.md](devices.md) 7.4): one named virtual phone
 with a model, one of the model's firmwares, a ROM variant, settings (`gl`, `audio`, `scale`: the
 defaults of `sydb phone` / `start` for it) and optional `[overrides]` of run-time profile values
 (`board`, `gl.host`, `modem`, `[[overrides.standins]]` config; anything composed into the ROM is
@@ -260,8 +259,7 @@ ran is the instance `n95-gui` (ROM variant `audio-exp`, which plays the startup 
 adds the sydb agent to its C:). `sydb phone` starts a session if none is running, with sound on the
 host speakers (`--audio host`: `$AUDIO` or pipewire). `sydb start` keeps sound in
 `<session>/audio.wav` unless the instance's `settings.audio` or `--audio` says otherwise. GLES runs on the host
-GPU by default (`--gl soft` for the software rasteriser, H-gles-host). Details:
-[phone-skin.md](phone-skin.md).
+GPU by default (`--gl soft` for the software rasteriser, H-gles-host).
 
 ## TUI
 
@@ -295,7 +293,7 @@ lines into events. Only processes whose client or server name contains MATCH are
 File-server function names come from F32's `OperationArray` (index = opcode) in our source; our
 `efile.exe` is built from it. Other servers show numbers. All IPC in the system is printed while
 the bit is on, which slows the phone a little; it is switched off when the strace ends.
-Exec-call (system call) tracing per thread needs the phase-2 driver (devtools-bridge.md).
+Exec-call (system call) tracing per thread needs a kernel debug driver (not built).
 
 ## Debugger
 

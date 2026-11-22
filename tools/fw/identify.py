@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Identify Nokia (and Sony Ericsson) flash files: what they are, read from the files (docs/device-model-v2.md
+"""Identify Nokia (and Sony Ericsson) flash files: what they are, read from the files (docs/devices.md 7
 section 3). Sony Ericsson packages (no FIASCO, no .vpl) are identified by tools/fw/semc.py package().
 
   identify.py PATH... [--json]     PATH: a directory (searched recursively), flash files, or a .zip/.rar/.7z

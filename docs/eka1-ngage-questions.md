@@ -2,7 +2,7 @@
 
 Start with [eka1-ngage.md](eka1-ngage.md) (state, running, debugging, next steps).
 
-The method for the `ngage` board (roadmap P1 onward, `docs/eka1-ngage-roadmap.md`):
+The method for the `ngage` board (`docs/eka1-ngage.md`):
 - Every stall or unknown becomes a numbered question here.
 - Each question has:
   - **why**: the boot step it blocks, with a run and PC;

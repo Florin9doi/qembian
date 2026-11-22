@@ -135,7 +135,7 @@ def main():
     a = ap.parse_args()
     prof = devmodel.load(a.device)
     dev = prof['_id']
-    fd = devmodel.firmware_dirs(prof)		# the ROM store entry and the shared extraction cache (device-model-v2)
+    fd = devmodel.firmware_dirs(prof)		# the ROM store entry and the shared extraction cache (docs/devices.md 7.2)
     fw = a.fw_dir or (fd and fd['store'])
     if not fw:
         raise SystemExit('%s: firmware not in the ROM store (tools/fw/store.py import DIR, or --fw-dir DIR)' % dev)

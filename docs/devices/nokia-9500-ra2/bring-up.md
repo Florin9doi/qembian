@@ -13,7 +13,7 @@ model): the kernel initialises, EFile mounts the DiskOnChip partitions (H-ra2-do
 syncs and passes IsaApi's checksum check (H-ra2-xbus-modem), C: mounts, EStart finishes and starts 14 processes
 (EwSrv, FbServ, SharedDataServer, Sysagx, C32, Starter, DosServer). DeviceManagementServer dies early (H-ra2-bal
 known gap). Stalls 20-22 fixed: 31 processes (SplashScreen, EikSrvs, PhoneServer, EComServer, ...); no display yet. Next: the UI and the displays.
-Hand-over prompt: docs/prompts/nokia-9500-homescreen.md. 2026-11-18 evening: 57 processes, the inner display shows the start-up splash, the cover UI draws; open: stall 31.
+2026-11-18 evening: 57 processes, the inner display shows the start-up splash, the cover UI draws; open: stall 31.
 
 ## Files (git-ignored)
 

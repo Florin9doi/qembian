@@ -28,7 +28,7 @@ glob = "RM-807_*_C00.01_*_prd.rofs3.fpsx"
 [firmware.identity]                         # filled from the inventory
 sw = { version = "112.020.0311", date = "2012-06-26", type_code = "RM-807" }   # Resource/versions/sw.txt [V]
 
-# user_window_start is derived from this firmware's core.json at build time (docs/device-model-v2.md);
+# user_window_start is derived from this firmware's core.json at build time (docs/devices.md 7.3);
 # the 113.010.1508 profile's literal (0x804B2B80) is that build's figure, not this one's.
 [firmware.rom]
 [[firmware.files]]

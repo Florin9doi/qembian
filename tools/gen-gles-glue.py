@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the glue between the N95's libgles_cm.dll and our GLES/EGL blob (docs/gpu-roadmap.md).
+"""Generate the glue between the N95's libgles_cm.dll and our GLES/EGL blob (docs/research/n95-gles-design.md).
 
   gen-gles-glue.py --blob-addr 0x80320000 --patches models/<id>/gl/gles-patches.txt --asm OUT.S --names OUT.c
 

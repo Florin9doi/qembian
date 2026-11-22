@@ -86,7 +86,7 @@ REGISTRY = os.path.join(ROOT, 'models', 'registry.toml')
 
 
 def registry():
-    """the known type codes (models/registry.toml, docs/device-model-v2.md 2.1): code -> row"""
+    """the known type codes (models/registry.toml, docs/devices.md 7.1): code -> row"""
     with open(REGISTRY, 'rb') as f:
         return {r['code']: r for r in tomllib.load(f).get('types', [])}
 
@@ -98,7 +98,7 @@ def default_device():
 
 
 # ---------------------------------------------------------------- device instances (tools/instance.py)
-# An instance is one virtual phone (docs/device-model-v2.md 2.3): a directory with instance.toml (model,
+# An instance is one virtual phone (docs/devices.md 7.4): a directory with instance.toml (model,
 # firmware, settings, [overrides]) and the session's state. $SYBORG_INSTANCE (its directory) makes every
 # tool load the instance's device with its overrides; sydb sets it for --instance / an instance session.
 # [overrides] may only touch tables that reach QEMU at start, never what is composed into the ROM.
@@ -298,7 +298,7 @@ def device_file(prof, name):
 
 STORE = os.environ.get('QEMBIAN_ROMS') or os.path.join(ROOT, 'roms')
 # what inventory.py extracts from a firmware: shared by every profile built on the same firmware, kept in
-# build/firmware/<firmware key>/ and linked into the profile's build directory (device-model-v2 step 3)
+# build/firmware/<firmware key>/ and linked into the profile's build directory (devices.md 7.2)
 FIRMWARE_ITEMS = ('core-flat.img', 'core.json', 'core-files.txt', 'kernel-drivers.txt', 'abi', 'symindex.json', 'ghidra')
 FIRMWARE_PATTERNS = (r'rofs\d+\.img', r'uda-[a-z]\.img', r'[a-z0-9]+-partitions\.txt')
 
@@ -466,7 +466,7 @@ def paths(prof):
 
 
 def paths_v2(prof):
-    """paths() plus where the firmware lives (store) and is extracted (cache), device-model-v2 step 3"""
+    """paths() plus where the firmware lives (store) and is extracted (cache), devices.md 7.2"""
     p = paths(prof)
     fd = firmware_dirs(prof) or {}
     p.update({'firmware_key': fd.get('key', ''), 'store': fd.get('store', ''), 'cache': fd.get('cache', ''),

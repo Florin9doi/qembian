@@ -104,7 +104,7 @@ OMAP1510 register set (0xFFFECB00 interrupt handler, EMIFS 0xFFFECC00, clocks 0x
 | 25 | the Menu shows its title, the grid stays empty; CPU idle | (a) the TSY asks the SIM service table `09 13` with sub-types 28 and 74; only the N-Gage sub-type 11 was answered [V log] -> replies per sub-type (62 processes instead of 49); (b) Menu's ECom plug-in MenuDRMPlugin -> DRMHelper.dll starts DRMHELPERSERVER.EXE and waits on "DRMHelperServerSemaphore" with no timeout (0x50ABD41C); the server panics ("CDRMHelperServe" 1, no secure environment) before it signals [V Ghidra + run] | `reply 09 13 14 @28 / @74 ..`; H-rm1-drmhelper (the start-server routine returns KErrNotFound): **the Menu grid** (Messaging, Contacts, Log, Gallery, Camera, Media, Calendar, Web, Clock; build/evidence/rm1-menu-grid.png) |
 | 26 | a **second boot from a kept NAND** faults: Kern::Fault "PLAT" 91 after ~75 s | DosServer (system-critical) panics E32USER-CBase 46 (stray signal) [V catch]; on a second boot Nokia.dsy asks `23 04 {01 33 ..}` (another permanent-data item; our reply is fixed to item 0xD4) and `15 01 {01}` (MTC state change) just before [V log] | open |
 
-## Next (hand-over: docs/prompts/nokia-6630-bringup.md)
+## Next
 
 1. Stall 26: the second boot (kept NAND): read Nokia.dsy's parsers for `23 04` (item 0x133) and the MTC state change
    (`15 01` -> `64`, then the 15 C0 indication?), and why DosServer gets a stray signal.

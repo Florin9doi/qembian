@@ -91,7 +91,7 @@ bluetooth = true
 camera = { main_mp = 5, front = true, key = "two-stage" }   # camera untested; CamServerCore needs a stand-in
 fm_radio = true
 gps = true
-accelerometer = true                       # Nokia accelerometerldd/pdd absent; no stand-in yet (docs/phone-skin.md)
+accelerometer = true                       # Nokia accelerometerldd/pdd absent; no stand-in yet
 slides = ["keypad", "media"]               # two-way slider; media slide = landscape layout (EKeyDeviceA/B)
 leds = ["keypad-backlight", "display-backlight"]   # SALightsService targets (H-light)
 memory_card = false                        # 8 GB mass memory; E: is modelled as a card anyway

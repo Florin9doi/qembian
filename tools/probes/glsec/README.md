@@ -5,7 +5,7 @@ could: user writes to the kernel's registers, read-backs into kernel memory and 
 from unmapped and kernel pages, a forged owner (user kick, ctl 0x7f12, ctl 0x7f11), OWNER_FREE of another
 process and of everyone, COMPOSE and SCANOUT_FREE without the compositor right, and (with a second instance
 of itself) a present into a GCE surface id another process presented. Plan and findings:
-`docs/gpu-boundary-roadmap.md`, `docs/gpu-boundary-review-2026-11-10.md`.
+`docs/gpu-boundary-roadmap.md` (findings S1-S10 at its end).
 
 ```
 tools/probes/glsec/build.sh                                   # -> build/n95apps/glsec.exe

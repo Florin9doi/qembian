@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Device smoke test (docs/refactor-plan.md): the checks every platform change must pass.
+# Device smoke test (docs/devices.md): the checks every platform change must pass.
 #   tests/device-smoke.sh [DEVICE-ID] [--soft] [--keep] [--budget S]
 # The boot budget (seconds to idle) is a property of the host running the test, not of the phone:
 # --budget S or SMOKE_BUDGET, default 90.

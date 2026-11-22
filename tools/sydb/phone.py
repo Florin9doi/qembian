@@ -1,5 +1,5 @@
 """sydb phone: an emulator window for the virtual N95 (like the Android emulator's): the screen, the
-phone's keys and machine controls, talking to a running sydb session (docs/phone-skin.md).
+phone's keys and machine controls, talking to a running sydb session.
 
   tools/sydb/sydb.py phone [--scale S]      (starts a session first if none is running; default
                                              scale 1)
@@ -17,7 +17,7 @@ phone's keys and machine controls, talking to a running sydb session (docs/phone
   the accelerometer stand-in (N8, 701, 808) it also sets the host sensor (syborg-sensor) so the phone's
   automatic rotation sees the turn; elsewhere no event: for games that keep the portrait screen and draw
   landscape themselves (FixNativeOrientation, e.g. Angry Birds). The keypad slide itself sends no event yet (Nokia's keypad.dll is not in our ROM,
-  see docs/phone-skin.md).
+  see docs/sydb.md "Phone window").
 """
 import mmap, os, queue, re, socket, struct, sys, threading, time
 

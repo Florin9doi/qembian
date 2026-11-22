@@ -1,8 +1,6 @@
 # Adding a new S60 device
 
-The flow for a human with an LLM agent (Claude Code with the sydb MCP server). It assumes the
-refactor in [refactor-plan.md](refactor-plan.md) is done at least through step 5; where a step is
-not done yet, the N95 equivalent is named in brackets. The device model is in
+The flow for a human with an LLM agent (Claude Code with the sydb MCP server). The device model is in
 [devices.md](devices.md). Budget your agent: each phase below is a separate brief with its own
 tool-call budget, as `CLAUDE.md` asks.
 

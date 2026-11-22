@@ -26,10 +26,8 @@ Related documents:
 |---|---|
 | [eka1-ngage-questions.md](eka1-ngage-questions.md) | the question log (Q1-Q56): every stall, its evidence and its answer, marked [V]/[I] |
 | [hacks.md](hacks.md), section "N-Gage QD" | every workaround and guess in the board |
-| [eka1-ngage-roadmap.md](eka1-ngage-roadmap.md) | the original plan (phases P0-P6), with status |
 | [../eka1/README.md](../eka1/README.md) | the firmware files, extraction and analysis tools |
 | [research/eka1-ngage-feasibility.md](research/eka1-ngage-feasibility.md) | the first feasibility study |
-| [eka1-ngage-handoff.md](eka1-ngage-handoff.md) | a historical hand-off prompt (2026-11-10) |
 
 ## State (2026-11-11)
 

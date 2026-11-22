@@ -1,5 +1,5 @@
 # Fake-modem canned replies of every BB5 phone (family bb5-s60): one table for all of them
-# (docs/cleanup-review.md 2.1). A reply to a request a firmware never sends is inert, so the table is
+# (layering checked by tools/isi.py lint). A reply to a request a firmware never sends is inert, so the table is
 # the union of what each phone needed; `# on:` names where a reply was verified (none = all members).
 # Device files (models/<id>/isi-replies.txt) come after this one and are only for true conflicts:
 # the same (resource, request) needing different bytes on different phones (none today).

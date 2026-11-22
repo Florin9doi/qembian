@@ -52,5 +52,5 @@ EGL too: the home screen (alf, OpenVG) and Cut the Rope and Angry Birds draw.
 
 ## Boundary review
 
-Merged with another model's review and checked against the source: docs/gpu-boundary-review-2026-11-10.md
-(safety findings S1-S10 with status, performance costs, the plan and the verification it needs).
+Merged with another model's review and checked against the source; the safety findings S1-S10 with their
+status and the plan are in docs/gpu-boundary-roadmap.md.

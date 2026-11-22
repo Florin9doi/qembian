@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Align the Symbian 6.1 kernel export names with the RH-29 ARM ekern.exe ordinals.
 
-Facts this relies on (see docs/eka1-ngage-roadmap.md, P0):
+Facts this relies on (see docs/eka1-ngage.md and docs/eka1-ngage-questions.md):
 - The ARM export order is the GCC 2.9 mangled names sorted (C locale).
 - The 6.1 names come from the S60 0.9 SDK's WINS EKERN.DLL (Borland-mangled, 244 exports),
   converted by bor2gcc.py. The ARM kernel has 506 exports; the rest are ARM-only and

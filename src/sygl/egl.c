@@ -1,6 +1,6 @@
 /*
  * sygl: our OpenGL ES 1.1 + EGL behind the N95's libgles_cm.dll entry points
- * (docs/gpu-roadmap.md; hacks H-gles-trampolines, H-gles-blob, H-gles-fbdirect, H-vsync-wait).
+ * (docs/research/n95-gles-design.md; hacks H-gles-trampolines, H-gles-blob, H-gles-fbdirect, H-vsync-wait).
  *
  * The blob is linked at a fixed ROM address (SYGL_BASE, src/n95gl/build.sh) and runs in the calling
  * thread: no loader, no writable static data. State: SyThread per thread (plat.cpp, DllTls), which
@@ -434,7 +434,7 @@ EGLSurface sy_eglCreateWindowSurface(EGLDisplay d, EGLConfig aConfig, NativeWind
 	s->stencil = c->stencil;
 	s->window = aWin;
 	/* the N95's window-system glue (libpvrTechviewWSEGL) reads the window's size and position once,
-	   here; afterwards it only gets the visible region (docs/gpu-roadmap.md "Fidelity",
+	   here; afterwards it only gets the visible region (docs/research/n95-gles-design.md "Fidelity",
 	   H-gles-window-fixed). So does sygl: the surface never tracks a resize or a rotation */
 	s->wx = x; s->wy = y;
 	if (!surface_alloc(s, w, h))

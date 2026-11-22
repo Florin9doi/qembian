@@ -21,7 +21,7 @@ Why this order:
 
 **Firmware as is (2026-11-10):** the list of every change our build makes to the phone's files, and the
 QEMU device that would replace each (VideoCore/KHRN, RAPIDO DSP, Bluetooth HCI + FM, drive map):
-[rom-as-is.md](rom-as-is.md).
+[research/rom-as-is.md](research/rom-as-is.md).
 
 **Other Symbian UIs (2026-11-07):** UIQ 3 phones (Sony Ericsson P990, P1i, M600, W950/W960, Motorola
 Z8/Z10; Symbian 9.1-9.3, EKA2) fit the existing kernel, personalities and tools; they need a new
@@ -129,7 +129,7 @@ happens when Carousel builds its UI (it is in the foreground, e.g. `sydb launch 
 while it idles in the background. Other GLES/M3G users will fail the same way. Fix = a GPU model
 (PowerVR services driver or a GLES stand-in), not planned yet.
 
-**Planned: GPU (OpenGL ES 1.1 + EGL), 2026-11-06.** Plan in [gpu-roadmap.md](gpu-roadmap.md):
+**Planned: GPU (OpenGL ES 1.1 + EGL), 2026-11-06.** Plan in [research/n95-gles-design.md](research/n95-gles-design.md):
 - keep the ROM's `libgles_cm.dll` and redirect its 175 entry points (generated code-patches) to our
   own GLES/EGL implementation, built for a fixed address in our part of the ROM;
 - software rendering on the phone first (owner: no host GPU for now), split into a front end and a
@@ -139,8 +139,8 @@ while it idles in the background. Other GLES/M3G users will fail the same way. F
 Owner decisions pending: entry-point patches vs. replacing the DLL, own renderer vs. a base library,
 colour depths, where the vsync wait lives.
 
-**Planned: phone skin (emulator window with hardware buttons), 2026-11-06.** Plan in
-[phone-skin.md](phone-skin.md): a PyQt6 `sydb phone` window (VNC screen, button bar, slider). Side
+**Planned: phone skin (emulator window with hardware buttons), 2026-11-06.** Built as
+`sydb phone` ([sydb.md](sydb.md) "Phone window"): a PyQt6 `sydb phone` window (VNC screen, button bar, slider). Side
 keys need only keymap entries. The slider and accelerometer need stand-ins for Nokia's kernel-side
 `keypad.dll` / accelerometer drivers, which are not in our ROM.
 
@@ -179,7 +179,7 @@ integers as descriptor pointers, e.g. TmScanServer, Anykey): worth checking agai
 argument-flag translation.
 
 **In progress: a safe graphics boundary, then a faster one (2026-11-11).** Plan, exit tests and status in
-[gpu-boundary-roadmap.md](gpu-boundary-roadmap.md) (findings: gpu-boundary-review-2026-11-10.md). Phases 1
+[gpu-boundary-roadmap.md](gpu-boundary-roadmap.md) (findings in it). Phases 1
 (authority: user-permission guest access, kernel-only registers, owner and compositor rights from
 d_display) and 2 (lifetime and bounds) are done; then the speed phases for slower hosts (phones): OpenVG
 batching (3), fewer copies (4), a renderer worker (5), each measured with `tools/gl_bench.py`. Hostile tests:
@@ -317,3 +317,10 @@ keep showing its first frame. GPU phones (N8, 701, 808) compose on the host and 
 ui-automation.md "Platforms", working through its assumption checklist where a device fails (first suspects:
 imports on 9.1, the Avkon icon record and the drawing path on Symbian^3). UIQ (P1i, P990i) needs a Qikon
 variant of the probe; the gdb reader needs the moving and flexible memory models.
+
+## Small open items carried over (2026-11-22)
+
+- Profile cleanup (from the 2026-11-07 cleanup review, item 1.1): `[props]` vs `milestones.idle`, `[status]`
+  fields that drift, `kernel.trace_mask`, `rom.manifest`, `[skin]`, `[composition]` docs, the LCD build rename.
+- Idea, not started: start Linux from a running Symbian on the virtual N95 the way it would be done on a real
+  one (a user-side loader app + a kernel driver that takes over the machine), as a rehearsal for the real phone.

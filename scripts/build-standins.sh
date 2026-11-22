@@ -27,7 +27,7 @@ if [ -z "${SYBORG_IN_CONTAINER:-}" ]; then
   PAD=0
   if [ "$(python3 -I "$ROOT/tools/device.py" get kernel.place 2>/dev/null | tr -d '"')" = after-firmware ]; then
     CORE=$(python3 -I "$ROOT/tools/device.py" paths core_flat)
-    PAD=$(stat -L -c %s "$CORE")	# core-flat.img is a link into build/firmware/ (device-model-v2)
+    PAD=$(stat -L -c %s "$CORE")	# core-flat.img is a link into build/firmware/ (docs/devices.md 7.2)
   fi
   rm -f "$GEN/pad.bin"; [ "$PAD" -gt 0 ] && truncate -s "$PAD" "$GEN/pad.bin"
   CONTAINER_ARGS="${CONTAINER_ARGS:-} -e SYBORG_BASEPORT=${BP:-syborg} -e SYBORG_DEVDIR=/work/${DEVDIR#$ROOT/}" \

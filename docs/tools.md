@@ -211,12 +211,12 @@ tools/fw/layout.py FILE...                             # what each flash file ho
 tools/fw/store.py import FILES|DIR|ARCHIVE [--label L] [--move]   # into roms/<RM>/<version>[~label]/
 tools/fw/store.py list | show RM-596/011.012 | path ID | reindex
 ```
-The ROM store (device-model-v2 2.2.2, 2026-11-10): `roms/<type code>/<version>/` with the original
+The ROM store (devices.md 7.2, 2026-11-10): `roms/<type code>/<version>/` with the original
 files, package metadata in `package/`, a generated `rom.toml` (identity, products, every file's role,
 pack id, partitions, sha256) and `roms/index.toml`. A label separates firmwares of one version with
 other files (custom firmware: `RM-596/111.040.1511~delight-6.7`). Archives stay where they are.
 
-`identify.py` says what flash files are, from the files (device-model-v2 section 3): the `.vpl`
+`identify.py` says what flash files are, from the files (devices.md 7.1): the `.vpl`
 (type code, version, products), else `sw.txt`/`langsw.txt` read from ROFS1/ROFS2 in memory, else the
 file name; language/customer/UDA files join the core they came with. It prints the registry row
 (`models/registry.toml`) and the profiles whose `[firmware.identity]` equals it. `layout.py` is the
@@ -319,7 +319,7 @@ host time). `-rtc base=...` on the QEMU command line shifts the host base.
 instance (`smoke`, ephemeral, made anew each run; from the seed drives `build/seeds/<id>`) and checks: idle within 1.5x the profile's
 a budget from `--budget S` / `SMOKE_BUDGET` (default 90 s: a property of the host, not of the phone), screen not black, Multimedia brings Carousel to the front without a
 panic on the chosen GL backend, Switch off ends the session. Run it after every platform change
-(docs/refactor-plan.md); ~40 s.
+(docs/devices.md); ~40 s.
 
 ## Older helpers still useful
 
@@ -344,8 +344,6 @@ DRIVE_C=... scripts/drive.sh put c build/n95apps/obj-dsbtest/dsbtest_reg.rsc /pr
 It appears in Menu → Applications. It measures `CDirectScreenBitmap` EndUpdate pacing and prints
 `DSBTEST:` lines (fast counter, NTickCount, fps) to the serial log. No C++ EH runtime: it opens a
 trap level with `User::MarkCleanupStack()` so cleanup-stack pushes work, but a leave panics.
-Approach for app development and debugging in general: [app-dev-debugging.md](app-dev-debugging.md).
-Planned LLM-driven debug bridge (MCP server, guest agent, kernel debug LDD): [devtools-bridge.md](devtools-bridge.md).
 
 ### `tools/cmt/isirecord.py`: the real modem's answers vs the fake modem's
 

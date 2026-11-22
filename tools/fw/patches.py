@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Byte patches that survive firmware versions (docs/device-model-v2.md 2.2.3, step 4).
+"""Byte patches that survive firmware versions (docs/devices.md 7.3).
 
 A patch line names a ROM module and an offset from that module's code start instead of an absolute ROM
 address; the address comes from the firmware's core.json at build time, and romcompose.py still checks

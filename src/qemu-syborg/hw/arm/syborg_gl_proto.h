@@ -1,6 +1,6 @@
 /*
  * syborg-gl command stream, shared by the guest (src/n95gl/hw.c, the sygl blob) and the QEMU device
- * (syborg_gl.c). docs/gpu-roadmap.md "Host GL backend".
+ * (syborg_gl.c). docs/research/n95-gles-design.md "Host GL backend".
  *
  * The guest keeps the whole GLES 1.1 state machine, transform, lighting and clipping (sygl); what
  * crosses is the rasteriser's input: window-space triangles with their raster state, clears,

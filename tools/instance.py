@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""instance.py: device instances, the user's virtual phones (docs/device-model-v2.md 2.3, docs/sydb.md).
+"""instance.py: device instances, the user's virtual phones (docs/devices.md 7.4, docs/sydb.md).
 
 An instance is one phone the way a VM is one machine: a name, a model, one of the model's firmwares,
 its own drives, snapshots, logs and settings, and optionally a few [overrides] of the model profile
@@ -162,7 +162,7 @@ def _table(name, t, out):
 def write(inst):
     d = inst['_dir']
     top = ['schema', 'name', 'created', 'model', 'firmware', 'rom_variant', 'primary', 'ephemeral', 'notes']
-    out = ['# Device instance (tools/instance.py, docs/device-model-v2.md 2.3): one virtual phone. Its drives,',
+    out = ['# Device instance (tools/instance.py, docs/devices.md 7.4): one virtual phone. Its drives,',
            '# snapshots and logs are in this directory. Written by tools/instance.py; [overrides] may be edited',
            '# by hand (run-time tables only: board, gl.host, modem, [[overrides.standins]] name + config).', '']
     out += ['%s = %s' % (k, _q(inst[k])) for k in top if k in inst]

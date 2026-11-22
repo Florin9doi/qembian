@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The ROM store (docs/device-model-v2.md 2.2.2): imported firmware by identity, not by hand-made names.
+"""The ROM store (docs/devices.md 7.2): imported firmware by identity, not by hand-made names.
 
   store.py import PATH... [--label L] [--move]   files, directories or archives -> roms/<RM>/<version>/
   store.py list                                  every firmware the store holds (roms/index.toml)

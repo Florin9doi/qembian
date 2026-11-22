@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Flash-file layout, read from the files themselves (docs/device-model-v2.md, decision 5).
+"""Flash-file layout, read from the files themselves (docs/devices.md 7.1).
 
 A profile says which files form the firmware (roles and globs); where the images are inside each file
 is the file's business, and it differs between versions of one phone (N73 3.0717: ROFS1 after the

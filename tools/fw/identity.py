@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""What a firmware says about itself, read straight from its flash files (docs/device-model-v2.md 2.2.1).
+"""What a firmware says about itself, read straight from its flash files (docs/devices.md 7.1).
 
   version_file(text)            Nokia sw.txt / langsw.txt: 'V 35.0.001\\n11-11-09\\nRM-320\\nN95(c)NMP'
   assemble(path, part)          (record payload, data) of one FIASCO partition, in memory

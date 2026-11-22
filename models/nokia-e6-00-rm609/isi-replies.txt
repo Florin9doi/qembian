@@ -1,5 +1,5 @@
 # Fake-modem replies of the N8 (RM-596) that differ from the shared table: none. All replies live in
-# platform/isi/replies-bb5.txt (one table for every BB5 phone, docs/cleanup-review.md 2.1); a reply here
+# platform/isi/replies-bb5.txt (one table for every BB5 phone; layering checked by tools/isi.py lint); a reply here
 # would override the shared one for the same (resource, request) on this phone only.
 
 # PN_PHONE_INFO 0x0B/0x0C: EInfoServer (channel 11) reads the phone's product name from the modem

@@ -1,4 +1,4 @@
-# Known Nokia type codes (docs/device-model-v2.md 2.1), and Sony Ericsson phones as SE-<product> (tools/fw/semc.py): grows with our knowledge. A row needs no profile;
+# Known Nokia type codes (docs/devices.md 7.1), and Sony Ericsson phones as SE-<product> (tools/fw/semc.py): grows with our knowledge. A row needs no profile;
 # it lets ROM identification say "known phone, no emulation profile yet" instead of "unknown".
 #   code      type designator (sw.txt / .vpl TypeDesignator)
 #   name      marketing name;  platform: S60/Symbian release;  soc: adaptation family ([I] = not checked)

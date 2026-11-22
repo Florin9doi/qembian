@@ -1,7 +1,7 @@
 /*
  * Nokia N-Gage QD (RH-29, DCT4 "UPP_WD2", Symbian 6.1 / EKA1) bring-up board.
  *
- * Runs the phone's own ROM (bootstrap, ekern.exe, ecust.dll): see docs/eka1-ngage-roadmap.md.
+ * Runs the phone's own ROM (bootstrap, ekern.exe, ecust.dll): see docs/eka1-ngage.md.
  * This is the discovery stage (roadmap P1): only what the ROM is known to need is modelled,
  * every other physical access goes to a logging catch-all that remembers what was written
  * (reads return the last value, else 0), so polling loops and probes show up in the log:

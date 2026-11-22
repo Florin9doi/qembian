@@ -40,7 +40,7 @@ python3 tools/ekern_align.py <Series 60 0.9 SDK WINS EKERN.DLL>     # -> analysi
 `--apply` on steps 3 and 4 also labels the open ROM.bin in Ghidra (REST plugin, port 8089).
 `ngage_run.py`, `ngage_sess.py` and the stack scans name addresses from
 `output/rom/manifest.json` and `analysis/user-exports.tsv`, so run steps 1 and 3 first.
-The SDKs are in the owner's archive (docs/eka1-ngage-roadmap.md, P0).
+The SDKs are in the owner's archive (docs/eka1-ngage.md).
 
 `python3 -m unittest -v test_dct4_extract test_eka1_extract_report` tests the container extractor and
 the report helpers on synthetic data.

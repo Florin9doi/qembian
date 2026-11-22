@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build a separate qemu-system-arm with the N-Gage (EKA1) bring-up board, docs/eka1-ngage-roadmap.md P1.
+# Build a separate qemu-system-arm with the N-Gage (EKA1) bring-up board, docs/eka1-ngage.md.
 #   scripts/build-qemu-ngage.sh [clean]
 # Own tree (build/qemu-ngage/) from the pinned QEMU tarball, so the bring-up never rebuilds the
 # shared Syborg binary (build/qemu-modern/). Only src/qemu-ngage/ is copied in; no Syborg files.
