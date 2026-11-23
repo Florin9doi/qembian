@@ -90,6 +90,28 @@ MODELS = {
         containers=0x80000398,              # as N-Gage (12 ported users agree)
         code=(0x50307f9c, 0x50f00000),
         ttb=0x0A074000),                    # [I]
+    'nokia9300': dict(
+        machine='nokia9300', root=ROOT / 'eka1/rae6/core',
+        rom=ROOT / 'eka1/rae6/core/ROM.bin', ppm=ROOT / 'eka1/rae6/images',
+        isi=ROOT / 'src/qemu-ngage/isi-replies-ra2.txt',
+        fatal=0x50020260,                   # Kern::Fault(desc, reason): 0x50020260 [V]
+        cur_thread=0x800018c0,              # as 9500/6600
+        containers=0x80000430,              # as 9500/6600
+        code=(0x5000cf9c, 0x51100000),
+        vectors=0xffff0000,                 # high vectors
+        panic=0x500d8e58,                   # EUser RThread::Panic(cat, reason) [V]
+        ttb=0x10000000),                    # [I]
+    'nokia9300i': dict(
+        machine='nokia9300i', root=ROOT / 'eka1/ra8/core',
+        rom=ROOT / 'eka1/ra8/core/ROM.bin', ppm=ROOT / 'eka1/ra8/images',
+        isi=ROOT / 'src/qemu-ngage/isi-replies-ra2.txt',
+        fatal=0x50021260,                   # Kern::Fault(desc, reason): 0x50021260 [V]
+        cur_thread=0x800018c0,              # as 9500/6600
+        containers=0x80000430,              # as 9500/6600
+        code=(0x5000df9c, 0x51200000),
+        vectors=0xffff0000,                 # high vectors
+        panic=0x500dd0b8,                   # EUser RThread::Panic(cat, reason) [V]
+        ttb=0x10000000),                    # [I]
     'nokia9500': dict(
         machine='nokia9500', root=ROOT / 'eka1/ra2/core',
         rom=ROOT / 'eka1/ra2/core/ROM.bin', ppm=ROOT / 'eka1/ra2/images',

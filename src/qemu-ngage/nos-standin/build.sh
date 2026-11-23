@@ -53,6 +53,12 @@ build nos_standin_nhl10.S 0x528943a4 ngage_rm51 ../hw/arm/ngage_rm51_nos_stub.h 
 build nos_standin.S       0x5148c1c4 ngage_nhl2  ../hw/arm/ngage_nhl2_nos_stub.h --defsym NHL2=1
 build doc_standin_ra2.S   0x500623d8 ngage_ra2_doc ../hw/arm/ngage_ra2_doc_stub.h
 build bal_standin_ra2.S   0x50925ecc ngage_ra2_bal ../hw/arm/ngage_ra2_bal_stub.h
+build doc_standin_ra2.S   0x50061378 ngage_rae6_doc ../hw/arm/ngage_rae6_doc_stub.h
+build bal_standin_ra2.S   0x5091ab2c ngage_rae6_bal ../hw/arm/ngage_rae6_bal_stub.h \
+      --defsym RQCOMPLETE_SLOT=0x500ef0bc --defsym DMS_READY=0x5092bf7c
+build doc_standin_ra2.S   0x50063f18 ngage_ra8_doc ../hw/arm/ngage_ra8_doc_stub.h
+build bal_standin_ra2.S   0x509228cc ngage_ra8_bal ../hw/arm/ngage_ra8_bal_stub.h \
+      --defsym RQCOMPLETE_SLOT=0x500f331c --defsym DMS_READY=0x50933d1c
 build doc_standin_p910.S  0x500a27c4 ngage_p910_doc ../hw/arm/ngage_p910_doc_stub.h
 build doc_standin_ra2.S   0x500ac1c8 ngage_rm12_doc ../hw/arm/ngage_rm12_doc_stub.h
 build bal_standin_ra2.S   0x501157dc ngage_rm12_bal ../hw/arm/ngage_rm12_bal_stub.h \

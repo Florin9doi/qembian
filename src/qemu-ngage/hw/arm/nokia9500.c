@@ -151,6 +151,18 @@ typedef struct {
     uint32_t len;
 } Ra2Part;
 
+static Ra2Part ra2_parts_9300[] = {
+    { "RAE6n6270.u18", "r01-", 163808 },        /* 0: C: (EFile reads its boot sector) [V] */
+    { NULL, NULL, 0 },                          /* 1: directory + ROFS + ROFx (ra2_part1) */
+    { NULL, NULL, 2048 },                       /* 2: asked for its size only; blank [I] */
+};
+
+static Ra2Part ra2_parts_9300i[] = {
+    { "RA8n6270.u18", "r01-", 163808 },         /* 0: C: (EFile reads its boot sector) [V] */
+    { NULL, NULL, 0 },                          /* 1: directory + ROFS + ROFx (ra2_part1) */
+    { NULL, NULL, 2048 },                       /* 2: asked for its size only; blank [I] */
+};
+
 static Ra2Part ra2_parts_9500[] = {
     { "RA2n6270.u18", "r01-", 163808 },         /* 0: C: (EFile reads its boot sector) [V] */
     { NULL, NULL, 0 },                          /* 1: directory + ROFS + ROFx (ra2_part1) */
@@ -438,6 +450,8 @@ static size_t ra2_load(const char *sub, const char *prefix, const char *tag, hwa
 static const uint32_t ra2_boot_stub[] = { 0xe51ff004, RA2_CORE_LOAD };
 
 #include "ngage_ra2_doc_stub.h"
+#include "ngage_rae6_doc_stub.h"
+#include "ngage_ra8_doc_stub.h"
 
 /* ROM virtual address -> its physical address in the SDRAM copy of the core */
 #define RA2_CORE_PHYS(va) (RA2_CORE_LOAD + ((va) - 0x50000000))
@@ -454,6 +468,22 @@ static uint32_t ra2_branch(uint32_t from, uint32_t to)
 {
     return 0xea000000 | (((to - (from + 8)) >> 2) & 0x00ffffff);
 }
+
+static const uint32_t ra2_doc_exports_9300[][2] = {
+    { 0x50064ec0, NGAGE_RAE6_DOC_NOS_SYM_doc_flcall },     /* ord 1 flCall */
+    { 0x50064ec8, NGAGE_RAE6_DOC_NOS_SYM_doc_ord2 },       /* ord 2 */
+    { 0x50064ec4, NGAGE_RAE6_DOC_NOS_SYM_doc_exit },       /* ord 3 flExit */
+    { 0x50064edc, NGAGE_RAE6_DOC_NOS_SYM_doc_setenv },     /* ord 4 flSetEnvAll */
+    { 0x50064ecc, NGAGE_RAE6_DOC_NOS_SYM_doc_setbase },    /* ord 5 setDocBase */
+};
+
+static const uint32_t ra2_doc_exports_9300i[][2] = {
+    { 0x50067a60, NGAGE_RA8_DOC_NOS_SYM_doc_flcall },      /* ord 1 flCall */
+    { 0x50067a68, NGAGE_RA8_DOC_NOS_SYM_doc_ord2 },        /* ord 2 */
+    { 0x50067a64, NGAGE_RA8_DOC_NOS_SYM_doc_exit },        /* ord 3 flExit */
+    { 0x50067a7c, NGAGE_RA8_DOC_NOS_SYM_doc_setenv },      /* ord 4 flSetEnvAll */
+    { 0x50067a6c, NGAGE_RA8_DOC_NOS_SYM_doc_setbase },     /* ord 5 setDocBase */
+};
 
 /*
  * H-ra2-doc: DiskOnChip.dll's exports (directory 0x5007F224, each a one-word thunk at 0x50065F20.. [V]) branch into the TrueFFS stand-in,
@@ -514,6 +544,8 @@ static void ra2_dsp_boot_patch(void)
 
 #include "ngage_ra2_bal_stub.h"
 #include "ngage_rm12_bal_stub.h"
+#include "ngage_rae6_bal_stub.h"
+#include "ngage_ra8_bal_stub.h"
 
 /*
  * H-ra2-bal: Bal.dll's DSP node and stream calls succeed without a DSP. The stand-in goes over the
@@ -1026,6 +1058,40 @@ static void ra2_devices_7710(MachineState *machine, struct omap_mpu_state_s *mpu
     rm12_input_init(OBJECT(machine), mpu);  /* touch on Microwire CS 0 + MPUIO 4, keys on the MPUIO matrix */
 }
 
+static const Ra2Phone ra2_phone_9300 = {
+    .machine = "nokia9300",
+    .core_file = "RAE6n6270.c01", .core_prefix = "r01-", .core_tag = "C",
+    .var_file = "RAE6n6270.l18", .var_prefix = "r09-", .var_tag = "V", .var_load = 0x11700000,
+    .rofs_file = "RAE6n6270.c01", .rofs_prefix = "r02-", .rofx_file = "RAE6n6270.l18", .rofx_prefix = "r06-",
+    .parts = ra2_parts_9300, .nparts = ARRAY_SIZE(ra2_parts_9300),
+    .doc_exports = ra2_doc_exports_9300, .ndoc_exports = ARRAY_SIZE(ra2_doc_exports_9300),
+    .doc_stub = ngage_rae6_doc_nos_stub, .doc_stub_len = sizeof(ngage_rae6_doc_nos_stub),
+    .doc_stub_va = NGAGE_RAE6_DOC_NOS_STUB_VA,
+    .ehwa_delta = 0x507ead64 - 0x507f60d4,      /* Ehwaomap.pdd */
+    .bal_delta = 0x5091ab2c - 0x50925ecc,       /* Bal.dll (Dasfgwc.dll the same) */
+    .dms_delta = 0x5092aac8 - 0x50935e68,       /* DeviceManagementServer.exe */
+    .bal_stub = ngage_rae6_bal_nos_stub, .bal_stub_len = sizeof(ngage_rae6_bal_nos_stub),
+    .patches = ra2_patches_dsp,
+    .devices = ra2_devices_9500,
+};
+
+static const Ra2Phone ra2_phone_9300i = {
+    .machine = "nokia9300i",
+    .core_file = "RA8n6270.c01", .core_prefix = "r01-", .core_tag = "C",
+    .var_file = "RA8n6270.l18", .var_prefix = "r09-", .var_tag = "V", .var_load = 0x11800000,
+    .rofs_file = "RA8n6270.c01", .rofs_prefix = "r02-", .rofx_file = "RA8n6270.l18", .rofx_prefix = "r06-",
+    .parts = ra2_parts_9300i, .nparts = ARRAY_SIZE(ra2_parts_9300i),
+    .doc_exports = ra2_doc_exports_9300i, .ndoc_exports = ARRAY_SIZE(ra2_doc_exports_9300i),
+    .doc_stub = ngage_ra8_doc_nos_stub, .doc_stub_len = sizeof(ngage_ra8_doc_nos_stub),
+    .doc_stub_va = NGAGE_RA8_DOC_NOS_STUB_VA,
+    .ehwa_delta = 0x507f2a94 - 0x507f60d4,      /* Ehwaomap.pdd */
+    .bal_delta = 0x509228cc - 0x50925ecc,       /* Bal.dll (Dasfgwc.dll the same) */
+    .dms_delta = 0x50932868 - 0x50935e68,       /* DeviceManagementServer.exe */
+    .bal_stub = ngage_ra8_bal_nos_stub, .bal_stub_len = sizeof(ngage_ra8_bal_nos_stub),
+    .patches = ra2_patches_dsp,
+    .devices = ra2_devices_9500,
+};
+
 static const Ra2Phone ra2_phone_9500 = {
     .machine = "nokia9500",
     .core_file = "RA2n6270.c01", .core_prefix = "r01-", .core_tag = "C",
@@ -1352,6 +1418,16 @@ static void nokian70_init(MachineState *machine)
     rm1_board_init(machine, &rm1_phone_n70);
 }
 
+static void nokia9300_init(MachineState *machine)
+{
+    ra2_board_init(machine, &ra2_phone_9300);
+}
+
+static void nokia9300i_init(MachineState *machine)
+{
+    ra2_board_init(machine, &ra2_phone_9300i);
+}
+
 static void nokia9500_init(MachineState *machine)
 {
     ra2_board_init(machine, &ra2_phone_9500);
@@ -1404,6 +1480,46 @@ static void ra2_class_props(ObjectClass *oc)
     object_class_property_add_str(oc, "flash", ra2_get_flash, ra2_set_flash);
     object_class_property_set_description(oc, "flash", "C: (partition 0) kept in this file across boots");
 }
+
+static void nokia9300_class_init(ObjectClass *oc, const void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+
+    ra2_class_props(oc);
+    mc->desc = "Nokia 9300 (RAE-6, OMAP1510, Symbian 7.0s EKA1) bring-up board";
+    mc->init = nokia9300_init;
+    mc->ignore_memory_transaction_failures = true;
+    mc->default_cpu_type = ARM_CPU_TYPE_NAME("ti925t");
+    mc->default_ram_size = RA2_SDRAM_SIZE;
+    mc->default_ram_id = "nokia9300.sdram";
+}
+
+static const TypeInfo nokia9300_type = {
+    .name = MACHINE_TYPE_NAME("nokia9300"),
+    .parent = TYPE_MACHINE,
+    .class_init = nokia9300_class_init,
+    .interfaces = arm_machine_interfaces,
+};
+
+static void nokia9300i_class_init(ObjectClass *oc, const void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+
+    ra2_class_props(oc);
+    mc->desc = "Nokia 9300i (RA-8, OMAP1510, Symbian 7.0s EKA1) bring-up board";
+    mc->init = nokia9300i_init;
+    mc->ignore_memory_transaction_failures = true;
+    mc->default_cpu_type = ARM_CPU_TYPE_NAME("ti925t");
+    mc->default_ram_size = RA2_SDRAM_SIZE;
+    mc->default_ram_id = "nokia9300i.sdram";
+}
+
+static const TypeInfo nokia9300i_type = {
+    .name = MACHINE_TYPE_NAME("nokia9300i"),
+    .parent = TYPE_MACHINE,
+    .class_init = nokia9300i_class_init,
+    .interfaces = arm_machine_interfaces,
+};
 
 static void nokia9500_class_init(ObjectClass *oc, const void *data)
 {
@@ -1489,6 +1605,8 @@ static const TypeInfo nokian70_type = {
 
 static void nokia9500_register(void)
 {
+    type_register_static(&nokia9300_type);
+    type_register_static(&nokia9300i_type);
     type_register_static(&nokia9500_type);
     type_register_static(&nokia6630_type);
     type_register_static(&nokian70_type);

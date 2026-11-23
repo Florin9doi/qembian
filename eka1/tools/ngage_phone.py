@@ -71,8 +71,12 @@ for i in range(10):
 
 
 TITLES = {'ngage': 'N-Gage QD', 'nokia6600': 'Nokia 6600', 'nokia7650': 'Nokia 7650',
-          'nokia9500': 'Nokia 9500 Communicator', 'p910i': 'Sony Ericsson P910i', 'nokia7710': 'Nokia 7710', 'p800': 'Sony Ericsson P800', 'nokia3230': 'Nokia 3230',
+          'nokia9300': 'Nokia 9300', 'nokia9300i': 'Nokia 9300i', 'nokia9500': 'Nokia 9500 Communicator',
+          'p910i': 'Sony Ericsson P910i', 'nokia7710': 'Nokia 7710', 'p800': 'Sony Ericsson P800', 'nokia3230': 'Nokia 3230',
           'nokia6630': 'Nokia 6630', 'nokian70': 'Nokia N70', 'nokia9210': 'Nokia 9210 Communicator'}
+
+# the clamshell Communicators (cover panel, lid, QWERTY): the 9300 and the 9500
+COMMUNICATORS = ('nokia9300', 'nokia9300i', 'nokia9500')
 
 # Nokia 9500: every host key goes to the board as a qcode (nokia9500_kbd.c RA2_KEYS maps them)
 QWERTY = {getattr(Qt.Key, 'Key_' + c): c.lower() for c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'}
@@ -157,7 +161,7 @@ class Phone(QtWidgets.QWidget):
         elif model == 'nokia7710':
             self.views = [('screen', {}, (640, 320), max(1, scale // 2 + scale % 2))]
             self.host_keys = RM12_KEYS
-        elif model == 'nokia9500':
+        elif model in COMMUNICATORS:
             self.views = [('cover', {'device': 'cover'}, (128, 128), scale),
                           ('inner', {}, (640, 200), max(1, scale // 2 + scale % 2))]
             self.host_keys = QWERTY
@@ -186,7 +190,7 @@ class Phone(QtWidgets.QWidget):
         self.status = QtWidgets.QLabel('booting...')
         lay.addWidget(self.status)
         grid = QtWidgets.QGridLayout()
-        if model == 'nokia9500':
+        if model in COMMUNICATORS:
             self.lid = QtWidgets.QPushButton('Open lid')
             self.lid.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             self.lid.clicked.connect(self.toggle_lid)
@@ -199,8 +203,8 @@ class Phone(QtWidgets.QWidget):
             self.labels[0].installEventFilter(self)       # the pen
         if model in ('nokia7710', 'p800'):
             self.labels[0].installEventFilter(self)       # the pen
-        rows = {'nokia9500': RA2_BUTTONS, 'p910i': P910_BUTTONS, 'nokia7710': RM12_BUTTONS, 'p800': P910_BUTTONS,
-                'nokia6630': RM1_BUTTONS, 'nokian70': RM84_BUTTONS,
+        rows = {'nokia9300': RA2_BUTTONS, 'nokia9300i': RA2_BUTTONS, 'nokia9500': RA2_BUTTONS, 'p910i': P910_BUTTONS,
+                'nokia7710': RM12_BUTTONS, 'p800': P910_BUTTONS, 'nokia6630': RM1_BUTTONS, 'nokian70': RM84_BUTTONS,
                 'nokia9210': RAE3_BUTTONS}.get(model, KEY_ROWS)
         for r, row in enumerate(rows):
             for c, (label, code) in enumerate(row):

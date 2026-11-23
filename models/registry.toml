@@ -17,6 +17,22 @@ model = ""                                    # not a device-model profile: QEMU
 status = "known"                              # V 04.10 boots to the home screen, games run from a card (2026-11-12); docs/eka1-ngage.md
 
 [[types]]
+code = "RAE-6"
+name = "9300"
+platform = "s80-2.0"
+soc = "omap1510"
+model = ""
+status = "known"
+
+[[types]]
+code = "RA-8"
+name = "9300i"
+platform = "s80-2.0"
+soc = "omap1510"
+model = ""
+status = "known"
+
+[[types]]
 code = "RA-2"
 name = "9500 Communicator"
 platform = "s80-2.0"                          # Symbian 7.0s, EKA1

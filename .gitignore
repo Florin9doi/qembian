@@ -28,6 +28,12 @@ src/standins/_shared/isireplies.h
 # Nokia 7650 (NHL-2NA, EKA1)
 /eka1/nhl2_rom/
 /eka1/nhl2/
+# Nokia 9300 (RAE-6)
+/eka1/rae6_rom/
+/eka1/rae6/
+# Nokia 9300i (RA-8)
+/eka1/ra8_rom/
+/eka1/ra8/
 # Nokia 9500 Communicator (RA-2)
 /eka1/ra2_rom/
 /eka1/ra2/
