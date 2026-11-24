@@ -6,6 +6,8 @@
 #   nos_standin.S       -> ../hw/arm/ngage_nos_stub.h        (N-Gage QD, -M ngage)
 #   nos_standin_nhl10.S -> ../hw/arm/ngage_nhl10_nos_stub.h  (Nokia 6600, -M nokia6600)
 #   nos_standin.S (NHL2) -> ../hw/arm/ngage_nhl2_nos_stub.h  (Nokia 7650, -M nokia7650)
+#   nos_standin.S (NHL-8) -> ../hw/arm/ngage_nhl8_nos_stub.h  (Nokia 3650, -M nokia3650)
+#   nos_standin.S (NHL-8X) -> ../hw/arm/ngage_nhl8x_nos_stub.h (Nokia 3660, -M nokia3660)
 #   nos_standin_nhl10.S (RM-51) -> ../hw/arm/ngage_rm51_nos_stub.h (Nokia 3230, -M nokia3230)
 #   doc_standin_ra2.S    -> ../hw/arm/ngage_ra2_doc_stub.h   (Nokia 9500 TrueFFS stand-in, -M nokia9500)
 #   doc_standin_p910.S   -> ../hw/arm/ngage_p910_doc_stub.h  (P910i TrueFFS dispatcher stand-in, -M p910i)
@@ -51,6 +53,16 @@ build nos_standin_nhl10.S 0x528943a4 ngage_rm51 ../hw/arm/ngage_rm51_nos_stub.h 
       --defsym HWCHUNK_CTOR=0x50349380 --defsym HWCHUNK_CREATE=0x503493f8 \
       --defsym RAM=0x8000755c --defsym ENOS_DELIVER=0x50452484
 build nos_standin.S       0x5148c1c4 ngage_nhl2  ../hw/arm/ngage_nhl2_nos_stub.h --defsym NHL2=1
+# Nokia 3650 (NHL-8 V 04.17) and 3660 (NHL-8X V 05.08): the N-Gage's stub at their NOS entries, with their own
+# ekern addresses (the 506-export numbering: ordinals 469, 394, 493, 7, 479, 64 as the N-Gage), read from the ROMs
+build nos_standin.S       0x5149d1e4 ngage_nhl8  ../hw/arm/ngage_nhl8_nos_stub.h \
+      --defsym KERN_VARIANT=0x5034e588 --defsym SET_POWER_MODEL=0x503567cc \
+      --defsym POWER_MODEL_CTOR=0x50356458 --defsym KERN_ADD_DFC=0x5035f0c8 \
+      --defsym RAM=0x8000bc38 --defsym THREAD_WRITE=0x5035b964 --defsym CHANNEL_COMPLETE=0x5034eea0
+build nos_standin.S       0x5149d334 ngage_nhl8x ../hw/arm/ngage_nhl8x_nos_stub.h \
+      --defsym KERN_VARIANT=0x5032b6ac --defsym SET_POWER_MODEL=0x503338f0 \
+      --defsym POWER_MODEL_CTOR=0x5033357c --defsym KERN_ADD_DFC=0x5033c1ec \
+      --defsym RAM=0x8000bda0 --defsym THREAD_WRITE=0x50338a88 --defsym CHANNEL_COMPLETE=0x5032bfc4
 build doc_standin_ra2.S   0x500623d8 ngage_ra2_doc ../hw/arm/ngage_ra2_doc_stub.h
 build bal_standin_ra2.S   0x50925ecc ngage_ra2_bal ../hw/arm/ngage_ra2_bal_stub.h
 build doc_standin_ra2.S   0x50061378 ngage_rae6_doc ../hw/arm/ngage_rae6_doc_stub.h

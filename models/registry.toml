@@ -51,10 +51,10 @@ status = "known"                              # V 5.06 boots to the home screen 
 [[types]]
 code = "NHL-8"                                # [from the firmware archive name "NHL-08 v.04.17 3650"; not read from a descriptor]
 name = "3650"
-platform = "s60-1.0"                          # S60 1st Edition, Symbian 6.1, EKA1 [I: the 7650's generation]
+platform = "s60-1.0"                          # S60 1st Edition, Symbian 6.1, EKA1 [I]; kernel is the N-Gage's generation (506 ekern exports) [V]
 soc = "upp-wd2"                               # 104 MHz UPP_WD2, ARM9 [U: Wikipedia]; flash container "WD2 BT2" [V]
 model = ""                                    # not a device-model profile: QEMU board -M nokia3650 (src/qemu-ngage/hw/arm/ngage.c)
-status = "known"                              # V 04.17 held; board copied from the 7650, not run yet
+status = "known"                              # V 04.17 held; board on the N-Gage's model with addresses read from the ROM, not run yet
 
 [[types]]
 code = "NHL-8X"                               # [from the firmware archive name "NHL-8X v.05.08 3660"; not read from a descriptor]
@@ -62,7 +62,7 @@ name = "3660"
 platform = "s60-1.0"                          # S60 1st Edition, Symbian 6.1, EKA1 [I]; the 3650 with a conventional keypad and a 16-bit display [U: Wikipedia]
 soc = "upp-wd2"                               # [I: as the 3650]; flash container "WD2 BT2" [V]
 model = ""                                    # not a device-model profile: QEMU board -M nokia3660 (src/qemu-ngage/hw/arm/ngage.c)
-status = "known"                              # V 05.08 held; board copied from the 7650, not run yet
+status = "known"                              # V 05.08 held; board on the N-Gage's model with addresses read from the ROM, not run yet
 
 [[types]]
 code = "NHL-10"

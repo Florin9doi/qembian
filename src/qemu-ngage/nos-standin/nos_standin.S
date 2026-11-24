@@ -32,13 +32,29 @@
         .equ    HWCHUNK_CTOR,   0x50316bf0      @ export 491: DPlatChunkHw::DPlatChunkHw() (6600 port)
         .equ    HWCHUNK_CREATE, 0x50316c64      @ export 102: create(this, phys, size, attribs)
         .else
+@ N-Gage QD (RH-29 V 04.10). The Nokia 3650 (NHL-8) and 3660 (NHL-8X) have this kernel (506 exports, the same ordinals,
+@ VT_STATUS_SET) at other addresses: build.sh passes each of these with --defsym.
+        .ifndef KERN_VARIANT
         .equ    KERN_VARIANT,   0x5032e7ac      @ ekern export 469: Kern::Variant()
+        .endif
+        .ifndef SET_POWER_MODEL
         .equ    SET_POWER_MODEL,0x50336a08      @ ekern export 394: Power::SetPowerModel()
+        .endif
+        .ifndef POWER_MODEL_CTOR
         .equ    POWER_MODEL_CTOR,0x50336694     @ ekern export 493: DPowerModel::DPowerModel()
+        .endif
+        .ifndef KERN_ADD_DFC
         .equ    KERN_ADD_DFC,   0x5033f304      @ ekern export 7: Kern::Add(TDfc&)
+        .endif
+        .ifndef RAM
         .equ    RAM,            0x8000c378      @ the NOS's bss (zeroed by nosstarter): free
+        .endif
+        .ifndef THREAD_WRITE
         .equ    THREAD_WRITE,   0x5033bba0      @ ekern export 479: DThread::Write(const TAny*, const TDesC8&)
+        .endif
+        .ifndef CHANNEL_COMPLETE
         .equ    CHANNEL_COMPLETE,0x5032f0c4     @ ekern export 64: DLogicalChannel::Complete(reqNo, reason) [V]
+        .endif
         .equ    VT_STATUS_SET,  0x128
         .endif
         .equ    PM_OBJ,         RAM + 0x100

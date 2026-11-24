@@ -1023,6 +1023,8 @@ static const MemoryRegionOps ngage_dbg_ops = {
 #include "ngage_nhl10_nos_stub.h"
 #include "ngage_rm51_nos_stub.h"
 #include "ngage_nhl2_nos_stub.h"
+#include "ngage_nhl8_nos_stub.h"
+#include "ngage_nhl8x_nos_stub.h"
 static bool ngage_flash_restored;    /* Q55: saved flash applied, not a factory-fresh phone */
 #include "ngage_isi.h"
 #include "ngage_keys.h"
@@ -1644,10 +1646,51 @@ static const NgageModel ngage_nhl2 = {
 };
 
 /*
- * Nokia 3650 (NHL-8 V 04.17) and 3660 (NHL-8X V 05.08): copies of the 7650's model (the same generation: Symbian 6.1,
- * S60 1st Edition, DCT4 UPP) made at machine init; every address in it is the 7650's and unchecked against these ROMs.
+ * Nokia 3650 (NHL-8 V 04.17) and 3660 (NHL-8X V 05.08): the N-Gage's generation of kernel, not the 7650's (506 ekern
+ * exports, the N-Gage's ordinals 469/394/493/7/479/64, bootstrap digests at ROM 0x8F00/0x8F18, three flash banks), so the
+ * model is the RH-29's with the values read from these ROMs (statically; none of it has been run). NOS alias 0x51400000
+ * as the N-Gage. Stub: nos_standin.S with the ROM's own ekern addresses (build.sh).
+ * [U] nchips 3 (the ROM spans chips 0..2 of the bank table; chip count and flash IDs are the N-Gage's defaults),
+ * the fatal-fault address in ngage_run.py, the 3660's RGB565 screen (3650: 12-bit as the N-Gage).
  */
-static NgageModel ngage_nhl8, ngage_nhl8x;
+static const uint32_t ngage_nhl8_nos_exports[][2] = {
+    { 0x514a1440, NGAGE_NHL8_NOS_SYM_nos_channel_ctor },
+    { 0x514a0ac4, NGAGE_NHL8_NOS_SYM_nos_channel_open },
+};
+
+static const NgageModel ngage_nhl8 = {
+    .name = "nokia3650",
+    .nchips = 3,
+    .rom_map = { { 0, 0x00700000, 0 }, { 0x00700000, 0x00400000, 1 }, { 0x00b00000, 0x006e0000, 2 } },
+    .nrom_map = 3,
+    .nos_alias = 0x51400000,
+    .stub = ngage_nhl8_nos_stub, .stub_len = sizeof(ngage_nhl8_nos_stub), .stub_va = NGAGE_NHL8_NOS_STUB_VA,
+    .nos_exports = ngage_nhl8_nos_exports, .nnos_exports = ARRAY_SIZE(ngage_nhl8_nos_exports),
+    .screen_chunk_ptr = 0x800066ec,
+    .nos_rx_dfc = 0x8000be38,           /* nos_standin.S RX_DFC / RX_FLAG with this ROM's RAM base */
+    .nos_rx_flag = 0x8000be30,
+    .flash_manuf = NGAGE_FLASH_MANUF, .flash_device = NGAGE_FLASH_DEVICE,
+};
+
+static const uint32_t ngage_nhl8x_nos_exports[][2] = {
+    { 0x514a147c, NGAGE_NHL8X_NOS_SYM_nos_channel_ctor },
+    { 0x514a0b00, NGAGE_NHL8X_NOS_SYM_nos_channel_open },
+};
+
+static const NgageModel ngage_nhl8x = {
+    .name = "nokia3660",
+    .nchips = 3,
+    .rom_map = { { 0, 0x00700000, 0 }, { 0x00700000, 0x00400000, 1 }, { 0x00b00000, 0x006d0000, 2 } },
+    .nrom_map = 3,
+    .nos_alias = 0x51400000,
+    .stub = ngage_nhl8x_nos_stub, .stub_len = sizeof(ngage_nhl8x_nos_stub), .stub_va = NGAGE_NHL8X_NOS_STUB_VA,
+    .nos_exports = ngage_nhl8x_nos_exports, .nnos_exports = ARRAY_SIZE(ngage_nhl8x_nos_exports),
+    .screen_chunk_ptr = 0x800066ec,
+    .screen_rgb565 = true,              /* [U] Wikipedia: 16-bit display */
+    .nos_rx_dfc = 0x8000bfa0,
+    .nos_rx_flag = 0x8000bf98,
+    .flash_manuf = NGAGE_FLASH_MANUF, .flash_device = NGAGE_FLASH_DEVICE,
+};
 
 /* the NOS exports enosdriver.ldd imports (hidden module 0x504128B0, nos_standin_nhl10.S) */
 static const uint32_t ngage_nhl10_nos_exports[][2] = {
@@ -1920,16 +1963,12 @@ static void ngage_init_nhl2(MachineState *machine)
 
 static void ngage_init_nhl8(MachineState *machine)
 {
-    ngage_nhl8 = ngage_rh29;
-    ngage_nhl8.name = "nokia3650";
     ngm = &ngage_nhl8;
     ngage_init(machine);
 }
 
 static void ngage_init_nhl8x(MachineState *machine)
 {
-    ngage_nhl8x = ngage_rh29;
-    ngage_nhl8x.name = "nokia3660";
     ngm = &ngage_nhl8x;
     ngage_init(machine);
 }
