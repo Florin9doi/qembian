@@ -49,6 +49,22 @@ model = ""                                    # not a device-model profile: QEMU
 status = "known"                              # V 5.06 boots to the home screen on -M nokia7650 (2026-11-18); docs/devices/nokia-7650-nhl2/bring-up.md
 
 [[types]]
+code = "NHL-8"                                # [from the firmware archive name "NHL-08 v.04.17 3650"; not read from a descriptor]
+name = "3650"
+platform = "s60-1.0"                          # S60 1st Edition, Symbian 6.1, EKA1 [I: the 7650's generation]
+soc = "upp-wd2"                               # 104 MHz UPP_WD2, ARM9 [U: Wikipedia]; flash container "WD2 BT2" [V]
+model = ""                                    # not a device-model profile: QEMU board -M nokia3650 (src/qemu-ngage/hw/arm/ngage.c)
+status = "known"                              # V 04.17 held; board copied from the 7650, not run yet
+
+[[types]]
+code = "NHL-8X"                               # [from the firmware archive name "NHL-8X v.05.08 3660"; not read from a descriptor]
+name = "3660"
+platform = "s60-1.0"                          # S60 1st Edition, Symbian 6.1, EKA1 [I]; the 3650 with a conventional keypad and a 16-bit display [U: Wikipedia]
+soc = "upp-wd2"                               # [I: as the 3650]; flash container "WD2 BT2" [V]
+model = ""                                    # not a device-model profile: QEMU board -M nokia3660 (src/qemu-ngage/hw/arm/ngage.c)
+status = "known"                              # V 05.08 held; board copied from the 7650, not run yet
+
+[[types]]
 code = "NHL-10"
 name = "6600"
 platform = "s60-2.0"                          # Symbian 7.0s, EKA1
@@ -339,6 +355,14 @@ platform = "s60-2.3"                         # S60 2nd Edition FP3, Symbian 8.1a
 soc = "omap1710"                             # TI OMAP1710 [V: kernel chip type 0xB5F7, custom.ldd]; the 6630's register map; BB5 modem
 model = ""                                   # not a device-model profile: QEMU board -M nokian70 (src/qemu-ngage/hw/arm/nokia9500.c + nokia6630_soc.c)
 status = "known"                             # V 5.1003.3 boots to the S60 home screen and Menu grid (2026-11-20); docs/devices/nokia-n70-rm84/bring-up.md
+
+[[types]]
+code = "RM-36"                                # [from the firmware archive name "RM-036 v.05.04 6680"; not read from a descriptor]
+name = "6680"
+platform = "s60-2.2"                          # S60 2nd Edition FP2, Symbian 8.0a, EKA1 [I: as the 6630]
+soc = "omap1610"                              # flash container "BB5 ... OMAP1610 GBBM" [V]; Wikipedia says OMAP1710 [U]: check
+model = ""                                    # not a device-model profile: QEMU board -M nokia6680 (src/qemu-ngage/hw/arm/nokia9500.c + nokia6630_soc.c)
+status = "known"                              # V 5.04.40 held; board copied from the 6630, not run yet
 
 [[types]]
 code = "RM-12"

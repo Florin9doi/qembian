@@ -1406,11 +1406,17 @@ static void rm1_patches_n70(uint8_t *core, gsize len)
 }
 
 static const Rm1Phone rm1_phone_6630 = { "nokia6630", "eka1/rm1/core", rm1_patches_6630, false };
+static const Rm1Phone rm1_phone_6680 = { "nokia6680", "eka1/rm36/core", rm1_patches_6630, false };
 static const Rm1Phone rm1_phone_n70 = { "nokian70", "eka1/rm84/core", rm1_patches_n70, true };
 
 static void nokia6630_init(MachineState *machine)
 {
     rm1_board_init(machine, &rm1_phone_6630);
+}
+
+static void nokia6680_init(MachineState *machine)
+{
+    rm1_board_init(machine, &rm1_phone_6680);
 }
 
 static void nokian70_init(MachineState *machine)
@@ -1581,6 +1587,26 @@ static const TypeInfo nokia6630_type = {
     .interfaces = arm_machine_interfaces,
 };
 
+static void nokia6680_class_init(ObjectClass *oc, const void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+
+    ra2_class_props(oc);
+    mc->desc = "Nokia 6680 (RM-36, BB5 OMAP1610, S60 2nd FP2, Symbian 8.0a EKA1) bring-up board";
+    mc->init = nokia6680_init;
+    mc->ignore_memory_transaction_failures = true;
+    mc->default_cpu_type = ARM_CPU_TYPE_NAME("arm926");     /* as the 6630 */
+    mc->default_ram_size = 64 * MiB;                        /* as the 6630 */
+    mc->default_ram_id = "nokia6680.sdram";
+}
+
+static const TypeInfo nokia6680_type = {
+    .name = MACHINE_TYPE_NAME("nokia6680"),
+    .parent = TYPE_MACHINE,
+    .class_init = nokia6680_class_init,
+    .interfaces = arm_machine_interfaces,
+};
+
 static void nokian70_class_init(ObjectClass *oc, const void *data)
 {
     MachineClass *mc = MACHINE_CLASS(oc);
@@ -1609,6 +1635,7 @@ static void nokia9500_register(void)
     type_register_static(&nokia9300i_type);
     type_register_static(&nokia9500_type);
     type_register_static(&nokia6630_type);
+    type_register_static(&nokia6680_type);
     type_register_static(&nokian70_type);
     type_register_static(&nokia7710_type);
 }

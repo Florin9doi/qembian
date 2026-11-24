@@ -1643,6 +1643,12 @@ static const NgageModel ngage_nhl2 = {
     .md5_entries = { 0x7fd0, 0x7fe8 },
 };
 
+/*
+ * Nokia 3650 (NHL-8 V 04.17) and 3660 (NHL-8X V 05.08): copies of the 7650's model (the same generation: Symbian 6.1,
+ * S60 1st Edition, DCT4 UPP) made at machine init; every address in it is the 7650's and unchecked against these ROMs.
+ */
+static NgageModel ngage_nhl8, ngage_nhl8x;
+
 /* the NOS exports enosdriver.ldd imports (hidden module 0x504128B0, nos_standin_nhl10.S) */
 static const uint32_t ngage_nhl10_nos_exports[][2] = {
     { 0x528887e8, NGAGE_NHL10_NOS_SYM_nos_export1 },
@@ -1815,7 +1821,7 @@ static void ngage_init(MachineState *machine)
             t->t[i].t = timer_new_ns(QEMU_CLOCK_VIRTUAL, ngage_timer_expire, &t->t[i]);
             t->t[i].irq = in[i];                                         /* IrqTimer<i> */
         }
-        ngage_keys_init(sys, in[25], ngm == &ngage_rm51 ? NGAGE_KPD_RM51 : (ngm == &ngage_nhl10 || ngm == &ngage_nhl2) ? NGAGE_KPD_NHL10 : NGAGE_KPD_NGAGE);  /* 7650: the 6600's ekeyb (94% same code, same key lists) [V] */                       /* keypad, IrqCTSI_IRQ (Q53) */
+        ngage_keys_init(sys, in[25], ngm == &ngage_rm51 ? NGAGE_KPD_RM51 : (ngm == &ngage_nhl10 || ngm == &ngage_nhl2 || ngm == &ngage_nhl8 || ngm == &ngage_nhl8x) ? NGAGE_KPD_NHL10 : NGAGE_KPD_NGAGE);  /* 7650: the 6600's ekeyb (94% same code, same key lists) [V] */                       /* keypad, IrqCTSI_IRQ (Q53) */
         ngage_lprf_setup();                                 /* Bluetooth, CBus dev 5, CTSI 2 */
         ngage_mmc_init(sys, in, ngage_mmc_file);            /* MMC 21-24, DMA channels 6.. [I] */
         memory_region_init_io(&t->mr, NULL, &ngage_timer_ops, t, "ngage.timers",
@@ -1912,6 +1918,22 @@ static void ngage_init_nhl2(MachineState *machine)
     ngage_init(machine);
 }
 
+static void ngage_init_nhl8(MachineState *machine)
+{
+    ngage_nhl8 = ngage_rh29;
+    ngage_nhl8.name = "nokia3650";
+    ngm = &ngage_nhl8;
+    ngage_init(machine);
+}
+
+static void ngage_init_nhl8x(MachineState *machine)
+{
+    ngage_nhl8x = ngage_rh29;
+    ngage_nhl8x.name = "nokia3660";
+    ngm = &ngage_nhl8x;
+    ngage_init(machine);
+}
+
 static void ngage_init_nhl10(MachineState *machine)
 {
     ngm = &ngage_nhl10;
@@ -1993,6 +2015,40 @@ static const TypeInfo ngage_nhl2_machine_type = {
     .interfaces = arm_machine_interfaces,
 };
 
+/* Nokia 3650 */
+static void ngage_nhl8_class_init(ObjectClass *oc, const void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+
+    ngage_machine_class_init(oc, data);
+    mc->desc = "Nokia 3650 (NHL-8, DCT4 UPP, Symbian 6.1 EKA1) bring-up board";
+    mc->init = ngage_init_nhl8;
+}
+
+static const TypeInfo ngage_nhl8_machine_type = {
+    .name = MACHINE_TYPE_NAME("nokia3650"),
+    .parent = TYPE_MACHINE,
+    .class_init = ngage_nhl8_class_init,
+    .interfaces = arm_machine_interfaces,
+};
+
+/* Nokia 3660 */
+static void ngage_nhl8x_class_init(ObjectClass *oc, const void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+
+    ngage_machine_class_init(oc, data);
+    mc->desc = "Nokia 3660 (NHL-8X, DCT4 UPP, Symbian 6.1 EKA1) bring-up board";
+    mc->init = ngage_init_nhl8x;
+}
+
+static const TypeInfo ngage_nhl8x_machine_type = {
+    .name = MACHINE_TYPE_NAME("nokia3660"),
+    .parent = TYPE_MACHINE,
+    .class_init = ngage_nhl8x_class_init,
+    .interfaces = arm_machine_interfaces,
+};
+
 /* Nokia 3230 */
 static void ngage_rm51_class_init(ObjectClass *oc, const void *data)
 {
@@ -2014,6 +2070,8 @@ static void ngage_machine_init(void)
 {
     type_register_static(&ngage_machine_type);
     type_register_static(&ngage_nhl2_machine_type);
+    type_register_static(&ngage_nhl8_machine_type);
+    type_register_static(&ngage_nhl8x_machine_type);
     type_register_static(&ngage_nhl10_machine_type);
     type_register_static(&ngage_rm51_machine_type);
 }

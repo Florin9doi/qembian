@@ -29,6 +29,24 @@ MODELS = {
         containers=0x80000398,              # K:: object containers (processes first)
         code=(0x5031af9c, 0x51170000),      # ROM code range for return-address scans
         ttb=0x0A074000),
+    'nokia3650': dict(
+        machine='nokia3650', root=ROOT / 'eka1/nhl8',
+        rom=ROOT / 'eka1/nhl8/output/rom/ROM.bin', ppm=ROOT / 'eka1/nhl8/extracted/NHL83041.726',
+        isi=ROOT / 'src/qemu-ngage/isi-replies.txt',
+        fatal=0x5030b0f4,
+        cur_thread=0x80006740,
+        containers=0x80000398,
+        code=(0x50307f9c, 0x50f00000),
+        ttb=0x0A074000),
+    'nokia3660': dict(
+        machine='nokia3660', root=ROOT / 'eka1/nhl8x',
+        rom=ROOT / 'eka1/nhl8x/output/rom/ROM.bin', ppm=ROOT / 'eka1/nhl8x/extracted/NHL83050.826',
+        isi=ROOT / 'src/qemu-ngage/isi-replies.txt',
+        fatal=0x5030b0f4,
+        cur_thread=0x80006740,
+        containers=0x80000398,
+        code=(0x50307f9c, 0x50f00000),
+        ttb=0x0A074000),
     'nokia6600': dict(
         machine='nokia6600', root=ROOT / 'eka1/nhl10',
         rom=ROOT / 'eka1/nhl10/output/rom/ROM.bin', ppm=ROOT / 'eka1/nhl10/extracted/NHL105530.26',
@@ -54,6 +72,17 @@ MODELS = {
         fatal=0x5001e664,                   # the kernel's fault routine (IRQs off, reason, variant hook +0x210); Kern::Fault 0x5001e65c (reason + 0x10000) falls into it [V]
         cur_thread=0x800018c8,              # ported from the 3230 (40 users agree)
         containers=0x8000048c,              # ported from the 3230 (13 users agree)
+        code=(0x50009f9c, 0x50c00000),
+        vectors=0xffff0000,
+        sdram=(0x10000000, 0x04000000),
+        ttb=0x10000000),
+    'nokia6680': dict(
+        machine='nokia6680', root=ROOT / 'eka1/rm36/core',
+        rom=ROOT / 'eka1/rm36/core/ROM.bin', ppm=ROOT / 'eka1/rm36/core',
+        isi=ROOT / 'src/qemu-ngage/isi-replies-rm1.txt',
+        fatal=0x5001e664,
+        cur_thread=0x800018c8,
+        containers=0x8000048c,
         code=(0x50009f9c, 0x50c00000),
         vectors=0xffff0000,
         sdram=(0x10000000, 0x04000000),
