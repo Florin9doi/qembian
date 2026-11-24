@@ -33,7 +33,7 @@ MODELS = {
         machine='nokia3650', root=ROOT / 'eka1/nhl8',
         rom=ROOT / 'eka1/nhl8/output/rom/ROM.bin', ppm=ROOT / 'eka1/nhl8/extracted/NHL83041.726',
         isi=ROOT / 'src/qemu-ngage/isi-replies.txt',
-        fatal=0x50000000,                   # not found yet: the fatal-fault routine is not located statically
+        fatal=0x5034dd44,                   # Kern::Fault's body (0x5034dd3c: reason + 0x10000, falls in; r0 = category, r1 = reason), same code as the 3660's [V static]
         cur_thread=0x80006740,              # N-Gage kernel-data layout (the 3650/3660 ROMs hold the same constants) [I]
         containers=0x80000398,
         code=(0x5033af9c, 0x51230000),      # ekern start .. an upper bound [I]
@@ -42,7 +42,7 @@ MODELS = {
         machine='nokia3660', root=ROOT / 'eka1/nhl8x',
         rom=ROOT / 'eka1/nhl8x/output/rom/ROM.bin', ppm=ROOT / 'eka1/nhl8x/extracted/NHL83050.826',
         isi=ROOT / 'src/qemu-ngage/isi-replies.txt',
-        fatal=0x50000000,                   # not found yet: the fatal-fault routine is not located statically
+        fatal=0x5032ae68,                   # Kern::Fault's body (0x5032ae60: reason + 0x10000, falls in; r0 = category, r1 = reason); it ends at the halt 0x5031b244 [V static]
         cur_thread=0x80006740,              # N-Gage kernel-data layout (the 3650/3660 ROMs hold the same constants) [I]
         containers=0x80000398,
         code=(0x50317f9c, 0x51230000),      # ekern start .. an upper bound [I]

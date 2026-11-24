@@ -10,7 +10,7 @@ typedef struct {
 
 /* nhl10: the Nokia 6600 key table, GPIO sense line and joystick port */
 /* key layouts: the N-Gage's matrix, the 6600's (two sub-matrices + joystick port; also the 7650), the 3230's */
-typedef enum { NGAGE_KPD_NGAGE, NGAGE_KPD_NHL10, NGAGE_KPD_RM51 } NgageKpdLayout;
+typedef enum { NGAGE_KPD_NGAGE, NGAGE_KPD_NHL8X, NGAGE_KPD_NHL10, NGAGE_KPD_RM51 } NgageKpdLayout;
 void ngage_keys_init(MemoryRegion *sys, qemu_irq irq, NgageKpdLayout layout);
 /* CTSI status 2 (0x0C150102): raise bits (bit 4 = Bluetooth module), same interrupt source */
 void ngage_ctsi2_raise(uint16_t bits);

@@ -94,6 +94,7 @@ typedef struct {
     uint32_t screen_chunk_ptr;      /* H-ngage-fb: kernel word holding the screen chunk (0 = off) */
     bool screen_rgb565;             /* screen chunk pixels: RGB565 (EColor64K), else 0RGB 4444 */
     uint32_t nos_rx_dfc, nos_rx_flag;   /* the stub's ISI delivery DFC and flag (0 = none) */
+    uint32_t nos_item14;            /* product data item 14 (the product code) when not 0: the 3660's product_info */
     uint32_t trace_mask_or;         /* bits set in the ROM header's trace mask (+0xD8) */
     uint16_t flash_manuf, flash_device;     /* the ID every chip answers (CFI01: Intel commands) */
     uint16_t flash_device1;                 /* chips 1.. if they differ (0 = flash_device) */
@@ -1245,6 +1246,10 @@ static void ngage_nos_write(void *opaque, hwaddr addr, uint64_t val, unsigned si
                 src = "";
             }
         }
+        if (item == 14 && ngm->nos_item14) {
+            value = ngm->nos_item14;
+            src = " (model product code)";
+        }
         if (item == 12 && ngage_flash_restored) {
             /* Q55: 105 makes Starter run the deep factory restore, which formats the user area
              * again; a phone whose flash was kept reports a normal start [I] */
@@ -1689,6 +1694,13 @@ static const NgageModel ngage_nhl8x = {
     .screen_rgb565 = true,              /* [U] Wikipedia: 16-bit display */
     .nos_rx_dfc = 0x8000bfa0,
     .nos_rx_flag = 0x8000bf98,
+    /*
+     * The 3660's product_info (ROM 0x50414330) reads item 14 and accepts the codes 0x2186404, 0x2186468, 0x21864cc,
+     * 0x2186530 and 0x2186594 (all lead to the same state 3) or value/100 in {0, 1004, 4400}; with 0 it reads item 15
+     * and, for an index of 0 or 1, ends in the "product_" panic (reason 0) at 0x50414ac8 [V static]. Which of the
+     * five is this phone's is not known: the lowest, as any of them takes the same path [U].
+     */
+    .nos_item14 = 0x2186404,
     .flash_manuf = NGAGE_FLASH_MANUF, .flash_device = NGAGE_FLASH_DEVICE,
 };
 
@@ -1864,7 +1876,10 @@ static void ngage_init(MachineState *machine)
             t->t[i].t = timer_new_ns(QEMU_CLOCK_VIRTUAL, ngage_timer_expire, &t->t[i]);
             t->t[i].irq = in[i];                                         /* IrqTimer<i> */
         }
-        ngage_keys_init(sys, in[25], ngm == &ngage_rm51 ? NGAGE_KPD_RM51 : (ngm == &ngage_nhl10 || ngm == &ngage_nhl2 || ngm == &ngage_nhl8 || ngm == &ngage_nhl8x) ? NGAGE_KPD_NHL10 : NGAGE_KPD_NGAGE);  /* 7650: the 6600's ekeyb (94% same code, same key lists) [V] */                       /* keypad, IrqCTSI_IRQ (Q53) */
+        ngage_keys_init(sys, in[25], ngm == &ngage_rm51 ? NGAGE_KPD_RM51
+            : (ngm == &ngage_nhl10 || ngm == &ngage_nhl2 || ngm == &ngage_nhl8) ? NGAGE_KPD_NHL10
+            : (ngm == &ngage_nhl8x) ? NGAGE_KPD_NHL8X
+            : NGAGE_KPD_NGAGE);  /* 7650: the 6600's ekeyb (94% same code, same key lists) [V] */                       /* keypad, IrqCTSI_IRQ (Q53) */
         ngage_lprf_setup();                                 /* Bluetooth, CBus dev 5, CTSI 2 */
         ngage_mmc_init(sys, in, ngage_mmc_file);            /* MMC 21-24, DMA channels 6.. [I] */
         memory_region_init_io(&t->mr, NULL, &ngage_timer_ops, t, "ngage.timers",
