@@ -1005,6 +1005,9 @@ static void nokia9210_init(MachineState *machine)
     g_autofree char *path = NULL;
     g_autofree gchar *rom = NULL;
     gsize len;
+    /* 9210i (RAE-5): the 0xFE0800-byte image needs an 8 MB bank 1 [copy of the RAE-3 board, unverified] */
+    bool is_i = !strcmp(object_get_typename(OBJECT(machine)), MACHINE_TYPE_NAME("nokia9210i"));
+    uint64_t bank1_size = is_i ? 8 * MiB : RAE3_BANK1_SIZE;
 
     if (!rae3_dir) {
         error_report("nokia9210: give the images with -M nokia9210,ppm=eka1/rae3/core (ROM.bin)");
@@ -1012,7 +1015,7 @@ static void nokia9210_init(MachineState *machine)
     }
     path = g_build_filename(rae3_dir, "ROM.bin", NULL);
     if (!g_file_get_contents(path, &rom, &len, NULL) || len <= RAE3_BANK0_SIZE ||
-        len > RAE3_BANK0_SIZE + RAE3_BANK1_SIZE) {
+        len > RAE3_BANK0_SIZE + bank1_size) {
         error_report("nokia9210: cannot read %s (or not an 8..12 MB core ROM)", path);
         exit(1);
     }
@@ -1020,7 +1023,7 @@ static void nokia9210_init(MachineState *machine)
 
     rae3_unknown(sys, 0, 0x100000000ULL, "nokia9210.unknown", -100);
     rae3_flash(sys, RAE3_BANK0, (uint8_t *)rom, RAE3_BANK0_SIZE, RAE3_BANK0_SIZE, 0x8864, "nokia9210.flash0");
-    rae3_flash(sys, RAE3_BANK1, (uint8_t *)rom + RAE3_BANK0_SIZE, len - RAE3_BANK0_SIZE, RAE3_BANK1_SIZE,
+    rae3_flash(sys, RAE3_BANK1, (uint8_t *)rom + RAE3_BANK0_SIZE, len - RAE3_BANK0_SIZE, bank1_size,
                0x8864, "nokia9210.flash1");
     /*
      * H-rae3-cs2: the ROM's upper part (offset 0x800000..) is at 0x02000000 + its offset: the kernel's page
@@ -1085,9 +1088,24 @@ static const TypeInfo nokia9210_type = {
     .interfaces = arm_machine_interfaces,
 };
 
+static void nokia9210i_class_init(ObjectClass *oc, const void *data)
+{
+    nokia9210_class_init(oc, data);
+    MACHINE_CLASS(oc)->desc = "Nokia 9210i Communicator (RAE-5, Series 80 1st, Symbian 6.0 EKA1) bring-up board";
+    object_class_property_set_description(oc, "ppm", "eka1/rae5/core (ROM.bin)");
+}
+
+static const TypeInfo nokia9210i_type = {
+    .name = MACHINE_TYPE_NAME("nokia9210i"),
+    .parent = TYPE_MACHINE,
+    .class_init = nokia9210i_class_init,
+    .interfaces = arm_machine_interfaces,
+};
+
 static void nokia9210_register(void)
 {
     type_register_static(&nokia9210_type);
+    type_register_static(&nokia9210i_type);
 }
 
 type_init(nokia9210_register)

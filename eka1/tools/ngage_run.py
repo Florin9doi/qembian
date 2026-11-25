@@ -98,6 +98,17 @@ MODELS = {
         sdram=(0x03000000, 0x01000000),
         thread_sp=0x160,                    # DThread saved SP (6.0 kernel; +0x158 on 6.1+) [V a thread's saved registers]
         ttb=0x03000000),
+    'nokia9210i': dict(
+        machine='nokia9210i', root=ROOT / 'eka1/rae5/core',
+        rom=ROOT / 'eka1/rae5/core/ROM.bin', ppm=ROOT / 'eka1/rae5/core',
+        isi=ROOT / 'src/qemu-ngage/isi-replies-rae3.txt',
+        fatal=0x50016270,                   # Kern::Fault body [V static ROM]
+        cur_thread=0x80007214,              # 21 literal users in the RAE-5 ROM [V code match]
+        containers=0x80000264,              # 17 literal users [V code match]
+        code=(0x50001f9c, 0x50fd0000),
+        sdram=(0x03000000, 0x01000000),
+        thread_sp=0x160,                    # DThread saved SP (6.0 kernel; +0x158 on 6.1+) [V a thread's saved registers]
+        ttb=0x03000000),
     'nokian70': dict(
         machine='nokian70', root=ROOT / 'eka1/rm84/core',
         rom=ROOT / 'eka1/rm84/core/ROM.bin', ppm=ROOT / 'eka1/rm84/core',

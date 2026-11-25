@@ -73,7 +73,7 @@ for i in range(10):
 TITLES = {'ngage': 'N-Gage QD', 'nokia6600': 'Nokia 6600', 'nokia7650': 'Nokia 7650',
           'nokia9300': 'Nokia 9300', 'nokia9300i': 'Nokia 9300i', 'nokia9500': 'Nokia 9500 Communicator',
           'p910i': 'Sony Ericsson P910i', 'nokia7710': 'Nokia 7710', 'p800': 'Sony Ericsson P800', 'nokia3230': 'Nokia 3230',
-          'nokia6630': 'Nokia 6630', 'nokian70': 'Nokia N70', 'nokia9210': 'Nokia 9210 Communicator',
+          'nokia6630': 'Nokia 6630', 'nokian70': 'Nokia N70', 'nokia9210': 'Nokia 9210 Communicator', 'nokia9210i': 'Nokia 9210i Communicator',
           'nokia3650': 'Nokia 3650', 'nokia3660': 'Nokia 3660', 'nokia6680': 'Nokia 6680'}
 
 # the clamshell Communicators (cover panel, lid, QWERTY): the 9300 and the 9500
@@ -169,7 +169,7 @@ class Phone(QtWidgets.QWidget):
         elif model in ('nokia6630', 'nokia6680'):       # the 6680: the 6630's keys [I]
             self.views = [('screen', {}, (176, 208), scale)]
             self.host_keys = RM1_KEYS
-        elif model == 'nokia9210':
+        elif model in ('nokia9210', 'nokia9210i'):
             self.views = [('screen', {}, (640, 200), max(1, scale // 2 + scale % 2))]
             self.host_keys = RAE3_HOST
         elif model == 'nokian70':
@@ -206,7 +206,7 @@ class Phone(QtWidgets.QWidget):
             self.labels[0].installEventFilter(self)       # the pen
         rows = {'nokia9300': RA2_BUTTONS, 'nokia9300i': RA2_BUTTONS, 'nokia9500': RA2_BUTTONS, 'p910i': P910_BUTTONS,
                 'nokia7710': RM12_BUTTONS, 'p800': P910_BUTTONS, 'nokia6630': RM1_BUTTONS, 'nokia6680': RM1_BUTTONS, 'nokian70': RM84_BUTTONS,
-                'nokia9210': RAE3_BUTTONS}.get(model, KEY_ROWS)
+                'nokia9210': RAE3_BUTTONS, 'nokia9210i': RAE3_BUTTONS}.get(model, KEY_ROWS)
         for r, row in enumerate(rows):
             for c, (label, code) in enumerate(row):
                 b = QtWidgets.QPushButton(label)
