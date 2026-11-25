@@ -14,6 +14,8 @@ BOARD = REPO / 'src/qemu-ngage/hw/arm/nokia9210.c'
 KEYS = REPO / 'src/qemu-ngage/hw/arm/nokia9210_keys.h'
 ROM = REPO / 'eka1/rae3/core/ROM.bin'
 NEED_ROM = unittest.skipUnless(ROM.exists(), '9210 core ROM not extracted')
+ROM_I = REPO / 'eka1/rae5/core/ROM.bin'          # the 9210i (RAE-5) flash image, rae3_extract.py --rae5
+NEED_ROM_I = unittest.skipUnless(ROM_I.exists(), '9210i flash image not extracted')
 
 
 def func(name):
@@ -63,6 +65,104 @@ class Rae3FlashProbe(unittest.TestCase):
         w = func('static void rae3_flash_write(')
         for c in ('0x90', '0xff', '0x40', '0x20', '0x50', '0x70', '0xb0', '0xd0'):
             self.assertIn('case %s' % c, w)
+
+
+class Rae5PmmUnlockRunsFromSameBank(unittest.TestCase):
+    """Crash rae5_pmm_unlock_nop_sled (9210i): cmt.ext's PMM set-up (0x50DC3AEC..0x50DC3B0E) writes 0x60, 0xD0, 0xFF
+    to each 8 KB block of bank 1 0x7F0000..0x7FE000 while running from bank 1. With one command mode per chip,
+    the fetches after 0xD0 read status 0x0080 (Thumb lsls: a NOP sled) up to 0x51000000, a prefetch abort.
+    The flash is read-while-write: a command switches only its own partition."""
+
+    def test_mode_is_per_partition(self):
+        s = BOARD.read_text()
+        self.assertIn('Rae3FlashMode mode[RAE3_FLASH_NPART];', s)
+        self.assertIn('#define RAE3_FLASH_PART  0x80000u', s)
+        r = func('static uint64_t rae3_flash_read(')
+        self.assertIn('f->mode[off / RAE3_FLASH_PART]', r)
+        w = func('static void rae3_flash_write(')
+        self.assertIn('&f->mode[off / RAE3_FLASH_PART]', w)
+        self.assertNotRegex(w, r'f->mode\s*=')                # no chip-wide mode switch left
+
+    def test_romd_only_when_every_partition_reads_array(self):
+        w = func('static void rae3_flash_write(')
+        self.assertIn('romd &= rae3_flash_reads_array(f->mode[i]);', w)
+
+    def test_top_parameter_blocks_are_8k(self):
+        """the PMM steps by 8 KB in the chip's top 64 KB: a 64 KB erase there would wipe its neighbours"""
+        b = func('static uint32_t rae3_flash_block(')
+        self.assertIn('f->size - RAE3_FLASH_BLOCK ? RAE3_FLASH_PARAM : RAE3_FLASH_BLOCK', b)
+        self.assertIn('#define RAE3_FLASH_PARAM 0x2000u', BOARD.read_text())
+
+    def test_partition_model(self):
+        """the same rule as the C code: the unlock's partition is not the one the code runs from"""
+        part = 0x80000
+        code, pmm = 0x50dc3af6 - 0x50000000 - 0x800000, 0x7f0000      # bank 1 offsets
+        self.assertNotEqual(code // part, pmm // part)
+
+    @NEED_ROM_I
+    def test_rom_unlock_loop(self):
+        rom = ROM_I.read_bytes()
+        h = lambda va: struct.unpack_from('<H', rom, va - 0x50000000)[0]
+        self.assertEqual(h(0x50dc3aec), 0x2560)                  # movs r5, #0x60
+        self.assertEqual(h(0x50dc3aee), 0x23d0)                  # movs r3, #0xD0
+        self.assertEqual(h(0x50dc3af2), 0x0371)                  # lsls r1, r6, #13: 8 KB steps
+        self.assertEqual(h(0x50dc3af6), 0x8005)                  # strh r5 (0x60)
+        self.assertEqual(h(0x50dc3afc), 0x8003)                  # strh r3 (0xD0)
+        self.assertEqual(h(0x50dc3b02), 0x20ff)                  # movs r0, #0xFF
+        self.assertEqual(h(0x50dc3b0c), 0x2e06)                  # cmp r6, #6: 7 blocks
+
+
+class Rae5DocStandin(unittest.TestCase):
+    """Stall rae5_doc_c_mount (9210i): EFile's C: is a DiskOnChip Millennium behind TrueFFS 4.x in Medata.pdd
+    ("Media.DiskOnChip"), which the board does not model. H-rae5-doc: TrueFFS's flCall (0x5008C730, ARM) is
+    replaced by doc_standin_rae5.S, which asks the block device at 0x0503F000 (VA 0x5803F000) for sectors."""
+
+    STUB = REPO / 'src/qemu-ngage/nos-standin/doc_standin_rae5.S'
+    HDR = REPO / 'src/qemu-ngage/hw/arm/ngage_rae5_doc_stub.h'
+
+    def test_stub_at_flcall_and_fits(self):
+        h = self.HDR.read_text()
+        self.assertIn('#define NGAGE_RAE5_DOC_NOS_STUB_VA 0x5008c730', h)
+        n = int(re.search(r'ngage_rae5_doc_nos_stub\[(\d+)\]', h).group(1))
+        self.assertLessEqual(n, 0x5008ca84 - 0x5008c730)         # flCall's body ends at the DOC init
+        self.assertIn('build doc_standin_rae5.S  0x5008c730 ngage_rae5_doc',
+                      (REPO / 'src/qemu-ngage/nos-standin/build.sh').read_text())
+
+    def test_stub_function_codes(self):
+        """4 mount, 0x12 info, 5 read, 6 write [V the wrapper's callers]; only 0x12, 5, 6 do work"""
+        a = self.STUB.read_text()
+        for code in ('#0x12', '#5', '#6'):
+            self.assertIn('cmp     r1, %s' % code, a)
+        self.assertNotIn('#0x38', a)       # info: word 0 only (the caller's buffer is 44 bytes, P910i cleared 56)
+
+    def test_blk_address_agrees(self):
+        """the stub's VA is the board's physical address in the kernel's peripheral window (0x05000000 -> 0x58000000)"""
+        va = int(re.search(r'\.equ\s+BLK,\s+(0x[0-9a-f]+)', self.STUB.read_text()).group(1), 16)
+        pa = int(re.search(r'#define RAE5_BLK_BASE\s+(0x[0-9a-f]+)u', BOARD.read_text()).group(1), 16)
+        self.assertEqual(va - 0x58000000, pa - 0x05000000)
+        self.assertLess(pa - 0x05000000, 0x40000)              # inside the 256 KB window
+
+    def test_patch_checks_old_code_only_on_9210i(self):
+        p = func('static void rae5_doc_patch(')
+        self.assertIn('0xf0, 0x40, 0x2d, 0xe9', p)              # stmdb sp!, {r4-r7, lr}
+        self.assertIn('memcmp(p, old, sizeof(old))', p)
+        self.assertRegex(func('static void nokia9210_init('), r'if \(is_i\) \{\s+rae5_doc_patch\(')
+
+    def test_dataflash_does_not_share_the_flash_file(self):
+        """on the 9210i flash=FILE is the DiskOnChip C:; the DataFlash writing it too would corrupt it"""
+        self.assertIn('if (rae3_flash_file && !rae3_is_i)', func('static void rae3_dataflash_init('))
+
+    @NEED_ROM_I
+    def test_rom_flcall_and_callers(self):
+        rom = ROM_I.read_bytes()
+        w = lambda va: struct.unpack_from('<I', rom, va - 0x50000000)[0]
+        self.assertEqual([w(0x5008c730 + 4 * i) for i in range(4)],
+                         [0xe92d40f0, 0xe1a06000, 0xe1a07001, 0xe1a04002])
+        self.assertEqual(w(0x5008d220), 0xe3a01004)              # mount: mov r1, #4
+        self.assertEqual(w(0x5008d254), 0x03a01012)              # moveq r1, #0x12 (volume info)
+        self.assertEqual(w(0x5008d268), 0x059d3018)              # ldreq r3, [sp, #0x18]: irData word 0
+        self.assertEqual(w(0x5008d26c), 0x01a03483)              # moveq r3, r3, lsl #9: sectors -> bytes
+        self.assertEqual(rom.find('Media.DiskOnChip'.encode('utf-16le')) + 0x50000000, 0x50098648)
 
 
 class Rae3Ram(unittest.TestCase):

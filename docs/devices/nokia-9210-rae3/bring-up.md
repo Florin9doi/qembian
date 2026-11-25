@@ -107,3 +107,24 @@ Kernel words (code match against the N-Gage's 6.1 kernel): current thread **0x80
 2. The cover display and keypad (phone side), sound, IrDA, the RTC (time at boot), the memory card (a card image
    behind the 0x0500A000 host).
 3. The language area (device 8 below 0x24DE00 in the .13x files) is not loaded; the core ROM's English is used.
+
+## Nokia 9210i (RAE-5, firmware 6.00) on `-M nokia9210i`
+
+State (2026-11-26): **the Series 80 Desk**, from the phone's own unmodified ROM, on the 9210's board with three
+differences. First boot ~2 min to the Home city wizard (the phone formats its blank C: itself: EPOC FAT12,
+15360 sectors), F1 through the wizard to the Desk; a second boot from the kept C: goes straight to the Desk (with
+the "Time and date" query: no RTC, as on the 9210). Evidence: `build/evidence/rae5/01-home-city.png`,
+`02-desk.png`, `03-second-boot-desk.png`.
+
+    python3 -I eka1/tools/rae3_extract.py RAE53006.000 eka1/rae5/core/ROM.bin --rae5 [RAE53006.00A]
+    python3 eka1/tools/ngage_phone.py --model nokia9210i --phone NAME [--fresh]   # C: in build/ngage/phones/NAME.flash
+
+| # | Stall | Evidence | Fix |
+|---|---|---|---|
+| i1 | the bootstrap's chip select 2 test | CS2 is a device, not ROM: an address-line test, then byte 0x02002000 must read 0x30 after 0xA5 twice to +4 [V 0x50000C8C] | no flash on CS2; 0x30 as a ready value (the DiskOnChip Millennium's chip ID) |
+| i2 | prefetch abort at 0x51000000 (the CPU in a forward slide from 0x50DC4C46) | cmt.ext unlocks its PMM (0x60 + 0xD0 + 0xFF on each 8 KB block of bank 1 0x7F0000..0x7FE000) **while running from bank 1** [V 0x50DC3AEC]; with one command mode per chip, every fetch after 0xD0 read status 0x0080 (Thumb `lsls`, a NOP sled). On the 9210 the PMM is on chip select 2 | H-rae3-rww: per-partition (512 KB [I]) command modes; 8 KB parameter blocks in the chip's top 64 KB. Test `Rae5PmmUnlockRunsFromSameBank` |
+| i3 | white screen; EFile's C: mount stops on the DiskOnChip | C: is a **DiskOnChip Millennium** behind **TrueFFS 4.x linked into Medata.pdd** ("Media.DiskOnChip", ARM). Its wrapper object (0x5008CBEC..0x5008D6F8: init 0x5008CC54, read 0x5008CC9C, write 0x5008CEAC, format 0x5008D10C) calls one dispatcher, **flCall(ctx, func, IOreq) at 0x5008C730**, which runs the DOC init 0x5008CA84 on first use; func 4 mount, 0x12 info (irData word 0 = sectors), 5 read, 6 write, 8 delete, 3 defragment, 0x10 format, 1 dismount, 0x13 after each; 0x37 = not mounted [V listing] | H-rae5-doc: `doc_standin_rae5.S` over flCall, block device at 0x0503F000 (VA 0x5803F000), C: in `flash=FILE`. Tests `Rae5DocStandin` |
+
+Decompilation: `build/evidence/ghidra-rae5/Medata.c` (+ `.lst`). The DataFlash controller of the 9210 is still
+instantiated but unused (the 9210i's Medata.pdd never touches 0x0500B000).
+

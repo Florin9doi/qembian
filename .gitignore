@@ -64,5 +64,9 @@ models/**/*.dll
 models/**/*.exe
 /eka1/rm84_rom/
 /eka1/rm84/
+# Nokia 9210 Communicator (RAE-3)
 /eka1/rae3_rom/
 /eka1/rae3/
+# Nokia 9210i Communicator (RAE-5)
+/eka1/rae5_rom/
+/eka1/rae5/

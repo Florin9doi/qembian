@@ -13,6 +13,7 @@
 #   doc_standin_p910.S   -> ../hw/arm/ngage_p910_doc_stub.h  (P910i TrueFFS dispatcher stand-in, -M p910i)
 #   doc_standin_ra2.S    -> ../hw/arm/ngage_rm12_doc_stub.h  (Nokia 7710: the 9500's stand-in at its DiskOnChip.dll, -M nokia7710)
 #   bal_standin_ra2.S    -> ../hw/arm/ngage_rm12_bal_stub.h  (Nokia 7710: the 9500's Bal stand-in, relocated)
+#   doc_standin_rae5.S   -> ../hw/arm/ngage_rae5_doc_stub.h  (Nokia 9210i TrueFFS flCall stand-in in Medata.pdd, -M nokia9210i)
 set -euo pipefail
 cd "$(dirname "$0")"
 T=${CROSS:-$HOME/gcc-builds/gcc-14.2.0/bin/arm-none-symbianelf-}
@@ -75,3 +76,4 @@ build doc_standin_p910.S  0x500a27c4 ngage_p910_doc ../hw/arm/ngage_p910_doc_stu
 build doc_standin_ra2.S   0x500ac1c8 ngage_rm12_doc ../hw/arm/ngage_rm12_doc_stub.h
 build bal_standin_ra2.S   0x501157dc ngage_rm12_bal ../hw/arm/ngage_rm12_bal_stub.h \
       --defsym RQCOMPLETE_SLOT=0x50080ab4 --defsym DMS_READY=0x50368dfc
+build doc_standin_rae5.S  0x5008c730 ngage_rae5_doc ../hw/arm/ngage_rae5_doc_stub.h

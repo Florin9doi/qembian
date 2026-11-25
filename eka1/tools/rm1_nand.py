@@ -17,6 +17,8 @@ stay all 0xFF (the driver's erased-page case) [V].
   rm1_nand.py OUT.img --rofs eka1/rm1/output/rom/rofs.img --rofx eka1/rm1/fiasco/v27/_pre@01050000.bin
   rm1_nand.py OUT.img --rofs eka1/rm84/output/rom/rofs.img --rofx eka1/rm84/fiasco/v05/_pre@01ae0000.bin \
       --user-start 0x2600000          (Nokia N70, RM-84: same controller and chip [I: mednand.pdd is the same size])
+  rm1_nand.py OUT.img --rofs eka1/rm36/output/rom/rofs.img --rofx eka1/rm36/fiasco/v27/_pre@01060000.bin
+                                      (Nokia 6680, RM-36: its ROFx is rebased onto the core, rebase_rofx)
 """
 import argparse, pathlib, struct, sys
 
@@ -88,6 +90,66 @@ def toc(records):
     return bytes(t)
 
 
+REBASE_WINDOW = 0x1000      # how far (bytes, forward) a core file may sit from where the ROFx expects it
+
+
+def rofs_entries(img, hdr):
+    """The file entries of the ROFS/ROFx header at img[hdr:]: [(entry offset in img, name, size, address,
+    uids)]. Offsets in the header and entries count from the ROFS start, which is img[hdr - base] with
+    base = the header's own ROFS-relative position (0 for the core; the core's iMaxImageSize for a ROFx,
+    whose directory pointer +0x08 is then base + 0x30). Entry: u16 iStructSize, 16-byte checked uids,
+    u8 iNameOffset, u8 iAtt, u32 iFileSize (uncompressed: executables are stored compressed), u32
+    iFileAddress, u8 iAttExtra, u8 iNameLength, name (UTF-16); entries 4-byte aligned, 0 = padding [V]."""
+    base = struct.unpack_from('<I', img, hdr + 0x08)[0] - 0x30
+    fe_off, fe_size = struct.unpack_from('<II', img, hdr + 0x10)
+    p, end = hdr + fe_off - base, hdr + fe_off - base + fe_size
+    out = []
+    if not hdr + 0x30 <= p <= end <= len(img):
+        return out                                  # no directory inside the image: nothing to list
+    while p + 2 <= end:
+        sz = struct.unpack_from('<H', img, p)[0]
+        if sz < 0x1e or p + sz > end:
+            p = (p + 4) & ~3
+            continue
+        size, addr = struct.unpack_from('<II', img, p + 0x14)
+        name = img[p + 0x1e:p + 0x1e + 2 * img[p + 0x1d]].decode('utf-16-le', 'replace')
+        out.append((p, name, size, addr, bytes(img[p + 2:p + 0x12])))
+        p = (p + sz + 3) & ~3
+    return out
+
+
+def rebase_rofx(rofs, rofx):
+    """-> (rofx with its references into the core ROFS moved to the core's own entries, count moved).
+
+    A ROFx lists every file of the core too; for unchanged files its entry points at the core's data. Nokia
+    6680 (RM-36 5.050440_B5): the .v27 was built against a core whose compressed executables differ by a
+    few bytes from the .C0R's (same names, sizes and UIDs), so its core addresses fall short by 4..288
+    bytes, growing through the image; "Dll Preload List" was read from 12 bytes before its start and
+    EFile's loader panicked (FSCLIENT 25) [V]. Each such entry is pointed at the core entry with the same
+    name, size and UIDs at or after the old address (nearest within REBASE_WINDOW); a ROFx built against
+    this core is left unchanged. H-rm36-rofx-rebase."""
+    if rofs[:4] != b'ROFS' or rofx[:4] != b'ROFx':
+        return rofx, 0
+    max_size = struct.unpack_from('<I', rofs, 0x2c)[0]
+    core = {}
+    for _, name, size, addr, uids in rofs_entries(rofs, 0):
+        core.setdefault((name, size, uids), []).append(addr)
+    out = bytearray(rofx)
+    moved = 0
+    for p, name, size, addr, uids in rofs_entries(rofx, 0):
+        if addr >= max_size or size == 0:
+            continue                                # the ROFx's own data, or an empty file
+        cands = core.get((name, size, uids), [])
+        if addr in cands:
+            continue
+        near = [b for b in cands if 0 < b - addr <= REBASE_WINDOW]
+        if not near:
+            raise ValueError('ROFx entry %r (0x%x bytes at 0x%x): no core file matches it' % (name, size, addr))
+        struct.pack_into('<I', out, p + 0x18, min(near))
+        moved += 1
+    return bytes(out), moved
+
+
 def layout(rofs, rofx, user_start=USER_START):
     """[(byte offset, data)], TOC records. USER_START: where C: begins (the N70's ROFS + ROFx pass 0x01000000:
     32 MB of them, so its image puts C: at 0x02600000)."""
@@ -100,6 +162,7 @@ def layout(rofs, rofx, user_start=USER_START):
         if max_size < len(rofs):
             raise ValueError('the ROFS iMaxImageSize 0x%x is smaller than the image 0x%x' % (max_size, len(rofs)))
         at = ROFS_START + max_size
+        rofx, _ = rebase_rofx(rofs, rofx)
         parts.append((at, rofx))
         end = at + len(rofx)
     if user_start % BLOCK or not ROFS_START < user_start < USER_END:
@@ -135,6 +198,10 @@ def main():
     ap.add_argument('--user-start', type=lambda v: int(v, 0), default=USER_START,
                     help='SOS-USER (C:) start in NAND bytes (default 0x%x; Nokia N70: 0x2600000)' % USER_START)
     a = ap.parse_args()
+    if a.rofx:
+        moved = rebase_rofx(pathlib.Path(a.rofs).read_bytes(), pathlib.Path(a.rofx).read_bytes())[1]
+        if moved:
+            print('ROFx: %d references into the core moved to the core\'s own entries (H-rm36-rofx-rebase)' % moved)
     img, recs = build(pathlib.Path(a.rofs).read_bytes(), pathlib.Path(a.rofx).read_bytes() if a.rofx else b'',
                       a.user_start)
     pathlib.Path(a.out).write_bytes(img)

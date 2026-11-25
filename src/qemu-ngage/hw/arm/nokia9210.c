@@ -35,6 +35,7 @@
 #include "ui/console.h"
 #include "ui/input.h"
 #include "nokia9210_keys.h"
+#include "ngage_rae5_doc_stub.h"
 
 #define RAE3_BANK0      0x00000000u
 #define RAE3_BANK0_SIZE (8 * MiB)
@@ -46,7 +47,9 @@
 #define RAE3_SRAM_SIZE  0x1000u          /* the DSP API RAM [V cmt.ext], 4 KB [I]; 0x05012000 is registers [V] */
 
 static char *rae3_dir;                  /* -M nokia9210,ppm=DIR */
-static char *rae3_flash_file;           /* -M nokia9210,flash=FILE: the DataFlash (C:), kept across boots */
+static char *rae3_flash_file;           /* -M nokia9210,flash=FILE: the DataFlash (C:), kept across boots;
+                                         * -M nokia9210i: the DiskOnChip C: image (rae5_blk_*) */
+static bool rae3_is_i;                  /* -M nokia9210i (RAE-5) */
 
 /* ---- catch-all for unmodelled addresses ---------------------------------------------------------- */
 
@@ -83,6 +86,8 @@ static void rae3_unknown_log(Rae3Unknown *u, hwaddr addr, bool wr, uint64_t val,
 static const struct { uint32_t addr, bits; } nokia9210_ready[] = {
     { 0x05003000, 0x800 },      /* cmt.ext 0x50A8F4A8: after 0x05002004 = 0x1000, 0x800 (a clock enable) waits for
                                  * bit 11 (its lock / ready) [V] */
+    { 0x02002000, 0x30 },       /* 9210i bootstrap 0x50000C8C: after 0xA5 written twice to +4, byte 0 must read 0x30
+                                 * (else 0x41, else error LED code 5); chip select 2 is a device there, not ROM [V static] */
     { 0x050121b4, 0x06 },       /* cmt.ext 0x50A1DEF2 / 0x50A1DF64: a byte serial interface (+0xB0 out, +0x1B0 in),
                                  * status bit 1 = sent, bit 2 = received [V] */
 };
@@ -158,32 +163,57 @@ static void rae3_unknown(MemoryRegion *sys, hwaddr base, uint64_t size, const ch
  * - pmmwrite.dll (the cellular side's permanent memory, PMM, at the top of chip select 2): 0x50 clear status,
  *   0x40 program one halfword, 0x20 + 0xD0 block erase, 0xB0 suspend / 0xD0 resume, 0x70 read status (bit 7 =
  *   ready, bits 3-5 errors), 0xFF read array [V 0x500BA400..0x500BA560].
- * Operations complete at once (status always ready). Erase block 64 KB [I]. A chip repeats over its chip
- * select's 16 MB window (the bootstrap sizes banks by finding the mirror).
+ * - cmt.ext (RAE-5 0x50DC3AEC..0x50DC3B0E): 0x60 + 0xD0 (unlock) then 0xFF on each 8 KB block of
+ *   0x7F0000..0x7FE000, the PMM at the top of bank 1, *running from bank 1 itself* [V].
+ * H-rae3-rww: read-while-write: a command switches only the partition it addresses (512 KB, Intel wireless flash
+ * [I]); the others keep reading the array. With one mode per chip the RAE-5 code above fetched status words
+ * (0x0080 = Thumb lsls, a NOP sled) after its 0xD0 and slid to 0x51000000 (prefetch abort) [V run].
+ * Operations complete at once (status always ready). Erase block 64 KB, 8 KB in the chip's top 64 KB (the
+ * parameter blocks of a top-boot part; the PMM steps by 8 KB) [I]. A chip repeats over its chip select's 16 MB
+ * window (the bootstrap sizes banks by finding the mirror).
  */
+#define RAE3_FLASH_BLOCK 0x10000u
+#define RAE3_FLASH_PARAM 0x2000u            /* the parameter blocks in the chip's top RAE3_FLASH_BLOCK */
+#define RAE3_FLASH_PART  0x80000u           /* a read-while-write partition */
+#define RAE3_FLASH_NPART 32                 /* up to 16 MB */
+
+typedef enum { RAE3_ARRAY, RAE3_ID, RAE3_STATUS, RAE3_PROGRAM, RAE3_ERASE, RAE3_CONFIG } Rae3FlashMode;
+
 typedef struct {
     MemoryRegion mr;
     uint8_t *data;
     uint32_t size;
     uint16_t device;
-    enum { RAE3_ARRAY, RAE3_ID, RAE3_STATUS, RAE3_PROGRAM, RAE3_ERASE } mode;
+    Rae3FlashMode mode[RAE3_FLASH_NPART];   /* per partition */
 } Rae3Flash;
 
-#define RAE3_FLASH_BLOCK 0x10000u
+static bool rae3_flash_reads_array(Rae3FlashMode m)
+{
+    return m == RAE3_ARRAY || m == RAE3_CONFIG;
+}
+
+/* the erase block holding chip offset off: its start and size */
+static uint32_t rae3_flash_block(const Rae3Flash *f, uint32_t off, uint32_t *len)
+{
+    *len = off >= f->size - RAE3_FLASH_BLOCK ? RAE3_FLASH_PARAM : RAE3_FLASH_BLOCK;
+    return off & ~(*len - 1);
+}
 
 static uint64_t rae3_flash_read(void *opaque, hwaddr addr, unsigned size)
 {
     Rae3Flash *f = opaque;
+    uint32_t off = addr % f->size;
     uint32_t w;
 
-    switch (f->mode) {
+    switch (f->mode[off / RAE3_FLASH_PART]) {
     case RAE3_ID:
         if (size == 4) {
             return 0x0089 | (uint32_t)f->device << 16;
         }
         return (addr & 2) ? f->device : 0x0089;            /* a halfword per identifier address */
     case RAE3_ARRAY:
-        w = ldl_le_p(f->data + ((addr & ~3u) % f->size));
+    case RAE3_CONFIG:       /* the code runs from this chip while the sequence is in flight (the real CPU's I-cache covers it) */
+        w = ldl_le_p(f->data + (off & ~3u));
         return (w >> ((addr & 3) * 8)) & (size == 4 ? 0xffffffffu : (1u << (size * 8)) - 1);
     default:
         return 0x80;                                     /* status: ready, no error */
@@ -194,32 +224,43 @@ static void rae3_flash_write(void *opaque, hwaddr addr, uint64_t val, unsigned s
 {
     Rae3Flash *f = opaque;
     uint32_t off = addr % f->size;
+    Rae3FlashMode *mode = &f->mode[off / RAE3_FLASH_PART];
+    bool romd = true;
 
-    if (f->mode == RAE3_PROGRAM) {                      /* the halfword (programming clears bits only) */
+    if (*mode == RAE3_PROGRAM) {                      /* the halfword (programming clears bits only) */
         uint16_t old = lduw_le_p(f->data + (off & ~1u));
 
         stw_le_p(f->data + (off & ~1u), old & (uint16_t)val);
         memory_region_set_dirty(&f->mr, off & ~1u, 2);
-        f->mode = RAE3_STATUS;
-    } else if (f->mode == RAE3_ERASE && (val & 0xff) == 0xd0) {
-        memset(f->data + (off & ~(RAE3_FLASH_BLOCK - 1)), 0xff, RAE3_FLASH_BLOCK);
-        memory_region_set_dirty(&f->mr, off & ~(RAE3_FLASH_BLOCK - 1), RAE3_FLASH_BLOCK);
-        f->mode = RAE3_STATUS;
+        *mode = RAE3_STATUS;
+    } else if (*mode == RAE3_ERASE && (val & 0xff) == 0xd0) {
+        uint32_t len, start = rae3_flash_block(f, off, &len);
+
+        memset(f->data + start, 0xff, len);
+        memory_region_set_dirty(&f->mr, start, len);
+        *mode = RAE3_STATUS;
+    } else if (*mode == RAE3_CONFIG) {                /* 0x60 + 0x03: set read configuration (burst timing in the
+                                                         * address bits, RAE-5 0x50E8DD1C); 0x60 + 0xD0/0x01/0x2F: block lock ops */
+        *mode = (val & 0xff) == 0x03 ? RAE3_ARRAY : RAE3_STATUS;
     } else {
         switch (val & 0xff) {
-        case 0x90: f->mode = RAE3_ID; break;
-        case 0xff: f->mode = RAE3_ARRAY; break;
-        case 0x40: case 0x10: f->mode = RAE3_PROGRAM; break;
-        case 0x20: f->mode = RAE3_ERASE; break;
-        case 0x50: case 0x70: case 0xb0: case 0xd0: f->mode = RAE3_STATUS; break;
+        case 0x60: *mode = RAE3_CONFIG; break;
+        case 0x90: *mode = RAE3_ID; break;
+        case 0xff: *mode = RAE3_ARRAY; break;
+        case 0x40: case 0x10: *mode = RAE3_PROGRAM; break;
+        case 0x20: *mode = RAE3_ERASE; break;
+        case 0x50: case 0x70: case 0xb0: case 0xd0: *mode = RAE3_STATUS; break;
         default:
             qemu_log_mask(LOG_UNIMP, "nokia9210: flash command %02x at %08x pc=%08x (not modelled)\n",
                           (unsigned)(val & 0xff), off, rae3_pc());
-            f->mode = RAE3_STATUS;
+            *mode = RAE3_STATUS;
             break;
         }
     }
-    memory_region_rom_device_set_romd(&f->mr, f->mode == RAE3_ARRAY);
+    for (int i = 0; i < RAE3_FLASH_NPART; i++) {
+        romd &= rae3_flash_reads_array(f->mode[i]);
+    }
+    memory_region_rom_device_set_romd(&f->mr, romd);   /* off: every read goes through rae3_flash_read */
 }
 
 static const MemoryRegionOps rae3_flash_ops = {
@@ -644,7 +685,7 @@ static void rae3_dataflash_init(MemoryRegion *sys)
     rae3_df.mem = g_malloc(RAE3_DF_SIZE);
     memset(rae3_df.mem, 0xff, RAE3_DF_SIZE);
     rae3_df_reset(&rae3_df);
-    if (rae3_flash_file) {
+    if (rae3_flash_file && !rae3_is_i) {    /* the 9210i's C: is the DiskOnChip (rae5_blk_*) */
         rae3_df_fd = open(rae3_flash_file, O_RDWR | O_CREAT, 0644);
         if (rae3_df_fd < 0) {
             error_report("nokia9210: cannot open %s", rae3_flash_file);
@@ -666,6 +707,132 @@ static void rae3_dataflash_init(MemoryRegion *sys)
     rae3_set_source(51, true);
     memory_region_init_io(m, NULL, &rae3_sf_ops, NULL, "nokia9210.sflash", 0x20);
     memory_region_add_subregion_overlap(sys, 0x0500b000, m, 10);
+}
+
+/* ---- 9210i: the DiskOnChip C: as a block device for the TrueFFS stand-in (H-rae5-doc) -------------- */
+
+/*
+ * The 9210i keeps C: on an M-Systems DiskOnChip Millennium (chip select 2, ID 0x30 at 0x02002000) behind
+ * TrueFFS 4.x linked into Medata.pdd. The chip is not modelled: doc_standin_rae5.S replaces TrueFFS's
+ * flCall (0x5008C730) and asks this device for sectors. Registers (32-bit) at physical 0x0503F000 = VA
+ * 0x5803F000 in the kernel's peripheral window:
+ *   +00 W command: 1 read, 2 write, 3 info (size into +18)
+ *   +08 first sector (512 bytes), +0C sector count, +10 buffer (virtual, the media driver's: kernel heap)
+ *   +14 R result: 0 ok, -2 out of range, -3 buffer not mapped
+ *   +18 R size in sectors (after info)
+ * C: is blank (zeros) on a new phone and the phone formats it [I size: a Millennium's 8 MB, less TrueFFS's
+ * spare blocks]. flash=FILE keeps it across boots, written through (a file of another size starts blank).
+ */
+#define RAE5_BLK_BASE    0x0503f000u
+#define RAE5_DOC_SECTORS 15360u                 /* 7.5 MB [I] */
+#define RAE5_DOC_BYTES   (RAE5_DOC_SECTORS * 512u)
+
+static struct {
+    uint32_t r[8];
+    uint8_t *data;
+    int fd;
+    unsigned logged;
+} rae5_blk = { .fd = -1 };
+
+static uint64_t rae5_blk_read(void *opaque, hwaddr a, unsigned size)
+{
+    return a < sizeof(rae5_blk.r) ? rae5_blk.r[a >> 2] : 0;
+}
+
+static void rae5_blk_write(void *opaque, hwaddr a, uint64_t v, unsigned size)
+{
+    uint32_t sec, cnt, va;
+
+    if (a >= sizeof(rae5_blk.r)) {
+        return;
+    }
+    rae5_blk.r[a >> 2] = v;
+    if (a != 0) {
+        return;
+    }
+    sec = rae5_blk.r[2];
+    cnt = rae5_blk.r[3];
+    va = rae5_blk.r[4];
+    if (rae5_blk.logged < 400) {
+        rae5_blk.logged++;
+        qemu_log_mask(LOG_UNIMP, "nokia9210i-blk: cmd %u sector %u count %u buf %08x\n", (unsigned)v, sec, cnt, va);
+    }
+    if (v == 3) {
+        rae5_blk.r[6] = RAE5_DOC_SECTORS;
+        rae5_blk.r[5] = 0;
+        return;
+    }
+    if (v != 1 && v != 2) {
+        rae5_blk.r[5] = -1;
+        return;
+    }
+    if ((uint64_t)sec + cnt > RAE5_DOC_SECTORS) {
+        rae5_blk.r[5] = -2;
+        qemu_log_mask(LOG_UNIMP, "nokia9210i-blk: sector %u+%u out of range\n", sec, cnt);
+        return;
+    }
+    if (!current_cpu || cpu_memory_rw_debug(current_cpu, va, rae5_blk.data + (uint64_t)sec * 512,
+                                            (uint64_t)cnt * 512, v == 1)) {
+        rae5_blk.r[5] = -3;
+        return;
+    }
+    if (v == 2 && rae5_blk.fd >= 0 &&
+        pwrite(rae5_blk.fd, rae5_blk.data + (uint64_t)sec * 512, (size_t)cnt * 512, (off_t)sec * 512) !=
+        (ssize_t)cnt * 512) {
+        warn_report("nokia9210i: flash file: write of sectors %u+%u failed", sec, cnt);
+    }
+    rae5_blk.r[5] = 0;
+}
+
+static const MemoryRegionOps rae5_blk_ops = {
+    .read = rae5_blk_read, .write = rae5_blk_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid = { .min_access_size = 4, .max_access_size = 4 },
+};
+
+/* flCall -> the stand-in, in the ROM image before it is copied into flash (bank 0) */
+static void rae5_doc_patch(uint8_t *rom)
+{
+    static const uint8_t old[] = { 0xf0, 0x40, 0x2d, 0xe9, 0x00, 0x60, 0xa0, 0xe1,     /* stmdb sp!,{r4-r7,lr}; mov r6,r0 */
+                                   0x01, 0x70, 0xa0, 0xe1, 0x02, 0x40, 0xa0, 0xe1 };   /* mov r7,r1; mov r4,r2 */
+    uint8_t *p = rom + (NGAGE_RAE5_DOC_NOS_STUB_VA - 0x50000000u);
+
+    QEMU_BUILD_BUG_ON(sizeof(ngage_rae5_doc_nos_stub) > 0x5008ca84 - NGAGE_RAE5_DOC_NOS_STUB_VA);
+    if (getenv("RAE5_NO_DOC_STANDIN")) {        /* experiments: the phone's own TrueFFS */
+        return;
+    }
+    if (memcmp(p, old, sizeof(old))) {
+        warn_report("nokia9210i: %08x is not TrueFFS's flCall; H-rae5-doc not applied", NGAGE_RAE5_DOC_NOS_STUB_VA);
+        return;
+    }
+    memcpy(p, ngage_rae5_doc_nos_stub, sizeof(ngage_rae5_doc_nos_stub));
+    info_report("nokia9210i: H-rae5-doc: Medata.pdd's TrueFFS -> block device stand-in");
+}
+
+static void rae5_doc_init(MemoryRegion *sys)
+{
+    MemoryRegion *m = g_new(MemoryRegion, 1);
+    struct stat st;
+
+    rae5_blk.data = g_malloc0(RAE5_DOC_BYTES);
+    if (rae3_flash_file) {
+        rae5_blk.fd = open(rae3_flash_file, O_RDWR | O_CREAT, 0644);
+        if (rae5_blk.fd < 0) {
+            error_report("nokia9210i: cannot open %s", rae3_flash_file);
+            exit(1);
+        }
+        if (fstat(rae5_blk.fd, &st) == 0 && st.st_size == RAE5_DOC_BYTES &&
+            pread(rae5_blk.fd, rae5_blk.data, RAE5_DOC_BYTES, 0) == RAE5_DOC_BYTES) {
+            info_report("nokia9210i: C: from %s", rae3_flash_file);
+        } else if (ftruncate(rae5_blk.fd, 0) || ftruncate(rae5_blk.fd, RAE5_DOC_BYTES)) {
+            error_report("nokia9210i: cannot size %s", rae3_flash_file);
+            exit(1);
+        } else {
+            info_report("nokia9210i: new phone: blank C: in %s", rae3_flash_file);
+        }
+    }
+    memory_region_init_io(m, NULL, &rae5_blk_ops, NULL, "nokia9210i.blk", 0x20);
+    memory_region_add_subregion_overlap(sys, RAE5_BLK_BASE, m, 10);
 }
 
 /*
@@ -1007,6 +1174,8 @@ static void nokia9210_init(MachineState *machine)
     gsize len;
     /* 9210i (RAE-5): the 0xFE0800-byte image needs an 8 MB bank 1 [copy of the RAE-3 board, unverified] */
     bool is_i = !strcmp(object_get_typename(OBJECT(machine)), MACHINE_TYPE_NAME("nokia9210i"));
+
+    rae3_is_i = is_i;
     uint64_t bank1_size = is_i ? 8 * MiB : RAE3_BANK1_SIZE;
 
     if (!rae3_dir) {
@@ -1021,6 +1190,10 @@ static void nokia9210_init(MachineState *machine)
     }
     ARMCPU *cpu = ARM_CPU(cpu_create(machine->cpu_type));
 
+    if (is_i) {
+        rae5_doc_patch((uint8_t *)rom);
+    }
+
     rae3_unknown(sys, 0, 0x100000000ULL, "nokia9210.unknown", -100);
     rae3_flash(sys, RAE3_BANK0, (uint8_t *)rom, RAE3_BANK0_SIZE, RAE3_BANK0_SIZE, 0x8864, "nokia9210.flash0");
     rae3_flash(sys, RAE3_BANK1, (uint8_t *)rom + RAE3_BANK0_SIZE, len - RAE3_BANK0_SIZE, bank1_size,
@@ -1034,13 +1207,18 @@ static void nokia9210_init(MachineState *machine)
      * to read as a floating data bus for the bootstrap's bank test 0x500006F0: the instruction word after
      * the load; with a chip there the test passes.)
      */
-    rae3_flash(sys, 0x02000000, (uint8_t *)rom + RAE3_BANK0_SIZE, len - RAE3_BANK0_SIZE, 8 * MiB,
-               0x8896, "nokia9210.flash2");
+    if (!is_i) {        /* RAE-5: chip select 2 is a device (address-line test + ID 0x30 at 0x02002000), not ROM */
+        rae3_flash(sys, 0x02000000, (uint8_t *)rom + RAE3_BANK0_SIZE, len - RAE3_BANK0_SIZE, 8 * MiB,
+                   0x8896, "nokia9210.flash2");
+    }
     memory_region_add_subregion(sys, RAE3_RAM_BASE, machine->ram);
     /* the DSP API RAM; the bootstrap runs code from it (MMU off), so it is RAM-like I/O plus the stand-in */
     memory_region_init_io(sram, NULL, &rae3_api_ops, NULL, "nokia9210.dsp-api", RAE3_SRAM_SIZE);
     memory_region_add_subregion(sys, RAE3_SRAM_BASE, sram);
     rae3_soc_init(sys, cpu);
+    if (is_i) {
+        rae5_doc_init(sys);
+    }
 }
 
 static char *rae3_get_ppm(Object *obj, Error **errp)

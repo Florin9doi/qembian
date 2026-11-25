@@ -325,6 +325,19 @@ Not modelled / not working (N70): as the 6630 (sound, network and SIM, DRM and t
 camera, USB, the boot-loader chain), and the OMAP1710's own blocks (only its IDs), the memory card (RS-MMC, medmmc.pdd:
 no card), the camera cover switch (ekeyp's "Switch" on GPIO4 bit 5 [I]).
 
+## Nokia 6680 (RM-36, S60 2nd FP2, EKA1, OMAP1610) on the 6630's board (-M nokia6680, src/qemu-ngage/hw/arm/nokia9500.c rm1_board_init + rm1_patches_6680, nokia6630_soc.c)
+
+Evidence: [devices/nokia-6680-rm36/bring-up.md](devices/nokia-6680-rm36/bring-up.md). The board, keys, NAND layout and
+ISI reply table are the 6630's (every H-rm1-* that is not a core patch applies unchanged); the 6680's own differences:
+
+| Hack | Where | Real implementation |
+|---|---|---|
+| **H-rm36-dsp-boot, -dsp-timeout, -bal-run, -eapgwc, -secenvinit, -drmhelper:** the 6630's core patches (H-rm1-*, same reasons) at RM-36 5.04.40's addresses (+0x7BD0 for DSP/Bal/EapGwc), old words checked | `nokia9500.c` `rm1_patches_6680` | as H-rm1-* |
+| **H-rm36-rofx-rebase:** the variant `RM36_5.050440_B5.v27` was built against a core ROFS other than the `.C0R`'s: it lists every core file (same names, sizes and UIDs), but past the first 0x17E6D4 bytes its addresses fall 4..288 bytes short, growing through the image, because a few compressed executables differ in size (libgles_cm.dll, Photoring.app, ...) [V]. "Dll Preload List" was read from 12 bytes before its start, EFile's loader panicked FSCLIENT 25 on the garbage name, EComServer then panicked USER 22 over and over and the boot stopped at the logo [V catch]. The NAND builder points each such entry (1023) at the core entry with the same name, size and UIDs at or just after the old address; a matching ROFx (6630, N70) is unchanged | `eka1/tools/rm1_nand.py` `rebase_rofx`; test `tests/rm1_nand_test.py` | the `.C0R` and `.v27` of one build (the variant the core was released with) |
+
+Not modelled / not working (6680): as the 6630 (sound, network and SIM, DRM and the secure environment, Bluetooth,
+camera, USB, the boot-loader chain); the files the variant meant for the other core's executables are those of this core.
+
 ## Nokia 9210 Communicator (RAE-3, Series 80 1st, Symbian 6.0, EKA1) on its own board (-M nokia9210, src/qemu-ngage/hw/arm/nokia9210.c)
 
 Evidence: [devices/nokia-9210-rae3/bring-up.md](devices/nokia-9210-rae3/bring-up.md). An undocumented Nokia ASIC
@@ -333,7 +346,9 @@ Evidence: [devices/nokia-9210-rae3/bring-up.md](devices/nokia-9210-rae3/bring-up
 | Hack | Where | Real implementation |
 |---|---|---|
 | **H-rae3-loader:** the core ROM (`eka1/tools/rae3_extract.py`) is placed in flash at 0 (8 MB) and behind chip selects 1 and 2 (the upper part, offset 0x800000.. at base + offset); the boot ROM / loaders are not run; the language area of the .13x files is not loaded | `nokia9210.c` `nokia9210_init` | the flash as the phone's loader programs it |
-| **H-rae3-flash:** Intel command set reduced to what the code uses (ID 0x0089/0x8864 bank 0, 0x8896 bank 2; program, 64 KB block erase [I], suspend, status always ready); chip select 2 holds the cellular PMM at its top; not saved across boots | `rae3_flash_*` | timed Intel flash, kept PMM |
+| **H-rae3-flash:** Intel command set reduced to what the code uses (ID 0x0089/0x8864 bank 0, 0x8896 bank 2; program, 64 KB block erase, 8 KB in the chip's top 64 KB [I], suspend, read configuration / lock 0x60, status always ready); chip select 2 holds the cellular PMM at its top (9210i: the top of bank 1); not saved across boots | `rae3_flash_*` | timed Intel flash, kept PMM |
+| **H-rae3-rww:** read-while-write flash: a command switches only its own 512 KB partition [I size]; the 9210i's cmt.ext unlocks its PMM blocks (bank 1 0x7F0000..) while running from bank 1 (one mode per chip = status words fetched as code, prefetch abort at 0x51000000) | `rae3_flash_*` (`mode[]`); test `tests/nokia9210_board_test.py` `Rae5PmmUnlockRunsFromSameBank` | the chip's real partition layout |
+| **H-rae5-doc:** the 9210i's DiskOnChip Millennium is not modelled: TrueFFS's flCall in Medata.pdd (0x5008C730) is replaced by `doc_standin_rae5.S`, which reads and writes sectors of a board block device (0x0503F000, VA 0x5803F000; 15360 sectors [I size]); C: blank on a new phone (the phone formats it), kept in `flash=FILE`, written through; delete/defragment/format do nothing | `rae5_blk_*`, `rae5_doc_patch` in `nokia9210.c`; `src/qemu-ngage/nos-standin/doc_standin_rae5.S`; test `Rae5DocStandin` | a DiskOnChip Millennium + NAND model under the phone's own TrueFFS |
 | **H-rae3-catchall:** "ready" bits (0x05003000 bit 11 clock lock, 0x050121B4 serial bus done) and self-clearing bits (0x05012060 bit 7 conversion) on the catch-all; everything else reads what was written | `nokia9210_ready[]`, `nokia9210_selfclear[]` | the clock, power-control serial bus and ADC devices |
 | **H-rae3-timers:** 5 timers at 13 MHz [I] and the 32 kHz timer (sources 55 and 56 together; +0x14 = the next period) | `rae3_timer_*` | the real timer block |
 | **H-rae3-intc:** two 64-source level controllers (pending = raw & enabled, lowest first [I]), 0x05006000 to FIQ, 0x05005000 to IRQ [I which pin] | `rae3_intc_*` | |

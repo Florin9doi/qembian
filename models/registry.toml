@@ -352,9 +352,9 @@ status = "known"                             # V 4.13 boots to the Series 80 Des
 code = "RAE-5"
 name = "9210i"
 platform = "s80-1"                           # Series 80 1st edition, Symbian 6.0, EKA1 [copy of the 9210]
-soc = "nokia-asic-ti925t"                    # as the 9210 [U: not run]
+soc = "nokia-asic-ti925t"                    # as the 9210 [V run]
 model = ""                                   # not a device-model profile: QEMU board -M nokia9210i (src/qemu-ngage/hw/arm/nokia9210.c)
-status = "profile-draft"                               # image built from RAE53006.000 + .00A (eka1/tools/rae3_extract.py --rae5); not run yet
+status = "known"                             # V 6.00 boots to the Series 80 Desk (2026-11-26); docs/devices/nokia-9210-rae3/bring-up.md "Nokia 9210i"
 
 [[types]]
 code = "RM-84"
@@ -370,7 +370,7 @@ name = "6680"
 platform = "s60-2.2"                          # S60 2nd Edition FP2, Symbian 8.0a, EKA1 [I: as the 6630]
 soc = "omap1610"                              # flash container "BB5 ... OMAP1610 GBBM" [V]; Wikipedia says OMAP1710 [U]: check
 model = ""                                    # not a device-model profile: QEMU board -M nokia6680 (src/qemu-ngage/hw/arm/nokia9500.c + nokia6630_soc.c)
-status = "known"                              # V 5.04.40 held; board copied from the 6630, not run yet
+status = "known"                              # V 5.04.40 boots to the S60 home screen and Menu grid (2026-11-26); docs/devices/nokia-6680-rm36/bring-up.md
 
 [[types]]
 code = "RM-12"
