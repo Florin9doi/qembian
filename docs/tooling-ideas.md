@@ -217,5 +217,11 @@ no kernel change. Record/replay (3) is still open.
 - **An OSE request decoder:** a tool that takes a signal number and prints its swbp.dll stub, the awaited reply
   signals and the decoder's reads (done by hand with grep over a listing, see docs/devices/se-p910i/how-it-was-done.md
   s. 3), and a `p910i-gsm:` log reader that lists UNANSWERED requests per run.
+- **EKA1 ROM disassembler without a cross toolchain:** `docs/eka1-ngage.md` "Reading the firmware" names an ARM
+  objdump under `~/gcc-builds` that is not on every machine. What worked (2026-11-26, the 7650 camera): wrap ROM.bin
+  in a one-section ARM ELF at 0x50000000 (40 lines of Python) and use `gdb-multiarch -batch -ex 'x/Ni VA'`; plus
+  an import-stub resolver (ARM `ldr ip,[pc]; ldr pc,[ip]` and Thumb `push {r6}; ldr r6,[pc,#8]` stubs -> module and
+  ordinal through each module's export table) and a DLL-reference lister. *Half an hour rebuilt by hand.* Cost:
+  small (`eka1/tools/rom_dis.py`). The Ghidra scripts now find the snap install themselves (`tools/ghidra/*.sh`).
 - **Leave finder:** a one-shot "who left with code N" (the CPU-state trace on User::Leave's first block, filtered
   and symbolised) instead of grepping qemu.log by hand.

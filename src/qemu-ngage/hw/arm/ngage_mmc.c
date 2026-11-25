@@ -62,6 +62,23 @@ typedef struct {
     Error *blocker;
 } NgageMmc;
 
+static NgageMmc *dma_s;
+static NgageDmaPeer dma_peer;
+
+void ngage_dma_set_peer(const NgageDmaPeer *peer)
+{
+    dma_peer = *peer;
+}
+
+void ngage_dma_finish(int ch)
+{
+    if (dma_s && ch >= 0 && ch < 7 && dma_s->dma_busy[ch]) {
+        dma_s->dma[ch][0x2c / 4] = 0xffffffff;     /* remaining count: all moved (camerapdd 0x503d7f9c checks it) */
+        dma_s->dma[ch][0x08 / 4] = 0;
+        dma_s->dma_busy[ch] = false;
+    }
+}
+
 static void mmc_irqs(NgageMmc *s)
 {
     bool rdy = s->rp < s->nresp;
@@ -363,6 +380,13 @@ static void dma_run(NgageMmc *s, int ch)
 
     if (from_fifo == to_fifo) {
         s->dma_busy[ch] = true;     /* not ours (the LCD's transfers): as before, the control word reads back */
+        if (r[0x08 / 4] == 2 && dma_peer.start &&
+            dma_peer.start(dma_peer.opaque, ch, src, dst, (uint32_t)(n * 4))) {
+            if (s->ngo++ < 2000) {
+                qemu_log_mask(LOG_UNIMP, "ngage-dma: ch %d %08x -> %08x, %" PRIu64 " bytes (peer)\n", ch, src, dst,
+                              n * 4);
+            }
+        }
         return;
     }
     s->dma_busy[ch] = false;
@@ -426,6 +450,9 @@ static void dma_write(void *opaque, hwaddr off, uint64_t val, unsigned size)
         if (val == 1 || val == 2) {
             dma_run(s, ch);
         } else if (val == 0) {
+            if (s->dma_busy[ch] && dma_peer.stop) {
+                dma_peer.stop(dma_peer.opaque, ch);
+            }
             s->dma_busy[ch] = false;
             qemu_set_irq(s->dma_irq[ch], 0);
         }
@@ -459,6 +486,7 @@ void ngage_mmc_init(MemoryRegion *sys, qemu_irq *intc, const char *card)
 {
     NgageMmc *s = g_new0(NgageMmc, 1);
 
+    dma_s = s;
     s->fd = -1;
     if (card) {
         int fd = open(card, O_RDWR);

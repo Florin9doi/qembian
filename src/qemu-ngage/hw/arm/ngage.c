@@ -18,6 +18,8 @@
  *   0x0DE00000  kernel debug output (trace port), to serial 0                 Q18
  *   0x0C150420  CBus master to the external chips (device 1: power ASIC)       Q11
  *               device 5: the Bluetooth module (LPRF, ngage_lprf.c), its interrupt CTSI 2 bit 4
+ *   0x0C121000  CCP camera receiver (-M nokia7650: ngage_cam.c test pattern, interrupt 86; the sensor's I2C on
+ *               GPIO 0x0C15020C/0x0C150210 bits 7/8, frames by DMA from 0x0C150554)
  *   0x0C000000  UPP peripherals and internal SRAM (0x0C004000), virtual 0x58000000: catch-all
  *
  * Machines: -M ngage (N-Gage QD, RH-29) and -M nokia6600 (Nokia 6600, NHL-10, Symbian 7.0s,
@@ -48,6 +50,7 @@
 #include "ngage_mmc.h"
 #include "ngage_keys.h"
 #include "ngage_lprf.h"
+#include "ngage_cam.h"
 #include "accel/tcg/cpu-loop.h"
 #include "tcg/insn-start-words.h"
 #include "exec/target_page.h"
@@ -104,6 +107,7 @@ typedef struct {
                                        finds a valid clock (H-nhl10-rtc) */
     uint32_t md5_entries[2];        /* ROM offsets of the bootstrap's digest entries (H-ngage-md5);
                                        0 = the N-Gage's 0x8F00 / 0x8F18 */
+    bool camera;                    /* the 7650's camera (ngage_cam.c) and keypad slide */
 } NgageModel;
 
 static const NgageModel *ngm;
@@ -448,6 +452,141 @@ static const MemoryRegionOps ngage_cbus_ops = {
     .valid = { .min_access_size = 2, .max_access_size = 4 },
     .impl = { .min_access_size = 2, .max_access_size = 2 },
 };
+
+/* ---- camera (Nokia 7650): CCP receiver, frames, DMA source (ngage_cam.c) -------------------- */
+/*
+ * camerapdd.pdd drives the sensor and the UPP's CCP receiver itself (docs/devices/nokia-7650-nhl2/camera.md); the
+ * board supplies a test pattern: while the receiver is on (0x0C121038 bit 0) a frame ends every NGAGE_CAM_FRAME_NS.
+ * If a DMA transfer from the CCP FIFO is armed then, the frame lands in its buffer and the channel completes
+ * (remaining count -1), then the frame-end event raises IrqCCPStatus (86) unless masked.
+ */
+#define NGAGE_CAM_FRAME_NS  (50 * 1000 * 1000)     /* 20 frames/s; camerapdd's watchdog (70 ms ticks)
+                                                      restarts the receiver after two ticks without a frame [V] */
+
+static NgageCam ngage_cam;
+static QEMUTimer *ngage_cam_timer;
+static qemu_irq ngage_cam_irq_line;
+static int ngage_cam_dma_ch = -1;
+static uint32_t ngage_cam_dma_dst, ngage_cam_dma_bytes;
+static bool ngage_slide_closed;                 /* machine property slide-closed (7650) */
+
+static void ngage_cam_update(void)
+{
+    qemu_set_irq(ngage_cam_irq_line, ngage_cam_irq(&ngage_cam));
+    if (!ngage_cam_streaming(&ngage_cam)) {
+        timer_del(ngage_cam_timer);
+    } else if (!timer_pending(ngage_cam_timer)) {
+        timer_mod(ngage_cam_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + NGAGE_CAM_FRAME_NS);
+    }
+}
+
+static void ngage_cam_frame(void *opaque)
+{
+    static uint16_t nlog;
+
+    if (ngage_cam_dma_ch >= 0) {
+        g_autofree uint8_t *buf = g_malloc(ngage_cam_dma_bytes);
+        int ch = ngage_cam_dma_ch;
+
+        ngage_cam_pattern(buf, ngage_cam_dma_bytes, ngage_cam.frames, ngage_cam_rgb444(&ngage_cam));
+        address_space_write(&address_space_memory, ngage_cam_dma_dst, MEMTXATTRS_UNSPECIFIED, buf,
+                            ngage_cam_dma_bytes);
+        ngage_cam_dma_ch = -1;
+        ngage_dma_finish(ch);
+        if (ngage_log_hot(&nlog)) {
+            qemu_log_mask(LOG_UNIMP, "ngage-cam: frame %u, %u bytes %s to %08x (DMA ch %d)\n", ngage_cam.frames,
+                          ngage_cam_dma_bytes, ngage_cam_rgb444(&ngage_cam) ? "RGB444" : "YUV422",
+                          ngage_cam_dma_dst, ch);
+        }
+    }
+    ngage_cam_frame_end(&ngage_cam);
+    ngage_cam_update();
+}
+
+static bool ngage_cam_dma_start(void *opaque, int ch, uint32_t src, uint32_t dst, uint32_t bytes)
+{
+    if ((src & 0x00ffffff) != (CAM_CCP_FIFO & 0x00ffffff) || (src >> 24 != 0x10 && src >> 24 != 0x0c) ||
+        !bytes || bytes > 640 * 480 * 2 ||
+        !address_space_access_valid(&address_space_memory, dst, bytes, true, MEMTXATTRS_UNSPECIFIED)) {
+        return false;
+    }
+    ngage_cam_dma_ch = ch;
+    ngage_cam_dma_dst = dst;
+    ngage_cam_dma_bytes = bytes;
+    return true;
+}
+
+static void ngage_cam_dma_stop(void *opaque, int ch)
+{
+    if (ch == ngage_cam_dma_ch) {
+        ngage_cam_dma_ch = -1;
+    }
+}
+
+static uint64_t ngage_ccp_read(void *opaque, hwaddr addr, unsigned size)
+{
+    uint32_t v = ngage_cam_ccp_read(&ngage_cam, addr & ~3u);
+
+    ngage_cam_update();
+    return (v >> ((addr & 3) * 8)) & (size == 4 ? 0xffffffffu : (1u << (size * 8)) - 1);
+}
+
+static void ngage_ccp_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
+{
+    static uint16_t wcount[16];
+    unsigned off = addr & ~3u, sh = (addr & 3) * 8;
+    uint32_t mask = size == 4 ? 0xffffffffu : ((1u << (size * 8)) - 1) << sh;
+    uint32_t w = off == CAM_CCP_STATUS ? 0 : ngage_cam.ccp[off / 4];
+
+    w = (w & ~mask) | (((uint32_t)val << sh) & mask);
+    if (ngage_log_hot(&wcount[(off / 4) & 15])) {
+        qemu_log_mask(LOG_UNIMP, "ngage-cam: W ccp +%02x = %08x pc=%08x\n", off, w, ngage_pc());
+    }
+    ngage_cam_ccp_write(&ngage_cam, off, w);
+    ngage_cam_update();
+}
+
+static const MemoryRegionOps ngage_ccp_ops = {
+    .read = ngage_ccp_read, .write = ngage_ccp_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid = { .min_access_size = 1, .max_access_size = 4 },
+    .impl = { .min_access_size = 1, .max_access_size = 4 },
+};
+
+static uint16_t ngage_cam_lines(void *opaque)
+{
+    return ngage_cam_gpio_lines(&ngage_cam);
+}
+
+static void ngage_cam_drive(void *opaque, uint16_t drive)
+{
+    ngage_cam_gpio_drive(&ngage_cam, drive);
+}
+
+static void ngage_cam_log(void *opaque, const char *msg)
+{
+    static uint16_t nlog;
+
+    if (ngage_log_hot(&nlog)) {
+        qemu_log_mask(LOG_UNIMP, "ngage-cam: %s\n", msg);
+    }
+}
+
+static void ngage_cam_setup(MemoryRegion *sys, qemu_irq irq)
+{
+    static MemoryRegion mr;
+    static const NgageDmaPeer peer = { ngage_cam_dma_start, ngage_cam_dma_stop, NULL };
+
+    ngage_cam.log = ngage_cam_log;
+    ngage_cam_init(&ngage_cam);
+    ngage_cam_irq_line = irq;
+    ngage_cam_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, ngage_cam_frame, NULL);
+    memory_region_init_io(&mr, NULL, &ngage_ccp_ops, NULL, "ngage.ccp", CAM_CCP_SIZE);
+    memory_region_add_subregion(sys, CAM_CCP_BASE, &mr);
+    ngage_dma_set_peer(&peer);
+    ngage_keys_gpio_peer(ngage_cam_lines, ngage_cam_drive, NULL);
+    ngage_keys_slide(true, ngage_slide_closed);
+}
 
 /* ---- interrupt controller (Q16) ---------------------------------------- */
 /*
@@ -1648,6 +1787,7 @@ static const NgageModel ngage_nhl2 = {
     /* bootstrap 0x2A8C checks {start, end, MD5} entries at ROM 0x7FD0 (PPM) / 0x7FE8 (MCU,
      * 0x50009000-0x50EF9FFF, stored digest wrong as on the N-Gage) and halts at 0x2A84 [V] */
     .md5_entries = { 0x7fd0, 0x7fe8 },
+    .camera = true,
 };
 
 /*
@@ -1882,6 +2022,9 @@ static void ngage_init(MachineState *machine)
             : NGAGE_KPD_NGAGE);  /* 7650: the 6600's ekeyb (94% same code, same key lists) [V] */                       /* keypad, IrqCTSI_IRQ (Q53) */
         ngage_lprf_setup();                                 /* Bluetooth, CBus dev 5, CTSI 2 */
         ngage_mmc_init(sys, in, ngage_mmc_file);            /* MMC 21-24, DMA channels 6.. [I] */
+        if (ngm->camera) {
+            ngage_cam_setup(sys, in[CAM_IRQ]);              /* 7650: camera (IrqCCPStatus) + slide */
+        }
         memory_region_init_io(&t->mr, NULL, &ngage_timer_ops, t, "ngage.timers",
                               0x20 * NGAGE_TIMERS);
         memory_region_add_subregion(sys, NGAGE_TIMER_BASE, &t->mr);       /* Q13 Q17 Q31 */
@@ -2052,12 +2195,28 @@ static const TypeInfo ngage_nhl10_machine_type = {
     .interfaces = arm_machine_interfaces,
 };
 
-/* Nokia 7650 */
+/* Nokia 7650: its keypad slide (the camera lens is behind it), open unless slide-closed=on */
+static bool ngage_get_slide(Object *obj, Error **errp)
+{
+    return ngage_cam_timer ? ngage_keys_slide_closed() : ngage_slide_closed;
+}
+
+static void ngage_set_slide(Object *obj, bool value, Error **errp)
+{
+    ngage_slide_closed = value;
+    if (ngage_cam_timer) {                          /* the machine runs: move it now */
+        ngage_keys_slide(true, value);
+    }
+}
+
 static void ngage_nhl2_class_init(ObjectClass *oc, const void *data)
 {
     MachineClass *mc = MACHINE_CLASS(oc);
 
     ngage_machine_class_init(oc, data);
+    object_class_property_add_bool(oc, "slide-closed", ngage_get_slide, ngage_set_slide);
+    object_class_property_set_description(oc, "slide-closed",
+        "the keypad slide is closed (covers the camera; F7 toggles it)");
     mc->desc = "Nokia 7650 (NHL-2NA, DCT4 UPP, Symbian 6.1 EKA1) bring-up board";
     mc->init = ngage_init_nhl2;
 }

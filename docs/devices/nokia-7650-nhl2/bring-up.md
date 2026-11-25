@@ -13,9 +13,16 @@ kernel-data layout). It runs on the N-Gage board as `-M nokia7650` (an `NgageMod
 - Window: `python3 eka1/tools/ngage_phone.py --model nokia7650` (flash build/ngage/phones/nokia7650.flash;
   the first boot formats C:, white screen for about a minute).
 - Check: `python3 tests/ngage-boot-check.py --model nokia7650` (all three phones after a board change).
+- **Camera (2026-11-26):** works with a board test pattern (no host camera): viewfinder, still capture saved as
+  JPEG under Images, stand-by with the slide closed. The phone's own camerapdd drives a modelled sensor (I2C)
+  and CCP receiver; details in [camera.md](camera.md) (H-nhl2-camera). Check:
+  `python3 tests/ngage-boot-check.py --model nokia7650 --camera`.
+- **Keypad slide (2026-11-26):** the switch line 0x0C15020C bit 9 (H-nhl2-slide); the phone starts with it open.
+  Closing it (F7, the window's Slide button, `qom-set /machine slide-closed true`) locks the keypad as on the
+  phone; opening unlocks.
 - Open: self-test `59 02` from object 0x36 is unanswered (the N-Gage table answers 59 01); the reply
-  table is the N-Gage's, unchecked for the 7650; the menu, camera, IrDA, Bluetooth and sound are
-  untried. Same "boots, not really working yet" level as the 6600 (docs/roadmap.md).
+  table is the N-Gage's, unchecked for the 7650; IrDA, Bluetooth and sound are untried. Same "boots,
+  not really working yet" level as the 6600 (docs/roadmap.md).
 
 Marks: **[V]** verified in the firmware or a run, **[I]** inferred.
 

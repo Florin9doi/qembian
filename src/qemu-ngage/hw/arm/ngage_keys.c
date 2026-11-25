@@ -142,6 +142,11 @@ typedef struct {
     uint16_t regs[16];
     uint8_t xc, xr, ier;            /* driven columns, driven rows, row interrupt enable */
     uint8_t pressed[6];             /* pressed[row] = column bits */
+    /* 7650: the camera sensor's I2C pins on this port (ngage_cam.c) and the keypad slide on its switch line */
+    uint16_t (*gpio_lines)(void *opaque);
+    void (*gpio_drive)(void *opaque, uint16_t drive);
+    void *gpio_opaque;
+    bool has_slide, slide_closed;
 } NgageKpd;
 
 static NgageKpd kpd;
@@ -231,6 +236,40 @@ static void ctsi_write(void *opaque, hwaddr a, uint64_t v, unsigned size)
     kpd_update(k);
 }
 
+void ngage_keys_gpio_peer(uint16_t (*lines)(void *opaque), void (*drive)(void *opaque, uint16_t drive),
+                          void *opaque)
+{
+    kpd.gpio_lines = lines;
+    kpd.gpio_drive = drive;
+    kpd.gpio_opaque = opaque;
+}
+
+/*
+ * H-nhl2-slide: the 7650's keypad slide on the switch line 0x0C15020C bit 9, which ekeyb reads (0x50367370: state bit
+ * 24 = line low) and reports as 0xA8/0xA9; SysAp turns it into System Agent state 0x100052DD, which Camera.app reads
+ * ("Camera on stand-by: Open cover" while it is 1). Low = open [V run]. A change raises CTSI status 2 bit 6 (0x40), the
+ * bit ekeyb enables at 0x0C150216 next to the joystick's [I].
+ */
+#define NGAGE_CTSI2_SLIDE 0x0040
+
+void ngage_keys_slide(bool present, bool closed)
+{
+    bool change = kpd.has_slide && closed != kpd.slide_closed;
+
+    kpd.has_slide = present;
+    kpd.slide_closed = closed;
+    if (change) {
+        qemu_log_mask(LOG_UNIMP, "ngage-key: slide %s\n", closed ? "closed" : "open");
+        kpd.ctsi2 |= NGAGE_CTSI2_SLIDE;
+        kpd_update(&kpd);
+    }
+}
+
+bool ngage_keys_slide_closed(void)
+{
+    return kpd.slide_closed;
+}
+
 void ngage_ctsi2_raise(uint16_t bits)
 {
     kpd.ctsi2 |= bits;
@@ -269,7 +308,14 @@ static uint64_t joy_read(void *opaque, hwaddr a, unsigned size)
         return ~k->joy & 0xffff;
     }
     if (a == 0x0c) {
-        return k->joy_regs[6] | 0x0200;         /* switch not asserted [I] */
+        uint16_t v = k->joy_regs[6] | 0x0200;   /* switch not asserted [I] */
+        if (k->has_slide && !k->slide_closed) {
+            v &= ~0x0200;                       /* 7650: slide open = line low (H-nhl2-slide) */
+        }
+        if (k->gpio_lines) {
+            v = (v & ~0x0180) | (k->gpio_lines(k->gpio_opaque) & 0x0180);
+        }
+        return v;
     }
     return k->joy_regs[(a >> 1) & 15];
 }
@@ -279,6 +325,9 @@ static void joy_write(void *opaque, hwaddr a, uint64_t v, unsigned size)
     NgageKpd *k = opaque;
 
     k->joy_regs[(a >> 1) & 15] = v;
+    if (a == 0x10 && k->gpio_drive) {
+        k->gpio_drive(k->gpio_opaque, v);       /* 7650: bits 7/8 pull the camera's SCL/SDA low */
+    }
     if (a == 0x16) {
         k->joy_ier |= v & 0xee;
     } else if (a == 0x14) {
@@ -312,6 +361,12 @@ static const MemoryRegionOps ctsi_ops = {
 
 static void ngage_key_event(DeviceState *dev, QemuConsole *src, QemuInputEvent *evt)
 {
+    if (kpd.has_slide && evt->key.key == KEY_F7) {
+        if (evt->key.down) {
+            ngage_keys_slide(true, !kpd.slide_closed);      /* 7650: F7 opens / closes the slide */
+        }
+        return;
+    }
     for (unsigned i = 0; i < kpd.nkeys; i++) {
         const NgageKey *key = &kpd.keys[i];
 

@@ -21,6 +21,9 @@ The phone keeps its flash (C:, settings) in build/ngage/phones/NAME.flash betwee
   press is a long press.
   Host keyboard: arrows, Enter = select, F1/F2 = left/right softkey, F3 = call (green),
   F4 = end (red), F5 = menu, Backspace = clear, Shift = edit, 0-9, * and #, F12 = power.
+- Nokia 7650: a Slide button (or F7) opens and closes the keypad slide (qom-set /machine slide-closed); the
+  phone starts with it open. Closed, the keypad locks and the camera (behind the slide) is on stand-by; open,
+  the camera shows the board's test pattern (ngage_cam.c, docs/devices/nokia-7650-nhl2/camera.md).
 - Nokia 9500 Communicator: two screens, the cover (128x128, its own console: screendump
   device=cover) and the inner 640x200 (the OMAP LCD controller, console 0), and a Lid button
   (qom-set /machine cover-open). The phone starts with the lid closed. The host keyboard is the
@@ -202,6 +205,11 @@ class Phone(QtWidgets.QWidget):
             self.flip.clicked.connect(self.toggle_flip)
             lay.addWidget(self.flip)
             self.labels[0].installEventFilter(self)       # the pen
+        if model == 'nokia7650':
+            self.slide = QtWidgets.QPushButton('Close slide')
+            self.slide.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.slide.clicked.connect(self.toggle_slide)
+            lay.addWidget(self.slide)
         if model in ('nokia7710', 'p800'):
             self.labels[0].installEventFilter(self)       # the pen
         rows = {'nokia9300': RA2_BUTTONS, 'nokia9300i': RA2_BUTTONS, 'nokia9500': RA2_BUTTONS, 'p910i': P910_BUTTONS,
@@ -228,6 +236,9 @@ class Phone(QtWidgets.QWidget):
             self.status.setText('key: %s' % e)
 
     def keyPressEvent(self, e):
+        if e.key() == Qt.Key.Key_F7 and hasattr(self, 'slide') and not e.isAutoRepeat():
+            self.toggle_slide()                     # 7650: F7 = the slide (keeps the button's label right)
+            return
         code = self.host_keys.get(e.key())
         if code and not e.isAutoRepeat():
             self.key(code, True)
@@ -272,6 +283,15 @@ class Phone(QtWidgets.QWidget):
             self.flip.setText('Open flip' if not closed else 'Close flip')
         except OSError as err:
             self.status.setText('flip: %s' % err)
+
+    def toggle_slide(self):
+        """The 7650's keypad slide: the switch line ekeyb reads (ngage_keys.c, H-nhl2-slide)."""
+        try:
+            closed = bool(self.qmp.cmd('qom-get', path='/machine', property='slide-closed').get('return'))
+            self.qmp.cmd('qom-set', path='/machine', property='slide-closed', value=not closed)
+            self.slide.setText('Open slide' if not closed else 'Close slide')
+        except OSError as err:
+            self.status.setText('slide: %s' % err)
 
     def cover_open(self):
         r = self.qmp.cmd('qom-get', path='/machine', property='cover-open')

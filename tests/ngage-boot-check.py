@@ -24,6 +24,10 @@ closely enough. References are firmware on screen: build/evidence/<model>/boot-r
     --fresh: "Locked" in the title, the idle area unpainted). Cause: the view server killed Phone.app
     (ViewSrv 11) while the start-up time query, shown on every boot because the clock is never
     valid, stayed up; answering it at once avoids it, which is what this check does.
+  --camera (7650): after the time query, OK twice, Camera (left softkey): the viewfinder must show the board's
+    test pattern (ngage_cam.c: eight colour bars), the slide closed (qom-set slide-closed) must stop it ("Open
+    cover") and opening it must bring it back. Regressions "viewfinder_colours_wrong" (the viewfinder is 0x0RGB
+    4444, not YUV: white came out cyan) and "camera_open_cover" (the slide line read closed: "Open cover" for ever).
 """
 import argparse, pathlib, shutil, subprocess, sys, tempfile, time
 
@@ -122,6 +126,45 @@ def joystick(sess, tmp, idle_done=False):
     return diff(load(a), load(b))
 
 
+VF_BARS = [(255, 255, 255), (255, 255, 0), (0, 255, 255), (0, 255, 0),
+           (255, 0, 255), (255, 0, 0), (0, 0, 255), (0, 0, 0)]
+
+
+def bars_seen(p):
+    """how many of the viewfinder's eight bars (160x120 at x 8, y 52; row 100) have the right colour"""
+    im = load(p)
+    return sum(max(abs(c - e) for c, e in zip(im.getpixel((18 + 20 * i, 100)), want)) <= 40
+               for i, want in enumerate(VF_BARS))
+
+
+def slide(sess, closed):
+    sys.path.insert(0, str(ROOT / 'eka1/tools'))
+    import ngage_sess as ns
+    ns.Qmp(sess[-1]).cmd('qom-set', path='/machine', property='slide-closed', value=closed)
+
+
+def camera(sess, tmp):
+    """Camera from the idle screen; returns the right viewfinder bars: open, with the slide closed, reopened"""
+    to_idle(sess, tmp)
+    key(sess, 'f1', 0.6)
+    res = []
+    for step in ('open', 'closed', 'reopened'):
+        if step == 'closed':
+            slide(sess, True)
+        elif step == 'reopened':
+            slide(sess, False)
+        n, end = 0, time.time() + 25
+        while time.time() < end:
+            time.sleep(2)
+            p = tmp / ('camera-%s.png' % step)
+            subprocess.run(sess + ['shot', str(p)], capture_output=True)
+            n = bars_seen(p)
+            if (n == 8) == (step != 'closed'):
+                break
+        res.append(n)
+    return res
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--model', default='ngage', choices=sorted(FLASH))
@@ -131,6 +174,7 @@ def main():
     ap.add_argument('--save-ref', action='store_true')
     ap.add_argument('--joystick', action='store_true', help='also check joystick navigation in the menu')
     ap.add_argument('--idle', action='store_true', help='also check that the idle screen comes up drawn')
+    ap.add_argument('--camera', action='store_true', help='7650: viewfinder test pattern and the slide')
     a = ap.parse_args()
     joy = 0.0
     SESS = [sys.executable, str(ROOT / 'eka1/tools/ngage_sess.py'), '-s',
@@ -174,12 +218,20 @@ def main():
             return 0
         if a.joystick and best <= a.limit and not frozen:
             joy = joystick(SESS, tmp)
+        cam = None
+        if a.camera and best <= a.limit and not frozen:
+            cam = camera(SESS, tmp)
     finally:
         subprocess.run(SESS + ['stop'], capture_output=True)
     if frozen:
         print('boot check (%s): FAIL, a catch froze the machine:\n%s' % (a.model, frozen))
         return 1
     ok = best <= a.limit
+    if a.camera:
+        cok = cam is not None and cam[0] == 8 and cam[1] < 4 and cam[2] == 8
+        print('%s camera check: %s (viewfinder bars right: %s of 8 open, %s closed, %s reopened; shots in %s)'
+              % (a.model, 'PASS' if cok else 'FAIL', *(cam or ('-', '-', '-')), tmp))
+        ok = ok and cok
     if a.joystick:
         print('%s joystick check: %s (menu before/after right differ by %.1f)'
               % (a.model, 'PASS' if joy > 1.0 else 'FAIL', joy))
