@@ -31,7 +31,14 @@ Addresses are ROM virtual (0x5xxxxxxx), physical (0x0xxxxxxx) or kernel data (0x
 - Unanswered ISI after idle: phonetsy `5A 00`, SIM `09 09`, SMS `02 1E` / `02 16` (no MMSMSGSM consumer
   for 02 17 / 02 1F found: their response ids are unknown); the DSY's `0B 11 {01 00}` (audio subtype 01).
 - The menu, the Phone app's network state (no MTC/network answers yet), the camera, the memory card
-  (mmc.pdd is a new driver), IrDA, Bluetooth (the N-Gage's LPRF model is untried here).
+  (mmc.pdd is a new driver), Bluetooth (the N-Gage's LPRF model is untried here).
+- Contacts: the list stays blank, and in one run the kernel faulted "PLAT 3" (Kern::Fault from the supervisor
+  thread, stack through isa_if_driver.ldd 0x50410224) about a minute after Contacts opened [V run, 2026-11-26, with
+  IrDA off]. Cause not looked at (an unanswered SIM phonebook request is the first guess [I]).
+- IrDA: done 2026-11-26 (H-nhl10-sir; docs/research/6600-irda.md; how to use it: [infrared.md](infrared.md)). Two phones beam a Calendar entry to each other
+  (`ngage_phone.py --irda a` / `--irda b`, docs/eka1-ngage.md "Infrared"). The first FIQ the phone ever took froze it
+  until 0x0C120050 stopped keeping the kernel's start-up 7 (it reads 0 now, H-upp-fiq-status). Checks: `tests/ngage_sir_test.c`,
+  `tests/ngage_nhl10_irda_test.py`.
 - Restarts (a kept flash): fixed 2026-11-18 (owner: "hangs on the home screen when not --fresh"). Phone.app
   calls RMobilePhone::GetALSLine synchronously while building the idle view (sssettings 0x51032D44 ->
   etelmm 0x50632B18 -> SIM `09 29 {35 00}`); unanswered, the view server killed Phone (ViewSrv 11), the idle

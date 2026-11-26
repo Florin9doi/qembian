@@ -1,12 +1,14 @@
 ---
 name: new-board-bringup
-description: Method for bringing up a phone that needs its own QEMU board, a chip QEMU does not model or a processor with no datasheet - an EKA1 phone (Symbian 6.0 to 8.1, S60 1st/2nd, Series 80/90, UIQ 2, N-Gage) on src/qemu-ngage, a new SoC variant, or a modem CPU running its own firmware (as the N95's n95-cmt). Also for an unknown baseband protocol (OSE, NOS, ISI peer). Use when starting such a bring-up, when a board's boot stalls on hardware, and before modelling a device. Covers phases, techniques that worked, traps, tools and where the per-phone records are.
+description: Method for bringing up a phone that needs its own QEMU board, a chip QEMU does not model or a processor with no datasheet - an EKA1 phone (Symbian 6.0 to 8.1, S60 1st/2nd, Series 80/90, UIQ 2, N-Gage) on src/qemu-ngage, a new SoC variant, or a modem CPU running its own firmware (as the N95's n95-cmt). Also for an unknown baseband protocol (OSE, NOS, ISI peer). Use when starting such a bring-up or when a board's boot stalls on unmodelled hardware. Not needed to add one device to a board that already boots: read that phone's docs/devices/<id>/bring-up.md instead. Covers phases, techniques that worked, traps, tools and where the per-phone records are.
 ---
 
 # New board bring-up (EKA1 and unknown chips)
 
 The phone's ROM runs unmodified, its own kernel included; we model the hardware it talks to, from its own code
-when there is no datasheet. Records to read first, each written for the next phone of its kind:
+when there is no datasheet. Records, each written for the next phone of its kind. Read only what matches the job (the phone's own
+`docs/devices/<id>/bring-up.md`, plus `docs/eka1-ngage.md` for the tools); open the others only when their kind
+of problem shows up:
 - `docs/eka1-ngage.md` (start here: tools, running, debugging, performance traps)
 - `docs/devices/se-p910i/how-it-was-done.md` (no-datasheet SoC, Ericsson OSE baseband)
 - `docs/devices/nokia-9210-rae3/how-it-was-done.md` (board from code only, odd flash container)
@@ -17,15 +19,18 @@ when there is no datasheet. Records to read first, each written for the next pho
 ## Rules
 
 - Boards live in `src/qemu-ngage/` (own QEMU tree, `scripts/build-qemu-ngage.sh`), QEMU changes as
-  `patches/qemu-ngage/` (one purpose per patch). After changing shared code (ngage*.c, the patches, the build
-  script) run `tests/ngage-boot-check.py --model ngageqd / ngage / nokia7650 / nokia6600 --idle`.
+  `patches/qemu-ngage/` (one purpose per patch). While iterating, boot only the model you are changing. Before a
+  commit that touches shared code (ngage*.c, the patches, the build script), run
+  `tests/ngage-boot-check.py --model ngageqd / ngage / nokia7650 / nokia6600 --idle` once.
 - Never two emulators on one flash file. The owner's phones (`-s phone-NAME`) are for reproducing their reports
   only, once nothing else uses them.
 - Every stand-in, patched word and modelled shortcut is a hack row in `docs/hacks.md` the day it is taken; every
   fixed bug gets a regression test (`tests/<board>_board_test.py`).
-- Research agents get mock-level briefs (CLAUDE.md "Subagent research rules"), with the Ghidra MCP
-  (localhost:8089) named. Give leaf devices (display, keys, sound) to agents; keep the critical path (boot,
-  storage, modem link) in the main session. Check every agent address against the first run.
+- Do leaf devices (display, keys, sound) inline by default: a spawned agent starts cold and re-reads everything.
+  Spawn a research agent only for a leaf device that needs more than about 30 tool calls of reading. Run it with
+  `model: sonnet` and a mock-level brief (CLAUDE.md "Subagent research rules"; name the Ghidra MCP at
+  localhost:8089 or `tools/ghidra/rawdec.sh`). Keep the critical path (boot, storage, modem link) in the main
+  session. Check every agent address against the first run.
 
 ## Phases (typical: 15 to 25 stalls)
 

@@ -51,10 +51,12 @@
 #include "ngage_keys.h"
 #include "ngage_lprf.h"
 #include "ngage_cam.h"
+#include "ngage_sir.h"
 #include "accel/tcg/cpu-loop.h"
 #include "tcg/insn-start-words.h"
 #include "exec/target_page.h"
 #include "chardev/char-fe.h"
+#include "chardev/char-serial.h"
 #include "system/system.h"
 #include "system/rtc.h"
 #include "qemu/cutils.h"
@@ -111,6 +113,7 @@ typedef struct {
     bool camera;                    /* the camera (ngage_cam.c): 7650, 6600, 3650, 3660 */
     bool cam_nhl8;                  /* 3650/3660: the sensor at 0x04 with 16-bit registers, JPEG stills */
     bool slide;                     /* the 7650's keypad slide (the camera lens is behind it) */
+    bool irda;                      /* the SIR UART behind euart1.pdd ("SIR.PDD", ngage_sir.c) on the 2nd -serial */
 } NgageModel;
 
 static const NgageModel *ngm;
@@ -217,6 +220,16 @@ static const struct {
 };
 
 /*
+ * H-upp-fiq-status: 0x0C120050, three FIQ causes the dispatcher checks ahead of the controller banks. The kernel
+ * writes 7 at start-up (ekern 0x503110ac, 6600) [V] and its FIQ dispatcher (0x503112b4) reads the word first: any of
+ * bits 0-2 set -> it writes the value back (acknowledge), passes the kernel's own start-up object (0x8000001C, made
+ * at 0x503110a4) to 0x503361d8 for bit 1 and returns WITHOUT dispatching bank 3 [V]. Nothing on the board raises these causes, so
+ * the word reads 0 and writes do not stick. The catch-all used to keep the 7: the first FIQ that went through the
+ * dispatcher (the 6600's IrDA UART, FiqCTSI_FIQ) re-entered for ever. What raises bits 0-2 is unknown [I].
+ */
+#define NGAGE_FIQ_CAUSES 0x0c120050
+
+/*
  * H-ngage-startup (Q51; NGAGE_STARTCODE=N overrides, -1 = off): the start-up reason hand-over
  * the NOS (or the hardware) makes [I]. Default 1 = a normal power-on. ecust's start-up mode getter (0x503439ac) takes the "reset" path when 0x0C150000
  * bits 1-3 are set and maps a code from internal SRAM (0x0C00420E when 0x420C/0x4208 are 0)
@@ -251,6 +264,9 @@ static uint64_t ngage_unknown_read(void *opaque, hwaddr addr, unsigned size)
                                   GUINT_TO_POINTER((guint)(addr & ~3u))));
 
     w = ngage_startup_handover(addr & ~3u, w);
+    if ((addr & ~3u) == NGAGE_FIQ_CAUSES) {
+        w = 0;                                      /* H-upp-fiq-status: nothing raises them */
+    }
     for (unsigned i = 0; i < ARRAY_SIZE(ngage_known); i++) {
         if (ngage_known[i].addr == (addr & ~3u)) {
             w |= ngage_known[i].set;
@@ -271,6 +287,9 @@ static void ngage_unknown_write(void *opaque, hwaddr addr, uint64_t val, unsigne
     uint32_t mask = size == 4 ? 0xffffffffu : ((1u << (size * 8)) - 1) << sh;
 
     w = (w & ~mask) | (((uint32_t)val << sh) & mask);
+    if ((addr & ~3u) == NGAGE_FIQ_CAUSES) {
+        w = 0;                          /* H-upp-fiq-status: a status, not a store */
+    }
     g_hash_table_insert(u->mem, k, GUINT_TO_POINTER(w));
     ngage_unknown_log(u, addr, true, val, size);
 }
@@ -361,6 +380,123 @@ static void ngage_lprf_setup(void)
     ngage_lprf.log = ngage_lprf_log;
     ngage_lprf_init(&ngage_lprf);
     ngage_lprf_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, ngage_lprf_expire, NULL);
+}
+
+/*
+ * IrDA (models with irda): the UPP SIR UART (ngage_sir.c) on QEMU's 2nd serial port (-serial / -chardev,
+ * serial_hd(1)); the 1st stays the kernel debug port. The phone's IrDA.prt frames SIR itself, so the
+ * chardev carries the raw SIR byte stream: two phones joined by one link (udp, or tcp server + client)
+ * beam to each other; a host tty at the phone's baud (set through CHR_IOCTL_SERIAL_SET_PARAMS) reaches
+ * a serial IR dongle. Interrupt: CTSI FIQ = kernel source 26 ("FiqCTSI_FIQ", the bank-3 side of 26).
+ * The end of a TX burst is signalled after its char time (10 bits a byte at the phone's baud).
+ */
+#define NGAGE_SIR_IRQ 26
+
+static NgageSir ngage_sir;
+static CharFrontend ngage_sir_chr;
+static QEMUTimer *ngage_sir_timer;
+static qemu_irq ngage_sir_line;
+static MemoryRegion ngage_sir_mr[2];
+
+static void ngage_sir_tx_byte(void *opaque, uint8_t b)
+{
+    /* never blocks the CPU: a peer that does not read loses the byte, as light nobody sees */
+    qemu_chr_fe_write(&ngage_sir_chr, &b, 1);
+}
+
+static void ngage_sir_burst(void *opaque, unsigned n)
+{
+    int64_t ns = (int64_t)n * 10 * NANOSECONDS_PER_SECOND / MAX(ngage_sir.baud, 1200u);
+
+    timer_mod(ngage_sir_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + ns);
+}
+
+static void ngage_sir_expire(void *opaque)
+{
+    ngage_sir_tx_done(&ngage_sir);
+}
+
+static void ngage_sir_set_baud(void *opaque, unsigned baud)
+{
+    QEMUSerialSetParams p = { .speed = baud, .parity = 'N', .data_bits = 8, .stop_bits = 1 };
+
+    qemu_log_mask(LOG_UNIMP, "ngage-sir: %u baud\n", baud);
+    qemu_chr_fe_ioctl(&ngage_sir_chr, CHR_IOCTL_SERIAL_SET_PARAMS, &p);   /* only ttys take it */
+}
+
+static void ngage_sir_set_irq(void *opaque, bool level)
+{
+    qemu_set_irq(ngage_sir_line, level);
+}
+
+static int ngage_sir_can_receive(void *opaque)
+{
+    return ngage_sir_rx_room(&ngage_sir);
+}
+
+static void ngage_sir_receive(void *opaque, const uint8_t *buf, int size)
+{
+    ngage_sir_rx(&ngage_sir, buf, size);
+}
+
+static uint64_t ngage_sir_mmio_read(void *opaque, hwaddr a, unsigned size)
+{
+    uint32_t addr = (uint32_t)(uintptr_t)opaque + a;
+    uint16_t v = ngage_sir_read(&ngage_sir, addr);
+    static uint16_t count[0x60];
+
+    if (ngage_log_hot(&count[(addr >> 1) % 0x60]) && addr != SIR_RXDATA) {
+        qemu_log_mask(LOG_UNIMP, "ngage-sir: R %08x -> %04x pc=%08x lr=%08x\n", addr, v, ngage_pc(), ngage_lr());
+    }
+    return v;
+}
+
+static void ngage_sir_mmio_write(void *opaque, hwaddr a, uint64_t val, unsigned size)
+{
+    uint32_t addr = (uint32_t)(uintptr_t)opaque + a;
+    static uint16_t count[0x60];
+
+    if (ngage_log_hot(&count[(addr >> 1) % 0x60]) && addr != SIR_TXDATA) {
+        qemu_log_mask(LOG_UNIMP, "ngage-sir: W %08x = %04x pc=%08x lr=%08x\n", addr, (unsigned)val,
+                      ngage_pc(), ngage_lr());
+    }
+    ngage_sir_write(&ngage_sir, addr, (uint16_t)val);
+}
+
+static const MemoryRegionOps ngage_sir_ops = {
+    .read = ngage_sir_mmio_read, .write = ngage_sir_mmio_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid = { .min_access_size = 1, .max_access_size = 4 },
+    .impl = { .min_access_size = 2, .max_access_size = 2 },     /* the drivers use 16-bit accesses */
+};
+
+static void ngage_sir_setup(MemoryRegion *sys, qemu_irq line)
+{
+    ngage_sir_init(&ngage_sir);
+    ngage_sir.tx_byte = ngage_sir_tx_byte;
+    ngage_sir.tx_burst_done = ngage_sir_burst;
+    ngage_sir.set_baud = ngage_sir_set_baud;
+    ngage_sir.irq = ngage_sir_set_irq;
+    ngage_sir_line = line;
+    ngage_sir_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, ngage_sir_expire, NULL);
+    if (serial_hd(1)) {
+        qemu_chr_fe_init(&ngage_sir_chr, serial_hd(1), &error_abort);
+        qemu_chr_fe_set_handlers(&ngage_sir_chr, ngage_sir_can_receive, ngage_sir_receive, NULL, NULL,
+                                 NULL, NULL, true);
+    }
+    /* the CTSI FIQ enables/status words (0x0C15000C..0F) and the UART (0x0C150510..63) */
+    memory_region_init_io(&ngage_sir_mr[0], NULL, &ngage_sir_ops, (void *)(uintptr_t)SIR_CTSI_DISABLE,
+                          "ngage.sir-ctsi", 4);
+    memory_region_add_subregion(sys, SIR_CTSI_DISABLE, &ngage_sir_mr[0]);
+    memory_region_init_io(&ngage_sir_mr[1], NULL, &ngage_sir_ops, (void *)(uintptr_t)SIR_BASE,
+                          "ngage.sir", SIR_END - SIR_BASE);
+    memory_region_add_subregion(sys, SIR_BASE, &ngage_sir_mr[1]);
+    /* 0x0C1500BA: a one-word region of its own */
+    {
+        MemoryRegion *st = g_new0(MemoryRegion, 1);
+        memory_region_init_io(st, NULL, &ngage_sir_ops, (void *)(uintptr_t)SIR_CTSI_STATUS, "ngage.sir-status", 2);
+        memory_region_add_subregion(sys, SIR_CTSI_STATUS, st);
+    }
 }
 
 /*
@@ -1953,6 +2089,7 @@ static const NgageModel ngage_nhl2 = {
     .md5_entries = { 0x7fd0, 0x7fe8 },
     .uem_rtc = true,                    /* rtc.dll and cbus.dll are the 6600's code (relocated) [V] */
     .camera = true,
+    .irda = true,
     .slide = true,
 };
 
@@ -1982,7 +2119,9 @@ static const NgageModel ngage_nhl8 = {
     .nos_rx_flag = 0x8000be30,
     .flash_manuf = NGAGE_FLASH_MANUF, .flash_device = NGAGE_FLASH_DEVICE,
     .uem_rtc = true,
-    .camera = true, .cam_nhl8 = true,   /* camerapdd: the 7650's receiver, its own sensor (docs/.../camera.md) */
+    .camera = true,
+    .cam_nhl8 = true,   /* camerapdd: the 7650's receiver, its own sensor (docs/.../camera.md) */
+    .irda = true,
 };
 
 static const uint32_t ngage_nhl8x_nos_exports[][2] = {
@@ -2011,7 +2150,9 @@ static const NgageModel ngage_nhl8x = {
     .nos_item14 = 0x2186404,
     .flash_manuf = NGAGE_FLASH_MANUF, .flash_device = NGAGE_FLASH_DEVICE,
     .uem_rtc = true,
-    .camera = true, .cam_nhl8 = true,   /* as the 3650 (sensor variant 1: register 0xC007 != 0x36) */
+    .camera = true,
+    .cam_nhl8 = true,   /* as the 3650 (sensor variant 1: register 0xC007 != 0x36) */
+    .irda = true,
 };
 
 /* the NOS exports enosdriver.ldd imports (hidden module 0x504128B0, nos_standin_nhl10.S) */
@@ -2025,6 +2166,7 @@ static const NgageModel ngage_nhl10 = {
     .name = "nokia6600",
     .uem_rtc = true,
     .camera = true,                     /* campdd.pdd: the 7650's hardware, sensor at 0x3C (docs/.../camera.md) */
+    .irda = true,                       /* euart1.pdd is SIR.PDD, COMM::1 of irda.esk (docs/research/6600-irda.md) */
     .nchips = 4,
     .rom_map = { { 0, 0x00800000, 0 }, { 0x00800000, 0x00700000, 2 }, { 0x00f00000, 0x00800000, 3 } },
     .nrom_map = 3,
@@ -2265,6 +2407,9 @@ static void ngage_init(MachineState *machine)
         ngage_mmc_init(sys, in, ngage_mmc_file);            /* MMC 21-24, DMA channels 6.. [I] */
         if (ngm->camera) {
             ngage_cam_setup(sys, in[CAM_IRQ]);              /* camera (IrqCCPStatus) */
+        }
+        if (ngm->irda) {
+            ngage_sir_setup(sys, in[NGAGE_SIR_IRQ]);        /* IrDA SIR UART (FiqCTSI_FIQ) */
         }
         memory_region_init_io(&t->mr, NULL, &ngage_timer_ops, t, "ngage.timers",
                               0x20 * NGAGE_TIMERS);

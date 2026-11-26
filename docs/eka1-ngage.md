@@ -120,6 +120,27 @@ python3 eka1/tools/ngage_phone.py            # --phone NAME, --fresh, --scale 3,
 
   The buttons under the screen do the same.
 
+## Infrared (Nokia 6600)
+
+How to use it, step by step: [devices/nokia-6600-nhl10/infrared.md](devices/nokia-6600-nhl10/infrared.md).
+
+The 6600's IrDA UART is QEMU's 2nd serial port (`ngage_sir.c`, hack H-nhl10-sir, evidence
+[research/6600-irda.md](research/6600-irda.md)). The phone's IrDA stack frames everything itself, so the port carries the
+raw SIR byte stream, and two emulated phones joined by one link beam to each other:
+
+```sh
+python3 eka1/tools/ngage_phone.py --model nokia6600 --phone ir-1 --irda a
+python3 eka1/tools/ngage_phone.py --model nokia6600 --phone ir-2 --irda b
+```
+
+`a` and `b` are the two ends of a local UDP link (ports 7470/7471). On one phone: Menu, Connect., Infrared (it
+listens for about two minutes). On the other: an item's Options, Send, Via infrared (e.g. a Calendar entry; the
+Gallery has no files on a fresh phone). The item arrives in the receiver's Messaging Inbox as "Infrared device".
+Any other value is a QEMU chardev spec (`udp:...`, `tcp:...,server=on,wait=off` with a client on the other side, a
+host serial port such as `/dev/ttyUSB0`, whose baud rate follows the phone's), and `ngage_sess.py start --irda`
+takes the same values. Without `--irda`, a session writes what the phone transmits to `serial2`.
+The 7650, 3650/3660, 3230, 6260 and N-Gage QD have a driver of the same kind, not switched on yet (`NgageModel.irda`).
+
 ## How it fits together
 
 | Piece | Where | Notes |

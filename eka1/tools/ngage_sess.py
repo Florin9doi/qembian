@@ -16,7 +16,8 @@ machine, without another boot.
 Catch names: fatal = the kernel fatal-fault routine (0x5031e340), pabt / dabt / undef = the
 exception vectors (VA 0x0c / 0x10 / 0x04, +0xffff0000 on a high-vector kernel), panic = RThread::Panic
 (models that know it). Any VA also works; VA=w:LABEL is a write watchpoint on that word. Session files are in
-build/ngage/sess-NAME/ (qemu.log, serial/serial2/serial3 = UART1..3, crash-N/). Offline: `ngage_sess.py dumpx DIR VA [N]`
+build/ngage/sess-NAME/ (qemu.log, serial/serial2/serial3 = UART1..3, crash-N/; --irda SPEC puts the 2nd
+port, the 6600's IrDA, on a chardev instead). Offline: `ngage_sess.py dumpx DIR VA [N]`
 reads a crash dump's RAM through its page tables, with no machine running.
 """
 import argparse, json, os, re, pathlib, select, signal, socket, struct, subprocess, sys, time
@@ -101,6 +102,10 @@ class Rsp:
         return out
 
 
+# The two ends of a local IR link between two phones: each sends to the other's port (docs/eka1-ngage.md "Infrared").
+IRDA_ENDS = {'a': 'udp:127.0.0.1:7471@127.0.0.1:7470', 'b': 'udp:127.0.0.1:7470@127.0.0.1:7471'}
+
+
 # ---- daemon ----
 class Daemon:
     def __init__(self, a):
@@ -124,7 +129,7 @@ class Daemon:
             + (',flash=%s' % a.flash if a.flash else '') + (',mmc=%s' % a.mmc if a.mmc else '')
         cmd = [str(nr.QEMU), '-M', mach, '-bios', a.rom, '-rtc', os.environ.get('NGAGE_RTC', 'base=localtime'), '-display', 'none',
                '-serial', 'file:%s' % (d / 'serial'),
-               '-serial', 'file:%s' % (d / 'serial2'), '-serial', 'file:%s' % (d / 'serial3'),
+               '-serial', a.irda or 'file:%s' % (d / 'serial2'), '-serial', 'file:%s' % (d / 'serial3'),
                '-monitor', 'unix:%s,server,nowait' % (d / 'mon'),
                '-qmp', 'unix:%s,server,nowait' % (d / 'qmp'),
                '-d', a.debug, '-D', str(d / 'qemu.log'), '-gdb', 'tcp:127.0.0.1:%d' % port, '-S'] \
@@ -435,6 +440,9 @@ def main():
     ap.add_argument('--flash', default='', help="the phone's flash file (kept across boots, Q55); default none")
     ap.add_argument('--mmc', default='', help='memory card image (E:), eka1/tools/ngage_card.py; default none')
     ap.add_argument('--isi', help='ISI reply table (Q50); "" = none; default: the model\'s')
+    ap.add_argument('--irda', default='', help='the 2nd serial port (the IrDA SIR UART on the 6600) instead of the '
+                    'serial2 file: "a" or "b" = the two ends of a local UDP link (one phone each), else a QEMU '
+                    'chardev spec (udp:HOST:PORT@:LPORT, tcp:..., /dev/ttyUSB0) (docs/eka1-ngage.md "Infrared")')
     a = ap.parse_args()
     d = sdir(a.session)
     if a.op != 'start' and (d / 'model').exists():
@@ -450,6 +458,7 @@ def main():
     a.rom = str(m['rom']) if a.rom is None else a.rom
     a.ppm = str(m['ppm']) if a.ppm is None else a.ppm
     a.isi = (str(m['isi']) if m['isi'].exists() else '') if a.isi is None else a.isi
+    a.irda = IRDA_ENDS.get(a.irda, a.irda)
     if a.op == '_daemon':
         dm = Daemon(a)
         try:
@@ -474,7 +483,7 @@ def main():
         args = [sys.executable, __file__, '-s', a.session, '_daemon', '--model', a.model, '--catch', a.catch,
                 '--debug', a.debug, '--dfilter', a.dfilter, '--rom', a.rom, '--ppm', a.ppm, '--isi', a.isi,
                 '--flash', os.path.abspath(a.flash) if a.flash else '',
-                '--mmc', os.path.abspath(a.mmc) if a.mmc else '']
+                '--mmc', os.path.abspath(a.mmc) if a.mmc else '', '--irda', a.irda]
         subprocess.Popen(args, start_new_session=True, stdin=subprocess.DEVNULL,
                          stdout=open(d / 'daemon.out', 'w'), stderr=subprocess.STDOUT)
         for _ in range(100):
