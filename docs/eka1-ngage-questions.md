@@ -529,7 +529,7 @@ Addresses are physical unless marked virtual. ROM offsets equal physical address
   - [V] That entry's digest matches the MD5 of tree + data. So the bootstrap check is plain
     MD5 over flash, and Q12's mismatch on the MCU entry must come from MCU bytes that differ
     from flash, i.e. the scrambled NOS (Q20).
-  - Board: `-M ngage,ppm=eka1/extracted/RH2941.026` (the runner's default) loads the
+  - Board: `-M ngage,ppm=eka1/rh29/extracted/RH2941.026` (the runner's default) loads the
     segments: the boot block before the patches, the rest into the chips.
 
 - **Q22. The power model.** [V] The kernel init (0x5032b924) calls the power model at

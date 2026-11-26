@@ -64,7 +64,7 @@ def main():
     ap.add_argument('--out', type=pathlib.Path, default=HERE.parent / 'analysis/ekern-align.tsv')
     ap.add_argument('--apply', action='store_true', help='name the anchor/exact exports in Ghidra (REST)')
     ap.add_argument('--server', default='http://127.0.0.1:8089')
-    ap.add_argument('--rom', type=pathlib.Path, default=HERE.parent / 'output/rom/ROM.bin')
+    ap.add_argument('--rom', type=pathlib.Path, default=HERE.parent / 'rh29/output/rom/ROM.bin')
     a = ap.parse_args()
     names = sorted({convert(n) for n in pe_export_names(a.wins_ekern)}, key=lambda s: s.encode())
     anchors = load_anchors()

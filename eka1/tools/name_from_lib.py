@@ -82,8 +82,8 @@ def rom_exports(rom, base, hdr_addr):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('libdir', type=pathlib.Path, help='SDK epoc32/release/armi/urel (the .lib files)')
-    ap.add_argument('--rom', type=pathlib.Path, default=ROOT / 'output/rom/ROM.bin')
-    ap.add_argument('--manifest', type=pathlib.Path, default=ROOT / 'output/rom/manifest.json')
+    ap.add_argument('--rom', type=pathlib.Path, default=ROOT / 'rh29/output/rom/ROM.bin')
+    ap.add_argument('--manifest', type=pathlib.Path, default=ROOT / 'rh29/output/rom/manifest.json')
     ap.add_argument('--out', type=pathlib.Path, default=ROOT / 'analysis/user-exports.tsv')
     ap.add_argument('--apply', action='store_true', help='label/rename in Ghidra (REST)')
     ap.add_argument('--server', default='http://127.0.0.1:8089')

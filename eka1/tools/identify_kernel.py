@@ -7,7 +7,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 def build():
     original = json.loads((ROOT/'analysis/kernel-api-map.json').read_text())
-    rom = (ROOT/'output/rom/ROM.bin').read_bytes()
+    rom = (ROOT/'rh29/output/rom/ROM.bin').read_bytes()
     exports = {r['ordinal']: r for r in original['exports']}
     execs = {r['id']: r for r in original['exec']}
     def word(a): return struct.unpack_from('<I', rom, a-0x50000000)[0]

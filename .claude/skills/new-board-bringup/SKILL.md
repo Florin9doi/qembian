@@ -18,7 +18,7 @@ when there is no datasheet. Records to read first, each written for the next pho
 
 - Boards live in `src/qemu-ngage/` (own QEMU tree, `scripts/build-qemu-ngage.sh`), QEMU changes as
   `patches/qemu-ngage/` (one purpose per patch). After changing shared code (ngage*.c, the patches, the build
-  script) run `tests/ngage-boot-check.py --model ngage / nokia7650 / nokia6600 --idle`.
+  script) run `tests/ngage-boot-check.py --model ngageqd / ngage / nokia7650 / nokia6600 --idle`.
 - Never two emulators on one flash file. The owner's phones (`-s phone-NAME`) are for reproducing their reports
   only, once nothing else uses them.
 - Every stand-in, patched word and modelled shortcut is a hack row in `docs/hacks.md` the day it is taken; every

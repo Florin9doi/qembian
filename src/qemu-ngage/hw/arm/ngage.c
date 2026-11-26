@@ -1,11 +1,11 @@
 /*
- * Nokia N-Gage QD (RH-29, DCT4 "UPP_WD2", Symbian 6.1 / EKA1) bring-up board.
+ * Nokia N-Gage (NEM-4) and N-Gage QD (RH-29), DCT4 "UPP_WD2", Symbian 6.1 / EKA1, bring-up board.
  *
  * Runs the phone's own ROM (bootstrap, ekern.exe, ecust.dll): see docs/eka1-ngage.md.
  * This is the discovery stage (roadmap P1): only what the ROM is known to need is modelled,
  * every other physical access goes to a logging catch-all that remembers what was written
  * (reads return the last value, else 0), so polling loops and probes show up in the log:
- *   qemu-system-arm -M ngage -bios ROM.bin -d unimp,guest_errors -D ngage.log
+ *   qemu-system-arm -M ngageqd -bios ROM.bin -d unimp,guest_errors -D ngage.log
  *
  * The memory map and each modelled device answer a question in docs/eka1-ngage-questions.md:
  *   0x00000000  flash chip 0 (Intel CFI, x16), ROM.bin offsets 0..0xEFFFFF     Q1 Q4 Q12
@@ -22,7 +22,7 @@
  *               GPIO 0x0C15020C/0x0C150210 bits 7/8, frames by DMA from 0x0C150554)
  *   0x0C000000  UPP peripherals and internal SRAM (0x0C004000), virtual 0x58000000: catch-all
  *
- * Machines: -M ngage (N-Gage QD, RH-29) and -M nokia6600 (Nokia 6600, NHL-10, Symbian 7.0s,
+ * Machines: -M ngage (N-Gage, NEM-4), -M ngageqd (N-Gage QD, RH-29) and -M nokia6600 (Nokia 6600, NHL-10, Symbian 7.0s,
  * docs/devices/nokia-6600-nhl10/bring-up.md). Both are the same DCT4 UPP SoC; what differs per
  * phone (flash chips, ROM split, NOS entry, kernel addresses the workarounds use) is an
  * NgageModel below. Comments name N-Gage addresses unless they say otherwise.
@@ -1169,6 +1169,7 @@ static const MemoryRegionOps ngage_dbg_ops = {
 
 #include "ngage_nos_stub.h"
 #include "ngage_nhl10_nos_stub.h"
+#include "ngage_nem4_nos_stub.h"
 #include "ngage_rm51_nos_stub.h"
 #include "ngage_nhl2_nos_stub.h"
 #include "ngage_nhl8_nos_stub.h"
@@ -1736,7 +1737,7 @@ static const uint32_t ngage_rh29_nos_exports[][2] = {
 };
 
 static const NgageModel ngage_rh29 = {
-    .name = "ngage",
+    .name = "ngageqd",
     .nchips = 2,
     .rom_map = { { 0, 0x00f00000, 0 }, { 0x00f00000, 0x01100000, 1 } },
     .nrom_map = 2,
@@ -1746,6 +1747,33 @@ static const NgageModel ngage_rh29 = {
     .screen_chunk_ptr = 0x800066ec,     /* Q38 */
     .nos_rx_dfc = 0x8000c578,           /* nos_standin.S RX_DFC / RX_FLAG (Q50, Q56) */
     .nos_rx_flag = 0x8000c570,
+    .flash_manuf = NGAGE_FLASH_MANUF, .flash_device = NGAGE_FLASH_DEVICE,
+};
+
+/*
+ * N-Gage (NEM-4 V 4.03, the first N-Gage; docs/devices/nokia-ngage-nem4/bring-up.md): the QD's kernel generation
+ * (506 ekern exports, the same ordinals and kernel-data layout: 0x800066EC, 0x80006740, 0x80000398 referenced as
+ * often as in the QD's ROM; bootstrap digests at ROM 0x8F00/0x8F18) [V static], with the 3650's flash layout: ROM.bin
+ * 0..7 MB in chip 0, 0x700000.. in chip 1 (flash 0x02000000), 0xB00000.. in chip 2 (flash 0x04000000) [V: the MCU
+ * file's blocks]. NOS entry 0x5149D284 (nosstarter literal), NOS bss 0x8000C680; nosdriver's two NOS imports
+ * (slots 0x511B4028 / 0x511B4030) [V]. Trace mask bit 30 already set in this ROM (0xC020A003).
+ */
+static const uint32_t ngage_nem4_nos_exports[][2] = {
+    { 0x514a13cc, NGAGE_NEM4_NOS_SYM_nos_channel_ctor },
+    { 0x514a0a50, NGAGE_NEM4_NOS_SYM_nos_channel_open },
+};
+
+static const NgageModel ngage_nem4 = {
+    .name = "ngage",
+    .nchips = 3,
+    .rom_map = { { 0, 0x00700000, 0 }, { 0x00700000, 0x00400000, 1 }, { 0x00b00000, 0x006c0000, 2 } },
+    .nrom_map = 3,
+    .nos_alias = 0x51400000,
+    .stub = ngage_nem4_nos_stub, .stub_len = sizeof(ngage_nem4_nos_stub), .stub_va = NGAGE_NEM4_NOS_STUB_VA,
+    .nos_exports = ngage_nem4_nos_exports, .nnos_exports = ARRAY_SIZE(ngage_nem4_nos_exports),
+    .screen_chunk_ptr = 0x800066ec,
+    .nos_rx_dfc = 0x8000c680 + 0x200,   /* nos_standin.S RX_DFC / RX_FLAG with this ROM's RAM */
+    .nos_rx_flag = 0x8000c680 + 0x1f8,
     .flash_manuf = NGAGE_FLASH_MANUF, .flash_device = NGAGE_FLASH_DEVICE,
 };
 
@@ -2029,6 +2057,7 @@ static void ngage_init(MachineState *machine)
             t->t[i].irq = in[i];                                         /* IrqTimer<i> */
         }
         ngage_keys_init(sys, in[25], ngm == &ngage_rm51 ? NGAGE_KPD_RM51
+            : ngm == &ngage_nem4 ? NGAGE_KPD_NEM4
             : (ngm == &ngage_nhl10 || ngm == &ngage_nhl2 || ngm == &ngage_nhl8) ? NGAGE_KPD_NHL10
             : (ngm == &ngage_nhl8x) ? NGAGE_KPD_NHL8X
             : NGAGE_KPD_NGAGE);  /* 7650: the 6600's ekeyb (94% same code, same key lists) [V] */                       /* keypad, IrqCTSI_IRQ (Q53) */
@@ -2125,6 +2154,12 @@ static void ngage_init_rh29(MachineState *machine)
     ngage_init(machine);
 }
 
+static void ngage_init_nem4(MachineState *machine)
+{
+    ngm = &ngage_nem4;
+    ngage_init(machine);
+}
+
 static void ngage_init_nhl2(MachineState *machine)
 {
     ngm = &ngage_nhl2;
@@ -2175,8 +2210,8 @@ static void ngage_machine_class_init(ObjectClass *oc, const void *data)
     object_class_property_set_description(oc, "ppm",
         "directory of extracted PPM flash segments (segment_*_<flash address>.bin)");
 
-    mc->desc = "Nokia N-Gage QD (RH-29, DCT4 UPP, EKA1) bring-up board";
-    mc->init = ngage_init_rh29;
+    mc->desc = "Nokia N-Gage (NEM-4, DCT4 UPP, Symbian 6.1 EKA1) bring-up board";
+    mc->init = ngage_init_nem4;
     mc->ignore_memory_transaction_failures = true;
     mc->default_cpu_type = ARM_CPU_TYPE_NAME("ti925t");
     mc->default_ram_size = 16 * MiB;           /* Q3 */
@@ -2190,7 +2225,24 @@ static const TypeInfo ngage_machine_type = {
     .interfaces = arm_machine_interfaces,
 };
 
-/* Nokia 6600: the same board and options, its own NgageModel */
+/* N-Gage QD: the same board and options, its own NgageModel */
+static void ngage_rh29_class_init(ObjectClass *oc, const void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+
+    ngage_machine_class_init(oc, data);
+    mc->desc = "Nokia N-Gage QD (RH-29, DCT4 UPP, Symbian 6.1 EKA1) bring-up board";
+    mc->init = ngage_init_rh29;
+}
+
+static const TypeInfo ngage_rh29_machine_type = {
+    .name = MACHINE_TYPE_NAME("ngageqd"),
+    .parent = TYPE_MACHINE,
+    .class_init = ngage_rh29_class_init,
+    .interfaces = arm_machine_interfaces,
+};
+
+/* Nokia 6600 */
 static void ngage_nhl10_class_init(ObjectClass *oc, const void *data)
 {
     MachineClass *mc = MACHINE_CLASS(oc);
@@ -2294,6 +2346,7 @@ static const TypeInfo ngage_rm51_machine_type = {
 static void ngage_machine_init(void)
 {
     type_register_static(&ngage_machine_type);
+    type_register_static(&ngage_rh29_machine_type);
     type_register_static(&ngage_nhl2_machine_type);
     type_register_static(&ngage_nhl8_machine_type);
     type_register_static(&ngage_nhl8x_machine_type);

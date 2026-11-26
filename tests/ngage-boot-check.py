@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Boot check for the ngage board's phones: the ROM still boots to its first UI screen, no fault.
 
-Run after every change to the ngage board (src/qemu-ngage/): both phones share it.
-  --model ngage (default): N-Gage QD; reference = the time query on the idle wallpaper.
+Run after every change to the ngage board (src/qemu-ngage/): the phones share it.
+  --model ngage (default): N-Gage (NEM-4); reference = its first UI screen (build/evidence/nem4/).
+  --model ngageqd: N-Gage QD (RH-29); reference = the time query on the idle wallpaper.
   --model nokia7650: Nokia 7650; reference = the first-boot time query.
   --model nokia6600: Nokia 6600; reference = the first-boot time query. It also covers the 6600
     bring-up stalls (docs/devices/nokia-6600-nhl10/bring-up.md), e.g. regression isa_frame_heap
@@ -33,12 +34,14 @@ closely enough. References are firmware on screen: build/evidence/<model>/boot-r
 import argparse, pathlib, shutil, subprocess, sys, tempfile, time
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-FLASH = {'ngage': ROOT / 'build/ngage/phones/test.flash',
+FLASH = {'ngage': ROOT / 'build/ngage/phones/nem4-agent.flash',
+         'ngageqd': ROOT / 'build/ngage/phones/test.flash',
          'nokia6600': ROOT / 'build/ngage/phones/nhl10-agent.flash',
          'nokia7650': ROOT / 'build/ngage/phones/nhl2-agent.flash',
          'nokia3650': ROOT / 'build/ngage/phones/nhl8-agent.flash',
          'nokia3660': ROOT / 'build/ngage/phones/nhl8x-agent.flash'}
-EVIDENCE = {'ngage': 'ngage', 'nokia6600': 'nhl10', 'nokia7650': 'nhl2', 'nokia3650': 'nhl8', 'nokia3660': 'nhl8x'}
+EVIDENCE = {'ngage': 'nem4', 'ngageqd': 'ngage', 'nokia6600': 'nhl10', 'nokia7650': 'nhl2', 'nokia3650': 'nhl8',
+            'nokia3660': 'nhl8x'}
 
 
 def load(p):
@@ -183,7 +186,7 @@ def main():
     a = ap.parse_args()
     joy = 0.0
     SESS = [sys.executable, str(ROOT / 'eka1/tools/ngage_sess.py'), '-s',
-            'agent-ngchk' if a.model == 'ngage' else 'agent-%schk' % a.model]
+            'agent-ngchk' if a.model == 'ngageqd' else 'agent-%schk' % a.model]
     REF = ROOT / 'build/evidence' / EVIDENCE[a.model] / 'boot-ref-timequery.png'
     a.flash = a.flash or str(FLASH[a.model])
     if a.idle:

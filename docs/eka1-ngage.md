@@ -1,7 +1,10 @@
 # N-Gage QD (EKA1) on the `ngage` board: start here
 
 The original Nokia N-Gage QD firmware (RH-29 V 04.10, Symbian 6.1, EKA1 kernel, Series 60
-1.x) boots unmodified on our own QEMU board `ngage`. This page covers:
+1.x) boots unmodified on our own QEMU board `ngage`, as `-M ngageqd` (`--model ngageqd`). The first N-Gage
+(NEM-4 V 4.03, the same kernel generation) is `-M ngage` (`--model ngage`):
+[devices/nokia-ngage-nem4/bring-up.md](devices/nokia-ngage-nem4/bring-up.md). Each phone's firmware is extracted into its
+own folder (`eka1/rh29/`, `eka1/nem4/`; [../eka1/README.md](../eka1/README.md)). This page covers:
 - the state of the work;
 - how to run the phone;
 - how the pieces fit;
@@ -12,7 +15,7 @@ The same board also runs the **Nokia 7650** (NHL-2NA, Symbian 6.1) as `-M nokia7
 ([devices/nokia-7650-nhl2/bring-up.md](devices/nokia-7650-nhl2/bring-up.md)) and the **Nokia 6600** (NHL-10, Symbian 7.0s) as `-M nokia6600`: per-phone
 values are an `NgageModel` in `ngage.c`; the tools take `--model nokia6600`. Its notes:
 [devices/nokia-6600-nhl10/bring-up.md](devices/nokia-6600-nhl10/bring-up.md). Run
-`python3 tests/ngage-boot-check.py [--model nokia6600]` after every board change.
+`python3 tests/ngage-boot-check.py [--model ngageqd|ngage|nokia6600]` after every board change.
 The EKA1 tree also holds boards of their own: the **Nokia 9500 Communicator** (`-M nokia9500`, QEMU's
 OMAP1510: [devices/nokia-9500-ra2/bring-up.md](devices/nokia-9500-ra2/bring-up.md)), the **Nokia 7710** (`-M nokia7710`,
 the same board, S90 Desk: [devices/nokia-7710-rm12/bring-up.md](devices/nokia-7710-rm12/bring-up.md)), the **Sony Ericsson P800**
@@ -206,10 +209,10 @@ python3 eka1/tools/ngage_sess.py dumpx build/ngage/sess-dbg/crash-1 VA N   # off
 ```sh
 OD=~/gcc-builds/gcc-14.2.0/bin/arm-none-symbianelf-objdump
 $OD -D -b binary -m arm [-M force-thumb] --adjust-vma=0x50000000 \
-    --start-address=VA --stop-address=VA2 eka1/output/rom/ROM.bin
+    --start-address=VA --stop-address=VA2 eka1/rh29/output/rom/ROM.bin
 ```
 
-- **Module layout.** `eka1/output/rom/manifest.json` gives each module's address and size;
+- **Module layout.** `eka1/rh29/output/rom/manifest.json` gives each module's address and size;
   user exports are named in `eka1/analysis/user-exports.tsv`. Kernel exports are ordinals in
   `eka1/analysis/kernel-api-map.tsv`; names only where `ekern_evidence.tsv` proves them.
 - **Imports.** An import stub is `ldr ip,[pc]; ldr pc,[ip]` plus the export table slot; map

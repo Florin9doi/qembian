@@ -45,7 +45,7 @@ and do not exist on Nokia's EKA1 kernel.
 - No scrambling or compression; the EKA1 ROM is uncompressed XIP, little-endian ARM [V].
 - Flash split in two banks: flash `0..0xF00000` = ROM offset 0; flash `0x02000000..0x02265000` = ROM
   offset `0xF00000..` [V, proven by `sw.txt` and a JPEG landing at predicted offsets].
-- Reconstructed image: `eka1/output/rom/ROM.bin`, 18,284,544 bytes, base `0x50000000` [V]. Z: tree
+- Reconstructed image: `eka1/rh29/output/rom/ROM.bin`, 18,284,544 bytes, base `0x50000000` [V]. Z: tree
   1060 files, all byte-verified; PPM overlay 1576 files, own virtual base `0x51230000` [V].
 - Tools: `eka1/tools/eka1_extract.py` (working extractor and report), `eka1/dct4_extract.py` (older,
   kept), `eka1/tools/identify_kernel.py`; analysis in `eka1/analysis/` (manifests, `files.tsv`,

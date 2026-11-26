@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Find a function of one EKA1 ROM in another (e.g. N-Gage QD -> Nokia 6600) by its code.
 
-  port_addr.py VA [VA...] [--src ngage] [--dst nokia6600] [--words 12] [--module ekern.exe]
+  port_addr.py VA [VA...] [--src ngageqd] [--dst nokia6600] [--words 12] [--module ekern.exe]
 
 For each source address, the first N instruction words are compared with every word-aligned
 position of the destination ROM (or of one module), with the parts that move between builds
@@ -85,7 +85,7 @@ def module_range(model, name):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('va', nargs='+')
-    ap.add_argument('--src', default='ngage')
+    ap.add_argument('--src', default='ngageqd')
     ap.add_argument('--dst', default='nokia6600')
     ap.add_argument('--words', type=int, default=12)
     ap.add_argument('--module', default='ekern.exe', help='destination module to search ("" = whole ROM)')

@@ -15,8 +15,10 @@ src/standins/_shared/isireplies.h
 # N-Gage (EKA1): firmware, extractions, generated analysis, Ghidra project, third-party sources
 # (eka1/README.md says how to regenerate each)
 /eka1/ngage_rom/
-/eka1/extracted/
-/eka1/output/
+/eka1/rh29/
+# N-Gage (NEM-4, EKA1)
+/eka1/nem4_rom/
+/eka1/nem4/
 /eka1/analysis/*
 !/eka1/analysis/kernel-api-map.json
 !/eka1/analysis/kernel-api-map.tsv

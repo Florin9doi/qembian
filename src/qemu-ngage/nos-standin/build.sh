@@ -3,7 +3,8 @@
 #   src/qemu-ngage/nos-standin/build.sh
 # Needs arm-none-symbianelf binutils (~/gcc-builds/gcc-14.2.0/bin or $PATH); the generated
 # headers are committed, so building QEMU does not need them.
-#   nos_standin.S       -> ../hw/arm/ngage_nos_stub.h        (N-Gage QD, -M ngage)
+#   nos_standin.S       -> ../hw/arm/ngage_nos_stub.h        (N-Gage QD, -M ngageqd)
+#   nos_standin.S (NEM-4) -> ../hw/arm/ngage_nem4_nos_stub.h (N-Gage, -M ngage)
 #   nos_standin_nhl10.S -> ../hw/arm/ngage_nhl10_nos_stub.h  (Nokia 6600, -M nokia6600)
 #   nos_standin.S (NHL2) -> ../hw/arm/ngage_nhl2_nos_stub.h  (Nokia 7650, -M nokia7650)
 #   nos_standin.S (NHL-8) -> ../hw/arm/ngage_nhl8_nos_stub.h  (Nokia 3650, -M nokia3650)
@@ -45,6 +46,12 @@ PY
 }
 
 build nos_standin.S       0x5149e4c4 ngage       ../hw/arm/ngage_nos_stub.h
+# N-Gage (NEM-4 V 4.03): the QD's stub at its NOS entry (nosstarter literal), with its own ekern addresses (the same
+# 506-export numbering, ordinals 469, 394, 493, 7, 479, 64) and NOS bss, read from the ROM
+build nos_standin.S       0x5149d284 ngage_nem4  ../hw/arm/ngage_nem4_nos_stub.h \
+      --defsym KERN_VARIANT=0x503346b4 --defsym SET_POWER_MODEL=0x5033c8f8 \
+      --defsym POWER_MODEL_CTOR=0x5033c584 --defsym KERN_ADD_DFC=0x503451f4 \
+      --defsym RAM=0x8000c680 --defsym THREAD_WRITE=0x50341a90 --defsym CHANNEL_COMPLETE=0x50334fcc
 build nos_standin_nhl10.S 0x52882024 ngage_nhl10 ../hw/arm/ngage_nhl10_nos_stub.h
 # Nokia 3230 (RM-51 V 05.07): the 6600's stub at its NOS entry, with its ekern exports (ordinals 426, 344,
 # 451, 7, 454, 93), NOS bss and enosdriver export 2 (docs/devices/nokia-3230-rm51/bring-up.md)

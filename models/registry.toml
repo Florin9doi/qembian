@@ -9,11 +9,19 @@ schema = 1
 default = "nokia-n95-8gb-rm320"         # the device a bare tools/device.py, sydb or script uses when no SYBORG_DEVICE / instance names one
 
 [[types]]
+code = "NEM-4"                                # [from the flash file names nem440.3c1 / nem440.326 (NEM-4 V 4.03); not read from a descriptor]
+name = "N-Gage"
+platform = "s60-1.2"                          # Symbian 6.1, EKA1; the QD's kernel generation (506 ekern exports, same ordinals) [V]
+soc = "upp-wd2"                               # DCT4 UPP, as the QD [I: same bootstrap layout, NOS starter, peripherals]
+model = ""                                    # not a device-model profile: QEMU board -M ngage (src/qemu-ngage/hw/arm/ngage.c)
+status = "known"                              # V 4.03 held; board on the QD's model with addresses read from the ROM; docs/devices/nokia-ngage-nem4/bring-up.md
+
+[[types]]
 code = "RH-29"
 name = "N-Gage QD"
 platform = "s60-1.2"                          # Symbian 6.1, EKA1
 soc = "upp-wd2"                               # DCT4 UPP [V bootstrap]
-model = ""                                    # not a device-model profile: QEMU board -M ngage (src/qemu-ngage)
+model = ""                                    # not a device-model profile: QEMU board -M ngageqd (src/qemu-ngage)
 status = "known"                              # V 04.10 boots to the home screen, games run from a card (2026-11-12); docs/eka1-ngage.md
 
 [[types]]

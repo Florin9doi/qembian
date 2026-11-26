@@ -9,7 +9,7 @@ state, stops QEMU and prints:
     first values (the 'ngage:' lines of ngage.c's catch-all).
 Each run's log stays in build/ngage/<name>.log for later questions (docs/eka1-ngage-questions.md).
 
-usage: ngage_run.py [--secs 5] [--name runN] [--rom eka1/output/rom/ROM.bin] [-- extra qemu args]
+usage: ngage_run.py [--secs 5] [--name runN] [--rom eka1/nem4/output/rom/ROM.bin] [-- extra qemu args]
 """
 import argparse, collections, os, pathlib, re, socket, subprocess, sys, time
 
@@ -20,9 +20,18 @@ QEMU = pathlib.Path(os.environ['NGAGE_QEMU']) if os.environ.get('NGAGE_QEMU') el
 # machine, its ROM, PPM segments and ISI table, the extraction root (manifest, user-exports.tsv)
 # and the kernel addresses the tools read. 6600 values marked [I] are unconfirmed.
 MODELS = {
-    'ngage': dict(
-        machine='ngage', root=ROOT / 'eka1',
-        rom=ROOT / 'eka1/output/rom/ROM.bin', ppm=ROOT / 'eka1/extracted/RH2941.026',
+    'ngage': dict(                          # N-Gage (NEM-4 V 4.03): the QD's kernel generation at other addresses
+        machine='ngage', root=ROOT / 'eka1/nem4',
+        rom=ROOT / 'eka1/nem4/output/rom/ROM.bin', ppm=ROOT / 'eka1/nem4/extracted/nem440.326',
+        isi=ROOT / 'src/qemu-ngage/isi-replies.txt',
+        fatal=0x50324240,                   # the QD's 0x5031E340, port_addr.py: unique 12/12 match
+        cur_thread=0x80006740,              # the QD's kernel-data layout (the same constants, as often) [V static]
+        containers=0x80000398,
+        code=(0x50320f9c, 0x511c0000),      # ekern start .. ROM end
+        ttb=0x0A074000),
+    'ngageqd': dict(
+        machine='ngageqd', root=ROOT / 'eka1/rh29', analysis=ROOT / 'eka1/analysis',
+        rom=ROOT / 'eka1/rh29/output/rom/ROM.bin', ppm=ROOT / 'eka1/rh29/extracted/RH2941.026',
         isi=ROOT / 'src/qemu-ngage/isi-replies.txt',
         fatal=0x5031e340,                   # ekern's fatal-fault routine
         cur_thread=0x80006740,              # the kernel's current DThread
@@ -314,7 +323,7 @@ def rom_namer():
     man = json.loads((root / 'output/rom/manifest.json').read_text())
     files = sorted((f['rom_virtual_address'], f['size'], f['path'].split('/')[-1])
                    for f in man['files'] if f.get('rom_virtual_address'))
-    tsv = root / 'analysis/user-exports.tsv'
+    tsv = M.get('analysis', root / 'analysis') / 'user-exports.tsv'
     names = sorted((int(r['address'], 16), r['module'], r['name'])
                    for r in csv.DictReader(tsv.open(), delimiter='\t')) if tsv.exists() else []
     keys = [n[0] for n in names]
@@ -390,7 +399,7 @@ def print_stack(mon, tname):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--model', default=os.environ.get('NGAGE_MODEL', 'ngage'), choices=sorted(MODELS),
-                    help='the phone (default ngage = N-Gage QD; nokia6600)')
+                    help='the phone (default ngage = N-Gage NEM-4; ngageqd = N-Gage QD; nokia6600 ...)')
     ap.add_argument('--secs', type=float, default=5)
     ap.add_argument('--name', default='run')
     ap.add_argument('--rom', help='default: the model\'s ROM.bin')

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""ngage_phone: an emulator window for the virtual EKA1 phones (N-Gage QD, 6600, 7650, 3230, 6630, 7710, 9500, P800, P910i; like `sydb phone`).
+"""ngage_phone: an emulator window for the virtual EKA1 phones (N-Gage, N-Gage QD, 6600, 7650, 3230, 6630, 7710, 9500, P800, P910i; like `sydb phone`).
 
-  python3 eka1/tools/ngage_phone.py [--model ngage|nokia6600|nokia7650|nokia7710|nokia9500|p910i] [--phone NAME] [--fresh]
+  python3 eka1/tools/ngage_phone.py [--model ngage|ngageqd|nokia6600|nokia7650|nokia7710|nokia9500|p910i] [--phone NAME] [--fresh]
                                     [--scale 2] [--keep]
 
---model picks the phone (default ngage = N-Gage QD; nokia6600 = Nokia 6600, -M nokia6600); --phone
+--model picks the phone (default ngage = N-Gage, NEM-4; ngageqd = N-Gage QD; nokia6600 = Nokia 6600, -M nokia6600); --phone
 names its flash file (default: the model's name).
 
 One command: it starts the phone (an ngage session, eka1/tools/ngage_sess.py, named phone-NAME)
@@ -73,7 +73,7 @@ for i in range(10):
     HOST_KEYS[getattr(Qt.Key, 'Key_%d' % i)] = str(i)
 
 
-TITLES = {'ngage': 'N-Gage QD', 'nokia6600': 'Nokia 6600', 'nokia7650': 'Nokia 7650',
+TITLES = {'ngage': 'N-Gage', 'ngageqd': 'N-Gage QD', 'nokia6600': 'Nokia 6600', 'nokia7650': 'Nokia 7650',
           'nokia9300': 'Nokia 9300', 'nokia9300i': 'Nokia 9300i', 'nokia9500': 'Nokia 9500 Communicator',
           'p910i': 'Sony Ericsson P910i', 'nokia7710': 'Nokia 7710', 'p800': 'Sony Ericsson P800', 'nokia3230': 'Nokia 3230',
           'nokia6630': 'Nokia 6630', 'nokian70': 'Nokia N70', 'nokia9210': 'Nokia 9210 Communicator', 'nokia9210i': 'Nokia 9210i Communicator',
@@ -333,7 +333,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--scale', type=int, default=2)
     ap.add_argument('--model', default='ngage', choices=sorted(TITLES),
-                    help='which phone model (ngage = N-Gage QD, nokia6600 = Nokia 6600, nokia7650 = Nokia 7650, '
+                    help='which phone model (ngage = N-Gage, ngageqd = N-Gage QD, nokia6600 = Nokia 6600, nokia7650 = Nokia 7650, '
                          'nokia9500 = Nokia 9500 Communicator, p910i = Sony Ericsson P910i, nokia7710 = Nokia 7710, p800 = Sony Ericsson P800, nokia3230 = Nokia 3230)')
     ap.add_argument('--phone', help="which phone (its flash file); default: the model's name")
     ap.add_argument('--mmc', default='', help='memory card image (E:), made with eka1/tools/ngage_card.py')

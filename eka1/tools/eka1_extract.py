@@ -898,8 +898,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("inputs", nargs="+", type=Path,
                     help="Phoenix A2/DCT4 firmware files (e.g. RH2941.0C1 RH2941.026)")
-    ap.add_argument("-o", "--output", type=Path, default=Path("output"),
-                    help="output directory (default: output)")
+    ap.add_argument("-o", "--output", type=Path, required=True,
+                    help="output directory: the phone's own folder, e.g. rh29/output (N-Gage QD), "
+                         "nem4/output (N-Gage); reports go next to it (rh29/analysis)")
     ap.add_argument("--rom-source", help="input filename to use as the MCU/ROM source")
     ap.add_argument("--no-variant", action="store_true", help="skip PPM/variant overlay extraction")
     ap.add_argument("--strict-checksums", action="store_true",

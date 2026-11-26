@@ -30,7 +30,7 @@ not read as "modem":
 
 | Phone (our board) | Symbian CPU | Separate cellular CPU? | Where the modem firmware lives | Reflashed how | In our files? | Evidence |
 |---|---|---|---|---|---|---|
-| N-Gage QD RH-29 (`-M ngage`) | ARM9 in a DCT4 UPP-class ASIC ("WD2 ALGORITHM") [I chip name] | **No**: NOS and Symbian share the ARM; NOS started by `nosstarter.ext`; layer 1 on the ASIC's DSP [I] | inside `RH2941.0C1`: ROM.bin 0x00C000-0x2AC000 = NOS code (scrambled), 0x2AC000-0x31B000 NOS strings/data (plain) | one Phoenix MCU file (+ `.026` PPM: language/variant data); the flasher descrambles while writing [I] | **Yes, scrambled** | [V] entropy 8.0 over 0x40000-0x280000 of `eka1/output/rom/ROM.bin`; strings `ENOS/CMT_SW/ATI/...`, `ENOS/ECS/NOS_DRIVER/SRC/Decsimpphonet.cpp`, `SIM_SERVER_TASK`, `SIM_L2_TASK`; docs/eka1-ngage-questions.md Q20 |
+| N-Gage QD RH-29 (`-M ngageqd`) | ARM9 in a DCT4 UPP-class ASIC ("WD2 ALGORITHM") [I chip name] | **No**: NOS and Symbian share the ARM; NOS started by `nosstarter.ext`; layer 1 on the ASIC's DSP [I] | inside `RH2941.0C1`: ROM.bin 0x00C000-0x2AC000 = NOS code (scrambled), 0x2AC000-0x31B000 NOS strings/data (plain) | one Phoenix MCU file (+ `.026` PPM: language/variant data); the flasher descrambles while writing [I] | **Yes, scrambled** | [V] entropy 8.0 over 0x40000-0x280000 of `eka1/rh29/output/rom/ROM.bin`; strings `ENOS/CMT_SW/ATI/...`, `ENOS/ECS/NOS_DRIVER/SRC/Decsimpphonet.cpp`, `SIM_SERVER_TASK`, `SIM_L2_TASK`; docs/eka1-ngage-questions.md Q20 |
 | 7650 NHL-2 (`-M nokia7650`) | same family as N-Gage | **No** (same as N-Gage) | inside `NHL23250.6C1`, same layout | MCU + PPM (`.677`) | **Yes, scrambled** | [V] same entropy profile and `ENOS/CMT_SW` strings in `eka1/nhl2/output/rom/ROM.bin` |
 | 6600 NHL-10 (`-M nokia6600`) | same family | **No**; Symbian reaches the NOS through `isa_if_driver.ldd` + `enosdriver.ldd` (ISA) instead of `nosdriver`+`phonet` | inside `NHL105530.C1` | MCU + PPM (`.26`) | **Yes, scrambled** | [V] same profile; `..\CMT_SW\...`, `ENOS_SW\SRC\Nos.cpp`, "PMM memory mapping fails at nos.cpp" in `eka1/nhl10/output/rom/ROM.bin`; docs/devices/nokia-6600-nhl10/bring-up.md |
 | 3230 RM-51 (`-M nokia3230`) | same family | **No** | inside `RM51PE507170.C1` | MCU + PPM (`.26`) | **Yes, scrambled** | [V] same profile; `CMT_SW\ISA_PROTOCOLS\DALTON\ATI\...` in `eka1/rm51/output/rom/ROM.bin` |
@@ -99,7 +99,7 @@ Notes:
 
 ## Sources
 
-- Bytes: `eka1/output/rom/ROM.bin`, `eka1/nhl2|nhl10|rm51/output/rom/ROM.bin`, `eka1/rae3/core/ROM.bin` (cmt.ext via
+- Bytes: `eka1/rh29/output/rom/ROM.bin`, `eka1/nhl2|nhl10|rm51/output/rom/ROM.bin`, `eka1/rae3/core/ROM.bin` (cmt.ext via
   `files.json`), `eka1/rm1|rm84/fiasco/core/{MCUSW,DSP0}@*.bin`, `eka1/rm12_rom/rm12pr410002.300` and `*.ini`,
   `build/n95-cmt/MCUSW@00000200.bin`; archive listings of the firmware packages and `eka1/ngage_rom/`.
 - Our docs: docs/eka1-ngage-questions.md (Q20, Q50, Decisions), docs/devices/*/bring-up.md, docs/research/

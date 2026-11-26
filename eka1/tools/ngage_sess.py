@@ -428,7 +428,7 @@ def main():
     ap.add_argument('--debug', default='unimp,guest_errors')
     ap.add_argument('--dfilter', default='', help="QEMU -dfilter (e.g. '0x0..0xfffff,0x50014f00+0x200' with --debug exec,nochain)")
     ap.add_argument('--model', default=os.environ.get('NGAGE_MODEL', 'ngage'), choices=sorted(nr.MODELS),
-                    help='the phone (default ngage = N-Gage QD; nokia6600); start only, later '
+                    help='the phone (default ngage = N-Gage (NEM-4); ngageqd = N-Gage QD; nokia6600); start only, later '
                          'commands read it from the session')
     ap.add_argument('--rom', help="default: the model's ROM.bin")
     ap.add_argument('--ppm', help="default: the model's PPM segments")

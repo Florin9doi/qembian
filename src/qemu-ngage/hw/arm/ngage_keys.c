@@ -95,6 +95,28 @@ static const NgageKey nhl8x_keys[] = {
 };
 
 /*
+ * N-Gage (NEM-4 V 4.03): the 6600's ports and scan (ekeyb reads the joystick port 0x0C15020A, which the QD's never does)
+ * [V run log], with its own key lists (ekeyb 0x5041B10C, sub-matrix g: list_g[line + (row << g)], 0x50419D14) [V static]:
+ *     row 0: lsk   menu                          row 3: .  .  1     2  3  0
+ *     row 1: C     0xB6                          row 4: .  .  4     5  6  call
+ *     row 2: .     .     rsk   *     #   edit    row 5: .  .  7     8  9  end
+ * Left / up / right also have scan codes in its list; down and select are taken to be the 6600's joystick lines [I].
+ * 0xB6 (EStdKeyApplication2 [I]) is a key the QD does not have; its place on the phone is not known.
+ */
+static const NgageKey nem4_keys[] = {
+    { KEY_F1, "left soft", 0, 0 },   { KEY_F5, "menu", 0, 1 },
+    { KEY_BACKSPACE, "clear", 1, 0 }, { KEY_F6, "0xB6", 1, 1 },
+    { KEY_F2, "right soft", 2, 2 },  { KEY_KPASTERISK, "*", 2, 3 }, { KEY_F10, "#", 2, 4 },
+    { KEY_LEFTSHIFT, "edit", 2, 5 },
+    { KEY_1, "1", 3, 2 }, { KEY_2, "2", 3, 3 }, { KEY_3, "3", 3, 4 }, { KEY_0, "0", 3, 5 },
+    { KEY_4, "4", 4, 2 }, { KEY_5, "5", 4, 3 }, { KEY_6, "6", 4, 4 }, { KEY_F3, "call", 4, 5 },
+    { KEY_7, "7", 5, 2 }, { KEY_8, "8", 5, 3 }, { KEY_9, "9", 5, 4 }, { KEY_F4, "end", 5, 5 },
+    { KEY_LEFT, "left", -2, 13 },    { KEY_UP, "up", -2, 1 },   { KEY_RIGHT, "right", -2, 2 },
+    { KEY_DOWN, "down", -2, 10 },    { KEY_ENTER, "select", -2, 11 },
+    { KEY_F12, "power", -1, -1 },
+};
+
+/*
  * Nokia 3230 (RM-51): one 6x6 table (ekeyb 0x503905F0, row * 6 + line) on the same ports as the N-Gage;
  * the joystick is in the matrix (rows 0-1) and 0x0C15020A is never read [V: docs/research/rm51-keys.md].
  * The N-Gage's layout with edit and C swapped, plus 0xAC (EStdKeyDevice8, a side key [I]) at (4, 1).
@@ -417,13 +439,15 @@ void ngage_keys_init(MemoryRegion *sys, qemu_irq irq, NgageKpdLayout layout)
 
     kpd.irq = irq;
     kpd.nhl8x = layout == NGAGE_KPD_NHL8X;
-    kpd.nhl10 = layout == NGAGE_KPD_NHL10;
+    kpd.nhl10 = layout == NGAGE_KPD_NHL10 || layout == NGAGE_KPD_NEM4;     /* NEM-4: the 6600's ports */
     kpd.rm51 = layout == NGAGE_KPD_RM51;
-    kpd.keys = kpd.nhl8x ? nhl8x_keys
+    kpd.keys = layout == NGAGE_KPD_NEM4 ? nem4_keys
+             : kpd.nhl8x ? nhl8x_keys
              : kpd.nhl10 ? nhl10_keys
              : kpd.rm51  ? rm51_keys
              : ngage_keys;
-    kpd.nkeys = kpd.nhl8x ? ARRAY_SIZE(nhl8x_keys)
+    kpd.nkeys = layout == NGAGE_KPD_NEM4 ? ARRAY_SIZE(nem4_keys)
+              : kpd.nhl8x ? ARRAY_SIZE(nhl8x_keys)
               : kpd.nhl10 ? ARRAY_SIZE(nhl10_keys)
               : kpd.rm51  ? ARRAY_SIZE(rm51_keys)
               : ARRAY_SIZE(ngage_keys);
