@@ -16,7 +16,9 @@ it done at ~138 s, after which the screensaver shows: white with the date bar an
 the Time and Date queries, the **Active Standby home screen** (date, shortcut bar, "No calendar entries for today",
 Messag./Gallery softkeys) and the **Menu grid** (Messaging, Contacts, Calendar, RealPlayer, Gallery, Imaging, Clock,
 Web, Office; it fills in a few seconds after the Menu title). No sound, network, SIM, DRM or secure environment; the
-cover display is driven (its frame goes over SPI) but not shown. Evidence: build/evidence/rm42-*.png.
+cover display is driven (its frame goes over SPI) but not shown. Clock: the RTC time read `19 0A` is answered with
+QEMU's clock in UTC (H-rm84-rtc, docs/research/n70-rtc.md); a second boot from a kept NAND asks no Time or Date and
+shows the host's date in the home city's zone [V run 2026-11-26]. Evidence: build/evidence/rm42-*.png.
 
     python3 eka1/tools/ngage_phone.py --model nokian90 --phone NAME [--fresh]   # the window (352x416 at scale 1)
     python3 eka1/tools/ngage_sess.py -s NAME --model nokian90 --flash build/ngage/NAME.flash --catch fatal,pabt,dabt,undef start

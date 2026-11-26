@@ -159,7 +159,7 @@ Environment knobs (experiments):
 | `NGAGE_STARTCODE=N` | start-up code (default 1 = normal, -1 = off; Q51) |
 | `NGAGE_ITEM12=N` | NOS product data item 12, the SW start-up reason (Q44) |
 | `NGAGE_POWERON=N` | UEM power-on reason register (Q51) |
-| `NGAGE_RTC=...` | QEMU `-rtc` value the launchers pass (default `base=localtime`): the phones' clock (H-uem-rtc), e.g. `base=2005-06-15T15:20:00` |
+| `NGAGE_RTC=...` | QEMU `-rtc` value the launchers pass (default `base=localtime`): the phones' clock (H-uem-rtc; the N70, N72 and N90 get it as UTC over ISI, H-rm84-rtc), e.g. `base=2005-06-15T15:20:00` |
 
 ## Debugging
 

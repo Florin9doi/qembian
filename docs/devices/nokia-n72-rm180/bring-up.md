@@ -15,7 +15,9 @@ From the phone's own unmodified ROM, in one session and no stalls past the board
 (clock, date, shortcut bar, "No calendar entries for today", Messag./Gallery softkeys), the **Menu grid** (Messaging,
 Contacts, Calendar, Radio, Gallery, Imaging, Clock, Web, My own; it fills in some seconds after the Menu title),
 folders open (Imaging: Camera, Movie, RealPlayer, Img. print). **A second boot from the kept NAND** reaches the home
-screen (the city kept; Time and Date asked again: no clock is kept between runs). No catches (fatal, pabt, dabt,
+screen (the city kept). Since 2026-11-26 the board answers the RTC time read `19 0A` with QEMU's clock in UTC
+(H-rm84-rtc, docs/research/n70-rtc.md): the second boot asks no Time or Date and shows the host's time in the home
+city's zone [V run]; a factory-fresh boot still asks (the queries' defaults then win until the next boot). No catches (fatal, pabt, dabt,
 undef) in either boot. No sound, network, SIM, DRM, secure environment or memory card. Evidence:
 build/evidence/rm180-*.png.
 

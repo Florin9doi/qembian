@@ -12,7 +12,9 @@ Marks: **[V]** verified in the firmware or by a run, **[I]** inferred.
 stalls: first boot ~3.5 min (NOKIA logo while C: is formatted), then "Select current city", the Time and Date queries,
 the Active Standby home screen (clock, shortcut bar, "No calendar entries for today", Messag./Music softkeys), the Menu
 (F5) with its grid (Messaging, Contacts, Calendar, Radio, Gallery, Imaging, Clock, Web, My own), folders open (Imaging:
-Camera, Movie, RealPlayer, Img. print). No sound, network, SIM, DRM, secure environment or memory card. **Not checked
+Camera, Movie, RealPlayer, Img. print). No sound, network, SIM, DRM, secure environment or memory card. Clock: the RTC
+time read `19 0A` is answered with QEMU's clock in UTC (H-rm84-rtc, [docs/research/n70-rtc.md](../../research/n70-rtc.md));
+later boots skip the Time and Date queries. **Not checked
 yet: a second boot from a kept NAND** (the 6630's open stall 26). How it was done: [how-it-was-done.md](how-it-was-done.md).
 
     python3 eka1/tools/ngage_phone.py --model nokian70 --phone NAME [--fresh]   # the window (NAND kept in build/ngage/phones/NAME.flash)

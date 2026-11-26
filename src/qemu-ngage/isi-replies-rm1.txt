@@ -66,3 +66,4 @@ reply 0B 04 05 00 00
 # (1,1) (2,2) (1,3) (1,6) [V Ghidra]; (1,1) chosen [I meaning]
 reply 1C 2D 2E 01 01 00
 # SMS 02 16 {00 00} (NOKIATSY): the 9500's reply `17 00 x13` made CTelServer panic USER 21 here [V run]: left unanswered
+reply 19 0A 0B 01 02 01 0C 01 00 rtc 00 04 04 01 00       # RTC time read (6630, 6680: custom.ldd, object 0x7F, sets the clock from sb 01 read at frame [12], the N70's parse; this NokiaDSY sends no 19 0A): QEMU's -rtc clock as UTC (H-rm84-rtc, docs/research/n70-rtc.md)

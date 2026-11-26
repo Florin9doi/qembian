@@ -39,6 +39,10 @@
  * length (LE, from the receiver object on), receiver object, sender object, transaction id,
  * message id, data [V: isaapi CheckCrcMsgL]. A reply swaps devices and objects [I]. A reply's
  * data byte written `rq10` is the request's byte 10 (the N70's ISC channel open: {channel, object}).
+ * `rtc` stands for 7 data bytes, QEMU's RTC clock (-rtc base=..., NGAGE_RTC) as UTC when the reply is
+ * queued: YYYY (big-endian), month 1-12, day 1-31, hour, minute, second (the N70/N72/N90 RTC time read
+ * 19 0A -> 0B, sub-block 01: the phone takes it as universal time and adds the home city's offset [V run];
+ * docs/research/n70-rtc.md).
  * Indications (`ind UNIT OBJ RES MSG BYTES`, as for the N-Gage): UNIT is the subscribing object
  * (decimal); the indication goes to object OBJ when UNIT subscribes (resource 0, message 0, to
  * object 0x10: a list of resource/message pairs [I]), from object 0x10.
@@ -48,6 +52,8 @@
 #include "qemu/osdep.h"
 #include "qemu/log.h"
 #include "hw/core/cpu.h"
+#include "qemu/cutils.h"
+#include "system/rtc.h"
 #include "ngage_isi.h"
 
 #define NGAGE_ISI_CHANS 32
@@ -69,6 +75,7 @@ typedef struct {
     uint8_t data[200];          /* len= up to 200 (the 9500's SIM 09 31 reply needs a 76-byte frame) */
     uint8_t rq10[4];            /* "rq10": data positions that take the request's byte 10 (N70 ISC channel) */
     uint8_t nrq10;
+    uint8_t rtc_at;             /* "rtc": 1 + data position of the 7 date/time bytes; 0 = none */
     int media, sobj;            /* "media=XX", "sobj=XX": override the media byte / sender object; -1 = mirror */
     int robj;                   /* "robj=XX": another receiver object (a reply+ to a third party); -1 = the requester */
 } NgageIsiReply;
@@ -329,6 +336,13 @@ void ngage_isi_load(const char *path)
                 r.robj = strtoul(*w + 5, NULL, 16);
                 continue;
             }
+            if (!strcmp(*w, "rtc") && k >= 3 && !r.rtc_at && r.len + 7 <= sizeof(r.data)) {
+                r.rtc_at = r.len + 1;
+                memset(r.data + r.len, 0, 7);
+                r.len += 7;
+                k += 7;
+                continue;
+            }
             if (!strcmp(*w, "rq10") && k >= 3 && r.len < sizeof(r.data) && r.nrq10 < sizeof(r.rq10)) {
                 r.rq10[r.nrq10++] = r.len;
                 r.data[r.len++] = 0;
@@ -399,6 +413,26 @@ static void enqueue(NgageIsiChan *c, const uint8_t *req, uint32_t reqlen, const 
     }
     for (unsigned i = 0; i < r->nrq10; i++) {
         m->b[10 + r->rq10[i]] = reqlen > 10 ? req[10] : 0;
+    }
+    if (r->rtc_at && !r->echo) {
+        struct tm tm;
+        uint8_t *t = m->b + 10 + r->rtc_at - 1;
+        unsigned year;
+        time_t utc;
+
+        /* base=localtime gives local fields with tm_gmtoff set; base=utc or a date gives UTC fields, gmtoff 0 */
+        qemu_get_timedate(&tm, 0);
+        utc = -tm.tm_gmtoff;
+        utc += mktimegm(&tm);
+        gmtime_r(&utc, &tm);
+        year = tm.tm_year + 1900;
+        t[0] = year >> 8;
+        t[1] = year & 0xff;
+        t[2] = tm.tm_mon + 1;
+        t[3] = tm.tm_mday;
+        t[4] = tm.tm_hour;
+        t[5] = tm.tm_min;
+        t[6] = tm.tm_sec;
     }
     m->len = 10 + dlen;
     while (*q) {

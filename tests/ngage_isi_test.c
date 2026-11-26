@@ -11,12 +11,14 @@
 #include <assert.h>
 #include <unistd.h>
 #include "../src/qemu-ngage/hw/arm/ngage_isi.h"
+#include "system/rtc.h"
 
 GString *shim_log;
 static CPUState cpu0;
 CPUState *first_cpu = &cpu0;
 uint8_t shim_mem[65536];
 uint32_t shim_mem_base = 0x80000000;
+struct tm shim_rtc_tm;
 
 static uint8_t got[512];
 static uint32_t gotlen;
@@ -332,6 +334,61 @@ static void test_ind_media(void)
     assert(seen == 3);
 }
 
+/*
+ * Regression rm84_time_query_every_boot (Nokia N70): custom.ldd (object 0x40) and NokiaDSY (0x18) send the RTC
+ * time read 19 0A and nobody answered, so the clock stayed unset and Startup asked for the time and date at every
+ * boot (docs/research/n70-rtc.md). "rtc" puts QEMU's RTC date and time in the reply: YYYY BE, MM, DD, hh, mm, ss.
+ */
+static void test_rtc_time_read(void)
+{
+    static const uint8_t req[] = { 0x00, 0x00, 0x00, 0x19, 0x06, 0x00, 0x00, 0x40, 0x50, 0x0a, 0x00, 0x00 };
+    static const uint8_t want[] = { 0x01, 0x02, 0x01, 0x0c, 0x01, 0x00, 0x07, 0xd5, 0x06, 0x0f, 0x0f, 0x14, 0x00,
+                                    0x00, 0x04, 0x04, 0x01, 0x00 };
+    uint8_t out[512];
+
+    load("reply 19 0A 0B 01 02 01 0C 01 00 rtc 00 04 04 01 00   # isi-replies-rm84.txt\n");
+    shim_rtc_tm = (struct tm){ .tm_year = 105, .tm_mon = 5, .tm_mday = 15, .tm_hour = 15, .tm_min = 20 };
+    ngage_isi_isa_send(req, sizeof(req));
+    assert(ngage_isi_isa_take(out, sizeof(out)) == 10 + sizeof(want));
+    assert(out[3] == 0x19 && out[6] == 0x40 && out[8] == 0x50 && out[9] == 0x0b);
+    assert(out[4] == 4 + sizeof(want));                 /* length counts the 7 rtc bytes */
+    assert(!memcmp(out + 10, want, sizeof(want)));      /* sb 01 first (custom.ldd reads it at [12]), sb 04 at [24] */
+
+    /* the clock is read when the reply is queued, not when the table is loaded; a year past 255 is big-endian */
+    shim_rtc_tm = (struct tm){ .tm_year = 199, .tm_mon = 11, .tm_mday = 31, .tm_hour = 23, .tm_min = 59,
+                               .tm_sec = 59 };
+    ngage_isi_isa_send(req, sizeof(req));
+    assert(ngage_isi_isa_take(out, sizeof(out)) == 10 + sizeof(want));
+    assert(out[16] == 0x08 && out[17] == 0x33 && out[18] == 12 && out[19] == 31);
+    assert(out[20] == 23 && out[21] == 59 && out[22] == 59 && out[23] == 0x00 && out[24] == 0x04);
+}
+
+/*
+ * Regression rm180_rtc_is_utc (N72, N90): the phones take sb 01 as universal time and add the home city's offset;
+ * the first "rtc" sent QEMU's local fields (-rtc base=localtime), so with the host at UTC+2 and Abu Dhabi (UTC+4)
+ * as home city a phone showed 27/11 at 22:48 on 26/11. Local fields (tm_gmtoff set) are turned into UTC, also
+ * across a day, month and year boundary; UTC fields (gmtoff 0: base=utc or a fixed date) are sent as they are.
+ */
+static void test_rtc_sends_utc(void)
+{
+    static const uint8_t req[] = { 0x00, 0x00, 0x00, 0x19, 0x06, 0x00, 0x00, 0x18, 0x20, 0x0a, 0x00, 0x00 };
+    uint8_t out[512];
+
+    load("reply 19 0A 0B 01 02 01 0C 01 00 rtc 00 04 04 01 00\n");
+    shim_rtc_tm = (struct tm){ .tm_year = 127, .tm_mon = 0, .tm_mday = 1, .tm_hour = 1, .tm_min = 30,
+                               .tm_sec = 5, .tm_gmtoff = 2 * 3600 };       /* 2027-01-01 01:30:05 at UTC+2 */
+    ngage_isi_isa_send(req, sizeof(req));
+    assert(ngage_isi_isa_take(out, sizeof(out)) == 28);
+    assert(out[16] == 0x07 && out[17] == 0xea && out[18] == 12 && out[19] == 31);   /* 2026-12-31 */
+    assert(out[20] == 23 && out[21] == 30 && out[22] == 5);
+
+    shim_rtc_tm = (struct tm){ .tm_year = 126, .tm_mon = 10, .tm_mday = 26, .tm_hour = 22, .tm_min = 0,
+                               .tm_gmtoff = -5 * 3600 };                    /* 22:00 at UTC-5 */
+    ngage_isi_isa_send(req, sizeof(req));
+    assert(ngage_isi_isa_take(out, sizeof(out)) == 28);
+    assert(out[18] == 11 && out[19] == 27 && out[20] == 3 && out[21] == 0);         /* 27/11 03:00 UTC */
+}
+
 int main(void)
 {
     shim_log = g_string_new(NULL);
@@ -357,6 +414,8 @@ int main(void)
     test_isc_defaults_mirror();
     test_reply_plus_robj();
     test_ind_media();
+    test_rtc_time_read();
+    test_rtc_sends_utc();
     printf("ngage_isi_test: all passed\n");
     return 0;
 }
