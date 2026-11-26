@@ -71,4 +71,18 @@ select are taken from the 6600 [I]. 0xB6 is a key the QD lacks (host F6); where 
 
 ## Status
 
-See the end of this file (updated with each run).
+- **2026-11-26: the freeze after start-up is fixed (H-nem4-uart-txempty).** The phone stopped before SysAp's UI, both
+  on a kept flash and after a fresh one's format: euart1.pdd (0x510E8370, a UPP UART at 0x0C150510 the QD's boots never
+  wait on) spun in `while (*0x800004A8 && !(*0x0C150514 & 4))` with no timeout (0x510E89CC) [V]. The board now reports
+  bit 2 (transmitter empty [I]) set. The QD's newer euart1.pdd has the same wait but gives up after 1000 tries [V].
+  Now [V run]: a kept flash reaches the N-GAGE logo and the first-boot Time query in ~2 min (30 processes, SysAp up);
+  a factory-fresh flash reaches the same screen in ~4 min (the C: format comes first). What is behind this UART is not
+  known: the NEM-4 has an FM radio and a music player that the QD lacks, so the radio is a candidate [I].
+  Regression test: `tests/ngage_nem4_board_test.py` `Nem4UartTxEmptyFreeze`.
+- **2026-11-26: restarts shortly after the home screen (ViewSrv 11).** The kernel faulted "PLAT 91" (a system-critical
+  thread died): Starter, which had renamed its process "CRASH" and its thread "Phone.app-508B82CE" and re-raised
+  Phone.app's panic, ViewSrv 11 (Phone's thread object: exit type 2, reason 11) [V, owner's session dump]. 0x508B82CE is
+  in EStor.dll: Phone.app was in the stream store, i.e. writing a file, when the view server's timeout ran out [I].
+  Flash writes were ~20x too slow (host timer latency per program cycle): H-ngage-flash-fiq. With it the owner's
+  phone reaches the home screen and stays up [owner]. Not proven to be the cause: my headless runs without the fix
+  (fresh flash, OK pressed at once) did not crash either; the owner's window (10 Hz screendumps) did, twice.

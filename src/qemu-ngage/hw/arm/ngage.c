@@ -204,6 +204,15 @@ static const struct {
      * the start-up (H-rm51-bt-uart; transmitter ready [I]; no BlueCore behind it)
      */
     { 0x0c150570, 0x00800000, "H-rm51-bt-uart: 0x0C150572 bit 7, BlueCore UART transmitter ready [I]" },
+    /*
+     * N-Gage (NEM-4): euart1.pdd (0x510E8370, the UPP UART at 0x0C150510) waits for 0x0C150514 bit 2 before it
+     * reconfigures or stops the port (0x510E8820, 0x510E89CC, 0x510E8BE8): `while (*0x800004A8 && !(st & 4))`,
+     * no timeout [V]. Bit 2 never came, so the thread that opened the port spun for ever and the phone froze.
+     * Its interrupt handler reads bit 5 of the same register (receive error) but not bit 2 [V]: bit 2 =
+     * transmitter empty [I] (H-nem4-uart-txempty). The QD's newer euart1.pdd polls the same bit but gives up
+     * after 1000 tries (0x503F345C) [V], which is why the QD never hung there.
+     */
+    { 0x0c150514, 0x00000004, "H-nem4-uart-txempty: 0x0C150514 bit 2, UART transmitter empty [I]" },
 };
 
 /*
@@ -762,6 +771,25 @@ static uint32_t ngage_timer_count(NgageTimer *s)
     return gone >= s->start_count ? 0 : s->start_count - gone;
 }
 
+/*
+ * H-ngage-flash-fiq: timer 3 in periodic mode with a period under NGAGE_TIMER_FAST_NS is medint.pdd's flash-program
+ * clock (0x186-0x1FE ticks = 11-15 us, one halfword per FIQ, Q54). QEMU delivered each period's host timer ~200 us
+ * late on average (up to ~9 ms) [V, measured 2026-11-26], so the phone programmed ~3500 halfwords/s instead of
+ * ~80 000. Instead of a host timer per period, a period counts as elapsed at once: at the start of a run (+10) and
+ * whenever the FIQ handler acknowledges (+08), so the FIQ comes again as soon as the handler returns, until it stops
+ * the timer (+04 = 0) at the end of its buffer. QEMU's flash completes every program at once, so the handler always
+ * finds it ready. NEM-4 factory-fresh boot to SysAp: 252 s -> ~200 s. Slow writes are the suspected cause [I] of
+ * the NEM-4's ViewSrv 11 restarts (Phone.app in EStor.dll, Starter renamed "CRASH"); NGAGE_NO_FAST_FIQ=1 turns it off.
+ */
+#define NGAGE_TIMER_FAST_NS 100000
+
+static bool ngage_timer_fast(NgageTimer *s)
+{
+    return s->index == 3 && s->regs[0x04 >> 2] == 2 && s->regs[0x18 >> 2] &&
+           muldiv64(s->regs[0x18 >> 2], NANOSECONDS_PER_SECOND, ngage_timer_hz(s)) < NGAGE_TIMER_FAST_NS &&
+           !getenv("NGAGE_NO_FAST_FIQ");
+}
+
 static void ngage_timer_expire(void *opaque)
 {
     NgageTimer *s = opaque;
@@ -770,6 +798,9 @@ static void ngage_timer_expire(void *opaque)
     s->regs[0x10 >> 2] = 0;
     qemu_set_irq(s->irq, 1);
     if (s->regs[0x04 >> 2] == 2 && s->regs[0x18 >> 2]) {
+        if (ngage_timer_fast(s)) {
+            return;             /* the next period starts at the acknowledgement (+08) */
+        }
         ngage_timer_arm(s, s->regs[0x18 >> 2]);
     }
 }
@@ -820,11 +851,20 @@ static void ngage_timer_write(void *opaque, hwaddr addr, uint64_t val, unsigned 
         break;
     case 0x08:
         qemu_set_irq(s->irq, 0);
+        if (ngage_timer_fast(s) && !timer_pending(s->t)) {
+            s->regs[0x08 >> 2] |= 1;            /* H-ngage-flash-fiq: the next period has passed */
+            qemu_set_irq(s->irq, 1);
+        }
         break;
     case 0x10:                  /* (re)start the countdown; written after the mode [V] */
         qemu_set_irq(s->irq, 0);
         /* medint.pdd starts timer 3 by writing the count without a mode (Q46): one-shot */
-        if (val) {
+        if (val && ngage_timer_fast(s)) {
+            timer_del(s->t);                    /* H-ngage-flash-fiq: the first period too */
+            s->regs[0x08 >> 2] |= 1;
+            s->regs[0x10 >> 2] = 0;
+            qemu_set_irq(s->irq, 1);
+        } else if (val) {
             ngage_timer_arm(s, val);
         } else {
             timer_del(s->t);

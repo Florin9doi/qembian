@@ -202,5 +202,81 @@ class MachineLinks(unittest.TestCase):
         self.assertTrue(str(qd['ppm']).startswith(str(REPO / 'eka1/rh29/')))
 
 
+def known_set(addr):
+    """the 'set' bits ngage.c's ngage_known table forces on for this register word (0 = not listed)"""
+    t = (HW / 'ngage.c').read_text().split('} ngage_known[] = {', 1)[1].split('\n};\n', 1)[0]
+    bits = 0
+    for a, s in re.findall(r'\{\s*(0x[0-9a-f]+),\s*(0x[0-9a-f]+),', t):
+        if int(a, 16) == addr:
+            bits |= int(s, 16)
+    return bits
+
+
+class Nem4UartTxEmptyFreeze(unittest.TestCase):
+    """Bug (2026-11-26): the NEM-4 froze after start-up (kept flash: before SysAp's UI). euart1.pdd spun in
+    `while (*0x800004A8 && !(*0x0C150514 & 4))` with no timeout, because the catch-all register read back 0.
+    Fix H-nem4-uart-txempty: the board reports bit 2 (transmitter empty) set."""
+
+    def test_board_forces_tx_empty(self):
+        self.assertEqual(known_set(0x0c150514) & 4, 4)
+
+    @unittest.skipUnless((NEM4 / 'ROM.bin').exists(), 'NEM-4 ROM not extracted in eka1/nem4')
+    def test_nem4_euart1_waits_on_bit2(self):
+        r = Rom(NEM4)
+        f = r.files['euart1.pdd']
+        va, size = f['rom_virtual_address'], f['size']
+        self.assertEqual(va, 0x510e8370)
+        lits = [a for a in range(va, va + size, 4) if r.word(a) == 0x00150514]
+        self.assertEqual(len(lits), 4)
+        # the wait loop at 0x510E8A0C: ldr r0, =0x00150514; bl read16; tst r0, #4; beq retry
+        self.assertEqual(r.word(0x510e8a0c), 0xe59f0050)        # ldr r0, [pc, #80] -> 0x510E8A64
+        self.assertEqual(r.word(0x510e8a64), 0x00150514)
+        self.assertEqual(r.word(0x510e8a14), 0xe3100004)        # tst r0, #4
+        self.assertEqual(r.word(0x510e8a18), 0x0afffff8)        # beq: no timeout but *0x800004A8
+
+    @unittest.skipUnless((RH29 / 'ROM.bin').exists(), 'QD ROM not extracted in eka1/rh29')
+    def test_qd_euart1_bounds_the_same_wait(self):
+        """why only the NEM-4 froze: the QD's newer euart1.pdd polls the same bit but gives up after 1000 tries"""
+        r = Rom(RH29)
+        self.assertEqual(r.files['euart1.pdd']['rom_virtual_address'], 0x503f30c0)
+        self.assertEqual(r.word(0x503f345c), 0xe3a04ffa)        # mov r4, #1000
+        self.assertEqual(r.word(0x503f3464), 0xe2544001)        # subs r4, r4, #1
+        self.assertEqual(r.word(0x503f3468), 0x0a000007)        # beq out
+        self.assertEqual(r.word(0x503f353c), 0x00150514)
+        self.assertEqual(r.word(0x503f3478), 0xe3100004)        # tst r0, #4
+
+
+class FlashFiqNotHostTimerBound(unittest.TestCase):
+    """Bug (2026-11-26): medint.pdd programs one halfword per timer-3 FIQ (period 0x186-0x1FE ticks, 11-15 us), but each
+    period waited for a QEMU host timer (~200 us late), so flash writes ran ~20x too slow (NEM-4 fresh boot 252 s,
+    ViewSrv 11 restarts suspected). H-ngage-flash-fiq: short timer-3 periods elapse at the start (+10) and at each
+    acknowledgement (+08)."""
+
+    src = (HW / 'ngage.c').read_text()
+
+    def fast_fn(self):
+        return self.src.split('static bool ngage_timer_fast(NgageTimer *s)', 1)[1].split('\n}\n', 1)[0]
+
+    def test_threshold_covers_medint_not_the_tick(self):
+        ns = int(re.search(r'#define NGAGE_TIMER_FAST_NS (\d+)', self.src).group(1))
+        hz = 34666667
+        self.assertLess(0x1fe * 1e9 / hz, ns)          # medint's longest flash period: 14.7 us
+        self.assertGreater(0x843e2 * 1e9 / hz, ns)      # the kernel tick (timer 0): 15.6 ms
+        f = self.fast_fn()
+        self.assertIn('s->index == 3', f)               # only medint's timer
+        self.assertIn('== 2', f)                        # only periodic runs
+
+    def test_ack_and_start_raise_at_once(self):
+        w = self.src.split('static void ngage_timer_write', 1)[1].split('\n}\n', 1)[0]
+        ack = w.split('case 0x08:', 1)[1].split('break;', 1)[0]
+        self.assertIn('ngage_timer_fast(s)', ack)
+        self.assertIn('qemu_set_irq(s->irq, 1)', ack)
+        start = w.split('case 0x10:', 1)[1].split('break;', 1)[0]
+        self.assertIn('ngage_timer_fast(s)', start)
+        self.assertIn('qemu_set_irq(s->irq, 1)', start)
+        e = self.src.split('static void ngage_timer_expire', 1)[1].split('\n}\n', 1)[0]
+        self.assertLess(e.index('ngage_timer_fast(s)'), e.index('ngage_timer_arm('))   # no host timer re-armed
+
+
 if __name__ == '__main__':
     unittest.main()

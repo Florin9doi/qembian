@@ -1,6 +1,11 @@
 # N-Gage first boot is too slow (factory-fresh flash): investigation notes
 
-Status: **open** (2026-11-26). Expected: a factory-fresh N-Gage QD (`-M ngage` on HEAD f40e28d, RH-29 V 04.10)
+Status: **QD: fine now** (owner, 2026-11-26: ~2 min for a fresh boot, under a minute for a kept flash). **NEM-4:
+the "freeze" was a different bug, fixed:** euart1.pdd's endless UART transmitter wait (H-nem4-uart-txempty,
+docs/devices/nokia-ngage-nem4/bring-up.md "Status"); a fresh NEM-4 now reaches the Time query in ~4 min. The notes
+below are the earlier (2026-11-26 morning) investigation of slow flash writes.
+
+Original status: **open** (2026-11-26). Expected: a factory-fresh N-Gage QD (`-M ngage` on HEAD f40e28d, RH-29 V 04.10)
 reaches SysAp in 1-2 min (docs/eka1-ngage.md says ~40 s to the logo, ~95 s to the UI, measured 2026-11-11).
 Observed: after 5-10 min it is still at the start-up stage with a white screen. A kept flash (second boot) is
 not affected. The N-Gage NEM-4 port (stashed, see the end) behaves the same, so this is a board problem.
