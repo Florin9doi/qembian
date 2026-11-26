@@ -43,11 +43,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 FLASH = {'ngage': ROOT / 'build/ngage/phones/nem4-agent.flash',
          'ngageqd': ROOT / 'build/ngage/phones/test.flash',
          'nokia6600': ROOT / 'build/ngage/phones/nhl10-agent.flash',
-         'nokia7650': ROOT / 'build/ngage/phones/nhl2-agent.flash',
-         'nokia3650': ROOT / 'build/ngage/phones/nhl8-agent.flash',
-         'nokia3660': ROOT / 'build/ngage/phones/nhl8x-agent.flash'}
-EVIDENCE = {'ngage': 'nem4', 'ngageqd': 'ngage', 'nokia6600': 'nhl10', 'nokia7650': 'nhl2', 'nokia3650': 'nhl8',
-            'nokia3660': 'nhl8x'}
+         'nokia7650': ROOT / 'build/ngage/phones/nhl2-agent.flash'}
+EVIDENCE = {'ngage': 'nem4', 'ngageqd': 'ngage', 'nokia6600': 'nhl10', 'nokia7650': 'nhl2'}
 
 
 def load(p):

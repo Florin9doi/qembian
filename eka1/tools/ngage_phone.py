@@ -58,9 +58,9 @@ KEY_ROWS = [
     [('Call', 'f3'), ('▲', 'up'), ('End', 'f4')],
     [('◀', 'left'), ('Select', 'ret'), ('▶', 'right')],
     [('C', 'backspace'), ('▼', 'down'), ('Power', 'f12')],
-    [('1', '1'), ('2', '2'), ('3', '3')],
-    [('4', '4'), ('5', '5'), ('6', '6')],
-    [('7', '7'), ('8', '8'), ('9', '9')],
+    [('1', '1'), ('2 (abc)', '2'), ('3 (def)', '3')],
+    [('4 (ghi)', '4'), ('5 (jkl)', '5'), ('6 (mno)', '6')],
+    [('7 (pqrs)', '7'), ('8 (tuv)', '8'), ('9 (wxyz)', '9')],
     [('*', 'kp_multiply'), ('0', '0'), ('#', 'f10')],
 ]
 
@@ -75,11 +75,14 @@ for i in range(10):
     HOST_KEYS[getattr(Qt.Key, 'Key_%d' % i)] = str(i)
 
 
-TITLES = {'ngage': 'N-Gage', 'ngageqd': 'N-Gage QD', 'nokia6600': 'Nokia 6600', 'nokia7650': 'Nokia 7650',
+TITLES = {'nokia7650': 'Nokia 7650', 'nokia3650': 'Nokia 3650', 'nokia3660': 'Nokia 3660',
+          'ngage': 'N-Gage', 'ngageqd': 'N-Gage QD', 'nokia6600': 'Nokia 6600',
+          'nokia3230': 'Nokia 3230', 'nokia6260': 'Nokia 6260', 'nokia6670': 'Nokia 6670', 'nokia7610': 'Nokia 7610',
+          'nokia6630': 'Nokia 6630', 'nokia6680': 'Nokia 6680',
+          'nokian70': 'Nokia N70', 'nokian72': 'Nokia N72', 'nokian90': 'Nokia N90',
+          'nokia9210': 'Nokia 9210 Communicator', 'nokia9210i': 'Nokia 9210i Communicator',
           'nokia9300': 'Nokia 9300', 'nokia9300i': 'Nokia 9300i', 'nokia9500': 'Nokia 9500 Communicator',
-          'p910i': 'Sony Ericsson P910i', 'nokia7710': 'Nokia 7710', 'p800': 'Sony Ericsson P800', 'nokia3230': 'Nokia 3230', 'nokia7610': 'Nokia 7610', 'nokia6670': 'Nokia 6670', 'nokia6260': 'Nokia 6260',
-          'nokia6630': 'Nokia 6630', 'nokian70': 'Nokia N70', 'nokia9210': 'Nokia 9210 Communicator', 'nokia9210i': 'Nokia 9210i Communicator',
-          'nokia3650': 'Nokia 3650', 'nokia3660': 'Nokia 3660', 'nokia6680': 'Nokia 6680', 'nokian90': 'Nokia N90', 'nokian72': 'Nokia N72'}
+          'nokia7710': 'Nokia 7710', 'p800': 'Sony Ericsson P800', 'p910i': 'Sony Ericsson P910i'}
 
 # the clamshell Communicators (cover panel, lid, QWERTY): the 9300 and the 9500
 COMMUNICATORS = ('nokia9300', 'nokia9300i', 'nokia9500')
@@ -99,9 +102,11 @@ QWERTY.update({
     Qt.Key.Key_Asterisk: 'kp_multiply',
 })
 RA2_BUTTONS = [[('Cover: left soft', 'f1'), ('Select', 'ret'), ('Right soft', 'f2'), ('Call', 'f3'),
-                ('End', 'f4'), ('*', 'kp_multiply'), ('#', 'backslash'), ('Menu', 'menu')],
+                ('End', 'f4'), ('*', 'kp_multiply'), ('#', 'backslash')],
                [('Cmd 1 (OK)', 'f9'), ('Cmd 2', 'f10'), ('Cmd 3', 'f11'), ('Cmd 4', 'f12'),
-                ('Esc', 'esc'), ('Enter', 'ret'), ('Chr', 'alt'), ('Desk', 'f1')]]
+                ('Esc', 'esc'), ('Enter', 'ret'), ('Chr', 'alt'), ('Menu', 'menu')],
+               [('Desk', 'f1'), ('Telephone', 'f2'), ('Messaging', 'f3'), ('Internet', 'f4'),
+                ('Contacts', 'f5'), ('Documents', 'f6'), ('Calendar', 'f7'), ('My own', 'f8')]]
 
 
 # Sony Ericsson P910i (p910i_input.c maps them): the flip keypad's pads (flip closed: digits, *, #,
@@ -125,7 +130,7 @@ RM12_KEYS = {Qt.Key.Key_Up: 'up', Qt.Key.Key_Down: 'down', Qt.Key.Key_Left: 'lef
 RM12_KEYS.update({getattr(Qt.Key, 'Key_F%d' % i): 'f%d' % i for i in range(1, 8)})
 RM12_BUTTONS = [[('Menu', 'f1'), ('Desk', 'f2'), ('Call', 'f3'), ('End', 'f4'), ('Back', 'esc')],
                 [('◀', 'left'), ('▲', 'up'), ('Select', 'ret'), ('▼', 'down'), ('▶', 'right')],
-                [('Key F5', 'f5'), ('Key F6', 'f6'), ('Key F7', 'f7')]]
+                [('Voice', 'f5'), ('Zoom', 'f6'), ('Switch', 'f7')]]
 
 
 # Nokia 6630 (nokia6630_keys.h maps the qcodes to ekeyp's MPUIO matrix): as the N-Gage's rows, # = f8
@@ -146,8 +151,8 @@ RM84_BUTTONS = [row[:] for row in RM1_BUTTONS] + [[('Key E3', 'f10'), ('Key BA',
 # Delete the application keys (Desk, Telephone, ... [I order])
 RAE3_BUTTONS = [[('Cmd 1 (OK)', 'f1'), ('Cmd 2', 'f2'), ('Cmd 3', 'f3'), ('Cmd 4', 'f4'), ('Menu', 'f9'),
                  ('Esc', 'esc'), ('Enter', 'ret'), ('Help', 'f10')],
-                [('App 1', 'f5'), ('App 2', 'f6'), ('App 3', 'f7'), ('App 4', 'f8'), ('App 5', 'f11'),
-                 ('App 6', 'f12'), ('App 7', 'insert'), ('App 8', 'delete')]]
+                [('Desk', 'f5'), ('Telephone', 'f6'), ('Messaging', 'f7'), ('Internet', 'f8'), ('Contacts', 'f11'),
+                 ('Calendar', 'f12'), ('Office', 'insert'), ('Extras', 'delete')]]
 RAE3_HOST = dict(QWERTY)
 RAE3_HOST.update({Qt.Key.Key_Delete: 'delete'})
 
@@ -204,22 +209,20 @@ class Phone(QtWidgets.QWidget):
             self.lid.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             self.lid.clicked.connect(self.toggle_lid)
             lay.addWidget(self.lid)
+        if model in ('nokia7710', 'p800'):
+            self.labels[0].installEventFilter(self)       # the pen
         if model == 'p910i':
             self.flip = QtWidgets.QPushButton('Close flip')
             self.flip.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             self.flip.clicked.connect(self.toggle_flip)
             lay.addWidget(self.flip)
             self.labels[0].installEventFilter(self)       # the pen
-        if model == 'nokia7650':
-            self.slide = QtWidgets.QPushButton('Close slide')
-            self.slide.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            self.slide.clicked.connect(self.toggle_slide)
-            lay.addWidget(self.slide)
-        if model in ('nokia7710', 'p800'):
-            self.labels[0].installEventFilter(self)       # the pen
-        rows = {'nokia9300': RA2_BUTTONS, 'nokia9300i': RA2_BUTTONS, 'nokia9500': RA2_BUTTONS, 'p910i': P910_BUTTONS,
-                'nokia7710': RM12_BUTTONS, 'p800': P910_BUTTONS, 'nokia6630': RM1_BUTTONS, 'nokia6680': RM1_BUTTONS, 'nokian70': RM84_BUTTONS, 'nokian72': RM84_BUTTONS, 'nokian90': RM84_BUTTONS,
-                'nokia9210': RAE3_BUTTONS, 'nokia9210i': RAE3_BUTTONS}.get(model, KEY_ROWS)
+        rows = {'nokia9210': RAE3_BUTTONS, 'nokia9210i': RAE3_BUTTONS,
+                'nokia9300': RA2_BUTTONS, 'nokia9300i': RA2_BUTTONS, 'nokia9500': RA2_BUTTONS,
+                'p800': P910_BUTTONS, 'p910i': P910_BUTTONS, 'nokia7710': RM12_BUTTONS,
+                'nokia6630': RM1_BUTTONS, 'nokia6680': RM1_BUTTONS,
+                'nokian70': RM84_BUTTONS, 'nokian72': RM84_BUTTONS, 'nokian90': RM84_BUTTONS,
+                }.get(model, KEY_ROWS)
         for r, row in enumerate(rows):
             for c, (label, code) in enumerate(row):
                 b = QtWidgets.QPushButton(label)
@@ -228,6 +231,11 @@ class Phone(QtWidgets.QWidget):
                 b.released.connect(lambda code=code: self.key(code, False))
                 grid.addWidget(b, r, c)
         lay.addLayout(grid)
+        if model == 'nokia7650': # the slide below the keys, as the N70's extra row
+            self.slide = QtWidgets.QPushButton('Close slide')
+            self.slide.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.slide.clicked.connect(self.toggle_slide)
+            lay.addWidget(self.slide)
         self.t0 = time.time()
         self.timer = QtCore.QTimer(self)
         self.timer.timeout.connect(self.tick)
