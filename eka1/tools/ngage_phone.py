@@ -75,7 +75,7 @@ for i in range(10):
 
 TITLES = {'ngage': 'N-Gage', 'ngageqd': 'N-Gage QD', 'nokia6600': 'Nokia 6600', 'nokia7650': 'Nokia 7650',
           'nokia9300': 'Nokia 9300', 'nokia9300i': 'Nokia 9300i', 'nokia9500': 'Nokia 9500 Communicator',
-          'p910i': 'Sony Ericsson P910i', 'nokia7710': 'Nokia 7710', 'p800': 'Sony Ericsson P800', 'nokia3230': 'Nokia 3230', 'nokia7610': 'Nokia 7610', 'nokia6670': 'Nokia 6670',
+          'p910i': 'Sony Ericsson P910i', 'nokia7710': 'Nokia 7710', 'p800': 'Sony Ericsson P800', 'nokia3230': 'Nokia 3230', 'nokia7610': 'Nokia 7610', 'nokia6670': 'Nokia 6670', 'nokia6260': 'Nokia 6260',
           'nokia6630': 'Nokia 6630', 'nokian70': 'Nokia N70', 'nokia9210': 'Nokia 9210 Communicator', 'nokia9210i': 'Nokia 9210i Communicator',
           'nokia3650': 'Nokia 3650', 'nokia3660': 'Nokia 3660', 'nokia6680': 'Nokia 6680', 'nokian90': 'Nokia N90'}
 
@@ -334,7 +334,7 @@ def main():
     ap.add_argument('--scale', type=int, default=2)
     ap.add_argument('--model', default='ngage', choices=sorted(TITLES),
                     help='which phone model (ngage = N-Gage, ngageqd = N-Gage QD, nokia6600 = Nokia 6600, nokia7650 = Nokia 7650, '
-                         'nokia9500 = Nokia 9500 Communicator, p910i = Sony Ericsson P910i, nokia7710 = Nokia 7710, p800 = Sony Ericsson P800, nokia3230 = Nokia 3230, nokia7610 = Nokia 7610, nokia6670 = Nokia 6670)')
+                         'nokia9500 = Nokia 9500 Communicator, p910i = Sony Ericsson P910i, nokia7710 = Nokia 7710, p800 = Sony Ericsson P800, nokia3230 = Nokia 3230, nokia7610 = Nokia 7610, nokia6670 = Nokia 6670, nokia6260 = Nokia 6260)')
     ap.add_argument('--phone', help="which phone (its flash file); default: the model's name")
     ap.add_argument('--mmc', default='', help='memory card image (E:), made with eka1/tools/ngage_card.py')
     ap.add_argument('--fresh', action='store_true', help='factory-fresh: forget the saved flash')

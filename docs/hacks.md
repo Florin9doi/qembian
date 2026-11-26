@@ -297,6 +297,20 @@ H-rm51-bt-uart, H-rm51-audio, the 6600's H-nos-standin, H-ngage-md5, H-nhl10-rtc
 
 Not modelled / not working (7610, 6670): sound, network, calls, SMS, RTC, camera, MMC, Bluetooth; first boot ~3 min.
 
+## Nokia 6260 (RM-25), S60 2nd FP1, EKA1, on the ngage board (-M nokia6260, ngage.c ngage_rm25)
+
+Evidence: [devices/nokia-6260-rm25/bring-up.md](devices/nokia-6260-rm25/bring-up.md). The 3230's and 7610's pieces apply
+(H-rm51-flash, H-rm51-bt-uart, H-rm51-audio, the 6600's H-nos-standin, H-ngage-md5, H-nhl10-rtc, H-rh51-joy-ctsi);
+6260-specific:
+
+| Hack | Where | Proper fix |
+|---|---|---|
+| **H-rm25-nos:** the 6600's NOS stand-in assembled with V 5.0536's addresses (the 3230's ekern exports + 0x4000, NOS bss 0x80007544, enosdriver export 2 0x50453C84) at its NOS entry 0x52894194; NOS exports 1/2/4 jump into it | `nos-standin/build.sh`, `ngage_rm25_nos_stub.h`; test `test_rm25_defsyms_match_rom` | the real NOS |
+| **H-rm25-switches:** GPIO 0x0C120C04 bits 22-26 (ekeyb's switch entries 0xB6-0xBB, the swivel/fold positions [I]) held high = not asserted | `ngage_keys.c` (`gpio_idle`); test `test_rm25_switch_lines_idle_high` | the phone's real position sensors, a host key to change them |
+| ISI replies: the 7610's table [I], CheckCrc 0xE4 [V] | `isi-replies-rm25.txt` | per-request parsers |
+
+Not modelled / not working (6260): sound, network, calls, SMS, RTC, camera, MMC, Bluetooth; first boot ~155 s.
+
 ## Nokia 6630 (RM-1, S60 2nd FP2, EKA1, OMAP1610) on the 9500's board (-M nokia6630, src/qemu-ngage/hw/arm/nokia9500.c nokia6630_init + nokia6630_soc.c)
 
 Evidence: [devices/nokia-6630-rm1/bring-up.md](devices/nokia-6630-rm1/bring-up.md). QEMU models the OMAP310/1510 only;

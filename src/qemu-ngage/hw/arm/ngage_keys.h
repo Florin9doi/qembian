@@ -13,7 +13,8 @@ typedef struct {
 /* key layouts: the N-Gage's matrix, the 6600's (two sub-matrices + joystick port; also the 7650), the 3230's */
 /* NGAGE_KPD_NGAGE: the N-Gage QD's matrix; NGAGE_KPD_NEM4: the first N-Gage (the 6600's ports, its own grid) */
 typedef enum { NGAGE_KPD_NGAGE, NGAGE_KPD_NHL8X, NGAGE_KPD_NHL10, NGAGE_KPD_RM51, NGAGE_KPD_NEM4,
-               NGAGE_KPD_RH51 /* 7610/6670: the 6600 matrix, line 5 and joystick on GPIO */ } NgageKpdLayout;
+               NGAGE_KPD_RH51 /* 7610/6670: the 6600 matrix, line 5 and joystick on GPIO */,
+               NGAGE_KPD_RM25 /* 6260: the 7610's ports, its own 6x6 grid, line 5 on GPIO bit 19 */ } NgageKpdLayout;
 void ngage_keys_init(MemoryRegion *sys, qemu_irq irq, NgageKpdLayout layout);
 /* CTSI status 2 (0x0C150102): raise bits (bit 4 = Bluetooth module), same interrupt source */
 void ngage_ctsi2_raise(uint16_t bits);

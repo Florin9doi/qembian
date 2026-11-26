@@ -357,6 +357,14 @@ model = ""                                   # not a device-model profile: QEMU 
 status = "known"                             # V 4.20 boots to the S60 home screen and Menu (2026-11-26); docs/devices/nokia-7610-rh51/bring-up.md
 
 [[types]]
+code = "RM-25"
+name = "6260"
+platform = "s60-2.1"                         # S60 2nd Edition FP1, Symbian 7.0s, EKA1
+soc = "upp-wd2"                              # the 3230's kernel byte for byte, 0x4000 higher [V]
+model = ""                                   # not a device-model profile: QEMU board -M nokia6260 (src/qemu-ngage/hw/arm/ngage.c)
+status = "known"                             # V 5.0536 boots to the S60 home screen and Menu (2026-11-26); docs/devices/nokia-6260-rm25/bring-up.md
+
+[[types]]
 code = "RM-1"
 name = "6630"
 platform = "s60-2.2"                         # S60 2nd Edition FP2, Symbian 8.0a, EKA1

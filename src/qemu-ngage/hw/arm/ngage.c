@@ -1212,6 +1212,7 @@ static const MemoryRegionOps ngage_dbg_ops = {
 #include "ngage_nem4_nos_stub.h"
 #include "ngage_rm51_nos_stub.h"
 #include "ngage_rh51_nos_stub.h"
+#include "ngage_rm25_nos_stub.h"
 #include "ngage_nhl2_nos_stub.h"
 #include "ngage_nhl8_nos_stub.h"
 #include "ngage_nhl8x_nos_stub.h"
@@ -2029,6 +2030,38 @@ static const NgageModel ngage_rh51 = {
 
 static NgageModel ngage_rh67;           /* the 6670: ngage_rh51 under its own name (same core image) */
 
+/*
+ * Nokia 6260 (RM-25), V 5.0536 (S60 2nd Edition FP1, Symbian 7.0s): core image RM25PE505360.C1, PPM .26;
+ * docs/devices/nokia-6260-rm25/bring-up.md. ekern is the 3230's byte for byte, 0x4000 higher (kernel-data
+ * layout identical) [V]. Bank table as the 7610's: ROM 0..16 MB in chip 0, 13 MB in chip 1 (PPM at flash
+ * 0x02D00000), an 8 MB device window at 0x04000000 (C:) [V: bootstrap table ROM 0x650].
+ * NOS: nosstarter entry 0x52894194, data 0x80002230 (0x5314 bytes from 0x52B286A4), bss 0x80007544 + 0xC6568;
+ * the hidden NOS module (header 0x504573F0) exports 1, 2, 4 [V].
+ */
+static const uint32_t ngage_rm25_nos_exports[][2] = {
+    { 0x5289a6c0, NGAGE_RM25_NOS_SYM_nos_export1 },
+    { 0x5289a690, NGAGE_RM25_NOS_SYM_nos_export2 },
+    { 0x5289a654, NGAGE_RM25_NOS_SYM_nos_export4 },
+};
+
+static const NgageModel ngage_rm25 = {
+    .name = "nokia6260",
+    .uem_rtc = true,
+    .nchips = 3,
+    .rom_map = { { 0, 0x01000000, 0 }, { 0x01000000, 0x00d00000, 1 } },
+    .nrom_map = 2,
+    .nos_alias = 0x52800000,
+    .stub = ngage_rm25_nos_stub, .stub_len = sizeof(ngage_rm25_nos_stub),
+    .stub_va = NGAGE_RM25_NOS_STUB_VA,
+    .screen_chunk_ptr = 0x80001780,     /* the 3230's kernel data [V same ekern] */
+    .screen_rgb565 = true,
+    .nos_exports = ngage_rm25_nos_exports, .nnos_exports = ARRAY_SIZE(ngage_rm25_nos_exports),
+    .trace_mask_or = 0x40000000,
+    .nos_rx_dfc = 0x80007544 + 0x200,   /* the stub's RX_DFC / RX_FLAG (RAM = the NOS bss) */
+    .nos_rx_flag = 0x80007544 + 0x1f8,
+    .flash_manuf = 0xec, .flash_device = 0x22fa, .flash_amd = true,  /* as the 3230 [I] */
+};
+
 static void ngage_init(MachineState *machine)
 {
     MemoryRegion *sys = get_system_memory();
@@ -2134,6 +2167,7 @@ static void ngage_init(MachineState *machine)
         }
         ngage_keys_init(sys, in[25], ngm == &ngage_rm51 ? NGAGE_KPD_RM51
             : ngm == &ngage_nem4 ? NGAGE_KPD_NEM4
+            : ngm == &ngage_rm25 ? NGAGE_KPD_RM25
             : (ngm == &ngage_rh51 || ngm == &ngage_rh67) ? NGAGE_KPD_RH51
             : (ngm == &ngage_nhl10 || ngm == &ngage_nhl2 || ngm == &ngage_nhl8) ? NGAGE_KPD_NHL10
             : (ngm == &ngage_nhl8x) ? NGAGE_KPD_NHL8X
@@ -2270,6 +2304,12 @@ static void ngage_init_rm51(MachineState *machine)
 static void ngage_init_rh51(MachineState *machine)
 {
     ngm = &ngage_rh51;
+    ngage_init(machine);
+}
+
+static void ngage_init_rm25(MachineState *machine)
+{
+    ngm = &ngage_rm25;
     ngage_init(machine);
 }
 
@@ -2467,8 +2507,26 @@ static const TypeInfo ngage_rh67_machine_type = {
     .interfaces = arm_machine_interfaces,
 };
 
+/* Nokia 6260 */
+static void ngage_rm25_class_init(ObjectClass *oc, const void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+
+    ngage_machine_class_init(oc, data);
+    mc->desc = "Nokia 6260 (RM-25, DCT4 UPP, S60 2nd FP1, Symbian 7.0s EKA1) bring-up board";
+    mc->init = ngage_init_rm25;
+}
+
+static const TypeInfo ngage_rm25_machine_type = {
+    .name = MACHINE_TYPE_NAME("nokia6260"),
+    .parent = TYPE_MACHINE,
+    .class_init = ngage_rm25_class_init,
+    .interfaces = arm_machine_interfaces,
+};
+
 static void ngage_machine_init(void)
 {
+    type_register_static(&ngage_rm25_machine_type);
     type_register_static(&ngage_rh51_machine_type);
     type_register_static(&ngage_rh67_machine_type);
     type_register_static(&ngage_machine_type);

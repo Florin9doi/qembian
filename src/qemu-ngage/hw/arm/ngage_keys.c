@@ -157,6 +157,30 @@ static const NgageKey rh51_keys[] = {
     { KEY_F12, "power", -1, -1 },
 };
 
+/*
+ * Nokia 6260 (RM-25 V 5.0536): the 7610's ports and GPIO joystick (bits 6, 3, 4, 5, 7), but one 6x6 table (ekeyb
+ * 0x503955D8, row * 6 + line) [V], and its read helper (0x50394854) takes sense line 5 from GPIO 0x0C120C04 bit 19
+ * (the 7610: bit 18) [V]; GPIO bits 22-26 are five more lines (switch entries 0xB6-0xBB after the joystick's in the
+ * list, the swivel/fold positions [I]), idle high = not asserted [I]:
+ *     row 0: lsk   menu  .     .     .     .         row 3: 0xAC  .     1     2     3     0
+ *     row 1: rsk   C     .     .     .     .         row 4: .     .     4     5     6     call
+ *     row 2: .     edit  0xA2  *     #     0xA3      row 5: .     .     7     8     9     end
+ * 0xA2 / 0xA3 (EStdKeyIncVolume / DecVolume [I]) and 0xAC (EStdKeyDevice8, a side key [I]): F7, F8, F6.
+ */
+static const NgageKey rm25_keys[] = {
+    { KEY_F1, "left soft", 0, 0 },   { KEY_F5, "menu", 0, 1 },
+    { KEY_F2, "right soft", 1, 0 },  { KEY_BACKSPACE, "clear", 1, 1 },
+    { KEY_LEFTSHIFT, "edit", 2, 1 }, { KEY_F7, "0xA2", 2, 2 }, { KEY_KPASTERISK, "*", 2, 3 },
+    { KEY_F10, "#", 2, 4 },          { KEY_F8, "0xA3", 2, 5 },
+    { KEY_F6, "side 0xAC", 3, 0 },
+    { KEY_1, "1", 3, 2 }, { KEY_2, "2", 3, 3 }, { KEY_3, "3", 3, 4 }, { KEY_0, "0", 3, 5 },
+    { KEY_4, "4", 4, 2 }, { KEY_5, "5", 4, 3 }, { KEY_6, "6", 4, 4 }, { KEY_F3, "call", 4, 5 },
+    { KEY_7, "7", 5, 2 }, { KEY_8, "8", 5, 3 }, { KEY_9, "9", 5, 4 }, { KEY_F4, "end", 5, 5 },
+    { KEY_LEFT, "left", -3, 6 },     { KEY_UP, "up", -3, 3 },   { KEY_RIGHT, "right", -3, 4 },
+    { KEY_DOWN, "down", -3, 5 },     { KEY_ENTER, "select", -3, 7 },
+    { KEY_F12, "power", -1, -1 },
+};
+
 /* joystick line (bit in 0x0C15020A) -> its enable / CTSI status-2 bit [I] */
 static uint16_t joy_irq_bit(int line)
 {
@@ -177,7 +201,9 @@ typedef struct {
     bool nhl8x;
     bool nhl10;
     bool rm51;                      /* 3230: GPIO port (line 5, switch bit 20), no joystick port */
-    bool rh51;                      /* 7610/6670: line 5 on GPIO bit 18, joystick on GPIO bits 3-7 */
+    bool rh51;                      /* 7610/6670: line 5 on GPIO bit 18, joystick on GPIO bits 3-7 (6260: also) */
+    uint32_t gpio_line5;            /* rh51: GPIO bit of sense line 5 (7610: 18, 6260: 19) */
+    uint32_t gpio_idle;             /* rh51: GPIO bits that idle high */
     uint32_t gpio_joy;              /* 7610/6670: pressed joystick GPIO bits */
     uint16_t joy;                   /* pressed joystick lines (bits of 0x0C15020A) */
     uint16_t joy_ier;               /* joystick interrupt enables (CTSI status-2 bits) */
@@ -329,10 +355,10 @@ static uint64_t gpio_read(void *opaque, hwaddr a, unsigned size)
     uint32_t v = k->gpio_regs[(a >> 2) & 7];
 
     if ((a & ~3) == 0x04 && k->rh51) {
-        v |= (1u << 19) | (1u << 18) | 0xf8;   /* idle: line 5 and the joystick lines high */
+        v |= k->gpio_idle;                      /* idle: line 5, the joystick (and 6260 switch) lines high */
         v &= ~k->gpio_joy;
         if (kpd_cols(k) & 0x20) {
-            v &= ~(1u << 18);
+            v &= ~k->gpio_line5;
         }
     } else if ((a & ~3) == 0x04) {
         v |= 1u << 19;
@@ -479,17 +505,22 @@ void ngage_keys_init(MemoryRegion *sys, qemu_irq irq, NgageKpdLayout layout)
 
     kpd.irq = irq;
     kpd.nhl8x = layout == NGAGE_KPD_NHL8X;
-    kpd.rh51 = layout == NGAGE_KPD_RH51;
+    kpd.rh51 = layout == NGAGE_KPD_RH51 || layout == NGAGE_KPD_RM25;    /* 6260: the 7610's ports */
+    kpd.gpio_line5 = layout == NGAGE_KPD_RM25 ? 1u << 19 : 1u << 18;
+    kpd.gpio_idle = (1u << 19) | (1u << 18) | 0xf8
+                    | (layout == NGAGE_KPD_RM25 ? 0x7c00000 : 0);        /* 6260: bits 22-26 not asserted [I] */
     kpd.nhl10 = layout == NGAGE_KPD_NHL10 || layout == NGAGE_KPD_NEM4      /* NEM-4: the 6600's ports */
                 || kpd.rh51;                                                /* 7610: the 6600's matrix */
     kpd.rm51 = layout == NGAGE_KPD_RM51;
-    kpd.keys = kpd.rh51 ? rh51_keys
+    kpd.keys = layout == NGAGE_KPD_RM25 ? rm25_keys
+             : kpd.rh51 ? rh51_keys
              : layout == NGAGE_KPD_NEM4 ? nem4_keys
              : kpd.nhl8x ? nhl8x_keys
              : kpd.nhl10 ? nhl10_keys
              : kpd.rm51  ? rm51_keys
              : ngage_keys;
-    kpd.nkeys = kpd.rh51 ? ARRAY_SIZE(rh51_keys)
+    kpd.nkeys = layout == NGAGE_KPD_RM25 ? ARRAY_SIZE(rm25_keys)
+              : kpd.rh51 ? ARRAY_SIZE(rh51_keys)
               : layout == NGAGE_KPD_NEM4 ? ARRAY_SIZE(nem4_keys)
               : kpd.nhl8x ? ARRAY_SIZE(nhl8x_keys)
               : kpd.nhl10 ? ARRAY_SIZE(nhl10_keys)

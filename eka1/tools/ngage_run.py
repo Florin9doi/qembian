@@ -92,6 +92,15 @@ MODELS = {
         containers=0x800003b8,
         code=(0x50319f9c, 0x51a00000),
         ttb=0x0A074000),
+    'nokia6260': dict(                      # Nokia 6260 V 5.0536 (RM-25): ekern = the 3230's, 0x4000 higher [V]
+        machine='nokia6260', root=ROOT / 'eka1/rm25',
+        rom=ROOT / 'eka1/rm25/output/rom/ROM.bin', ppm=ROOT / 'eka1/rm25/extracted/RM25PE505360.26',
+        isi=ROOT / 'src/qemu-ngage/isi-replies-rm25.txt',
+        fatal=0x5033eb34 + 0x4000,          # the 3230's Kern::Fault + 0x4000 [V same bytes]
+        cur_thread=0x800017d4,              # as the 3230 (identical ekern)
+        containers=0x800003b8,
+        code=(0x5033ff9c, 0x51d00000),
+        ttb=0x0A074000),                    # [I] as the 6600
     'nokia6630': dict(
         machine='nokia6630', root=ROOT / 'eka1/rm1/core',
         rom=ROOT / 'eka1/rm1/core/ROM.bin', ppm=ROOT / 'eka1/rm1/core',
