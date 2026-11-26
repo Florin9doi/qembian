@@ -356,6 +356,16 @@ Not modelled / not working (N70): as the 6630 (sound, network and SIM, DRM and t
 camera, USB, the boot-loader chain), and the OMAP1710's own blocks (only its IDs), the memory card (RS-MMC, medmmc.pdd:
 no card), the camera cover switch (ekeyp's "Switch" on GPIO4 bit 5 [I]).
 
+## Nokia N72 (RM-180, S60 2nd FP3, EKA1, OMAP1710) on the 6630's board (-M nokian72, src/qemu-ngage/hw/arm/nokia9500.c rm1_board_init + rm1_patches_n72, nokia6630_soc.c)
+
+Evidence: [devices/nokia-n72-rm180/bring-up.md](devices/nokia-n72-rm180/bring-up.md). The N70 relinked: every N70 hack
+that is not a core patch applies unchanged (H-rm84-omap1710, -ram, -nand, -ap-wake, -isc, -keys; ISI table copied as
+`isi-replies-rm180.txt`); the N72's own:
+
+| Hack | Where | Real implementation |
+|---|---|---|
+| **H-rm180-dsp-boot, -dsp-timeout, -bal-run, -eapgwc, -secenvinit, -drmhelper:** the N70's core patches (H-rm84-*, H-rm1-* reasons) at RM-180's addresses (each a unique exact match of the 32 words around the N70's site, same module offset, old word checked) | `nokia9500.c` `rm1_patches_n72`; test `tests/nokian72_board_test.py` | a DSP model, a secure environment |
+
 ## Nokia N90 (RM-42, S60 2nd FP3, EKA1, OMAP1710) on the 6630's board (-M nokian90, src/qemu-ngage/hw/arm/nokia9500.c rm1_board_init + rm1_patches_n90, nokia6630_soc.c)
 
 Evidence: [devices/nokia-n90-rm42/bring-up.md](devices/nokia-n90-rm42/bring-up.md). Every N70 hack that is not a core

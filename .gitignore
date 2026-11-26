@@ -72,6 +72,9 @@ models/**/*.dll
 models/**/*.exe
 /eka1/rm84_rom/
 /eka1/rm84/
+# Nokia N72 (RM-180)
+/eka1/rm180_rom/
+/eka1/rm180/
 # Nokia N90 (RM-42)
 /eka1/rm42_rom/
 /eka1/rm42/

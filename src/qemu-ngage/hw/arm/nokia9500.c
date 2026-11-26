@@ -1176,8 +1176,9 @@ static void ra2_board_init(MachineState *machine, const Ra2Phone *ph)
 
 /*
  * The phones on this board: the Nokia 6630 and the Nokia N70 (RM-84, S60 2nd FP3, Symbian 8.1a: the same SoC
- * blocks at the same addresses [V bootstrap literals], docs/devices/nokia-n70-rm84/bring-up.md). Per phone: the
- * machine name and its core patches (each phone's own addresses, old words checked).
+ * blocks at the same addresses [V bootstrap literals], docs/devices/nokia-n70-rm84/bring-up.md) with its relatives
+ * (the N72 RM-180, the N90 RM-42). Per phone: the machine name and its core patches (each phone's own addresses,
+ * old words checked).
  */
 typedef struct Rm1Phone {
     const char *name;                       /* machine name, for messages */
@@ -1444,9 +1445,31 @@ static void rm1_patches_n90(uint8_t *core, gsize len)
     rm1_patch(core, len, "H-rm42-drmhelper", 0x50ac0e50, 0x1c0444a5, 0x46c04770);
 }
 
+/*
+ * Nokia N72 (RM-180 V 5.0819.4, S60 2nd FP3, Symbian 8.1a, OMAP1710): the N70 relinked (the same kernel code, the
+ * same drivers modulo relocated addresses, 176x208, the N70's keypad). The N70's patches (H-rm84-*) at RM-180's
+ * addresses, each a unique exact match of the 32 words around the N70's site, at the same module offset, old word
+ * identical [V eka1/rm180/core/ROM.bin] (docs/devices/nokia-n72-rm180/bring-up.md).
+ */
+static void rm1_patches_n72(uint8_t *core, gsize len)
+{
+    rm1_patch(core, len, "H-rm180-dsp-boot", 0x504f6864, 0x1afffffb, 0xe1a00000);
+    rm1_patch(core, len, "H-rm180-dsp-timeout", 0x504ec330, 0xe3e02020, 0xe3a02000);
+    rm1_patch(core, len, "H-rm180-bal-run", 0x5048df60, 0xe92d40f0, 0xe3a00000);
+    rm1_patch(core, len, "H-rm180-bal-run", 0x5048df64, 0xe24dd008, 0xe12fff1e);
+    rm1_patch(core, len, "H-rm180-bal-run", 0x5048de98, 0xe92d4030, 0xe3a00000);
+    rm1_patch(core, len, "H-rm180-bal-run", 0x5048de9c, 0xe24dd00c, 0xe12fff1e);
+    rm1_patch(core, len, "H-rm180-eapgwc", 0x50492348, 0x2600d12c, 0x2600e02c);
+    rm1_patch(core, len, "H-rm180-eapgwc", 0x504850a8, 0xd1282800, 0xe0282800);
+    rm1_patch(core, len, "H-rm180-secenvinit", 0x5047700c, 0x4657b5f0, 0x47702000);
+    rm1_patch(core, len, "H-rm180-drmhelper", 0x50819bb0, 0x4c19b510, 0x42402001);
+    rm1_patch(core, len, "H-rm180-drmhelper", 0x50819bb4, 0x1c0444a5, 0x46c04770);
+}
+
 static const Rm1Phone rm1_phone_6630 = { "nokia6630", "eka1/rm1/core", rm1_patches_6630, false };
 static const Rm1Phone rm1_phone_6680 = { "nokia6680", "eka1/rm36/core", rm1_patches_6680, false };
 static const Rm1Phone rm1_phone_n70 = { "nokian70", "eka1/rm84/core", rm1_patches_n70, true };
+static const Rm1Phone rm1_phone_n72 = { "nokian72", "eka1/rm180/core", rm1_patches_n72, true };
 /* H-rm42-display: the N90's 352x416 main display behind a controller on SoSSI (genericlcd_lcd.ldd) */
 static const Rm1Phone rm1_phone_n90 = { "nokian90", "eka1/rm42/core", rm1_patches_n90, true, 352, 416, true };
 
@@ -1463,6 +1486,11 @@ static void nokia6680_init(MachineState *machine)
 static void nokian70_init(MachineState *machine)
 {
     rm1_board_init(machine, &rm1_phone_n70);
+}
+
+static void nokian72_init(MachineState *machine)
+{
+    rm1_board_init(machine, &rm1_phone_n72);
 }
 
 static void nokian90_init(MachineState *machine)
@@ -1675,6 +1703,27 @@ static const TypeInfo nokian70_type = {
     .interfaces = arm_machine_interfaces,
 };
 
+static void nokian72_class_init(ObjectClass *oc, const void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+
+    ra2_class_props(oc);
+    mc->desc = "Nokia N72 (RM-180, BB5 OMAP1710, S60 2nd FP3, Symbian 8.1a EKA1) bring-up board";
+    mc->init = nokian72_init;
+    mc->ignore_memory_transaction_failures = true;
+    mc->default_cpu_type = ARM_CPU_TYPE_NAME("arm926");
+    /* the bootstrap's memory table (ROM +0xD0C): 64 MB at 0x10100000, as the N70's [V] */
+    mc->default_ram_size = 128 * MiB;
+    mc->default_ram_id = "nokian72.sdram";
+}
+
+static const TypeInfo nokian72_type = {
+    .name = MACHINE_TYPE_NAME("nokian72"),
+    .parent = TYPE_MACHINE,
+    .class_init = nokian72_class_init,
+    .interfaces = arm_machine_interfaces,
+};
+
 static void nokian90_class_init(ObjectClass *oc, const void *data)
 {
     MachineClass *mc = MACHINE_CLASS(oc);
@@ -1704,6 +1753,7 @@ static void nokia9500_register(void)
     type_register_static(&nokia6630_type);
     type_register_static(&nokia6680_type);
     type_register_static(&nokian70_type);
+    type_register_static(&nokian72_type);
     type_register_static(&nokian90_type);
     type_register_static(&nokia7710_type);
 }

@@ -157,6 +157,18 @@ MODELS = {
         sdram=(0x10000000, 0x08000000),
         objstride=2,                        # container entries {DObject*, key} (as the 7710's kernel) [V run]
         ttb=0x10000000),
+    'nokian72': dict(
+        machine='nokian72', root=ROOT / 'eka1/rm180/core',
+        rom=ROOT / 'eka1/rm180/core/ROM.bin', ppm=ROOT / 'eka1/rm180/core',
+        isi=ROOT / 'src/qemu-ngage/isi-replies-rm180.txt',
+        fatal=0x5001fa8c,                   # as the N70's: ekern's code is the N70's word for word (only its pointers into other modules move) [V ROM]
+        cur_thread=0x8000295c,              # as the N70 (21 users in both ROMs)
+        containers=0x8000048c,              # as the N70 (17 users in both ROMs)
+        code=(0x50008f9c, 0x50b00000),
+        vectors=0xffff0000,
+        sdram=(0x10000000, 0x08000000),
+        objstride=2,                        # as the N70
+        ttb=0x10000000),
     'nokian90': dict(
         machine='nokian90', root=ROOT / 'eka1/rm42/core',
         rom=ROOT / 'eka1/rm42/core/ROM.bin', ppm=ROOT / 'eka1/rm42/core',
