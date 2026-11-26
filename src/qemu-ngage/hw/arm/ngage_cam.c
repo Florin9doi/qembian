@@ -25,6 +25,7 @@
  */
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
 #include "ngage_cam.h"
 
 enum { CAM_I2C_IDLE, CAM_I2C_RX, CAM_I2C_ACK, CAM_I2C_TX, CAM_I2C_TXACK, CAM_I2C_IGNORE };
@@ -47,9 +48,21 @@ void ngage_cam_init(NgageCam *c)
     memset(c, 0, sizeof(*c));
     c->log = log;
     c->opaque = opaque;
-    c->regs[1] = 0x01;              /* sensor type 1, variant 1 [V tables; the part itself: I] */
+    c->regs[1] = 0x01;              /* 7650: sensor type 1, variant 1 [V tables; the part itself: I] */
     c->ccp[CAM_CCP_MASK / 4] = 0x3ff;
     c->scl = c->sda = true;
+    c->addr = CAM_I2C_ADDR;
+}
+
+void ngage_cam_set_sensor(NgageCam *c, uint8_t addr, bool reg16)
+{
+    c->addr = addr;
+    c->reg16 = reg16;
+}
+
+static uint16_t cam_reg_mask(const NgageCam *c)
+{
+    return c->reg16 ? 0xffff : 0xff;
 }
 
 /* ---- I2C slave -------------------------------------------------------------------------------- */
@@ -59,20 +72,23 @@ static bool cam_i2c_byte(NgageCam *c, uint8_t b)
 {
     if (c->tx == 0xfe) {                        /* the address byte of this transfer */
         c->tx = 0;
-        if (b >> 1 != CAM_I2C_ADDR) {
+        if (b >> 1 != c->addr) {
             return false;
         }
         c->rd = b & 1;
-        c->first = !c->rd;
+        c->naddr = c->rd ? 0 : c->reg16 ? 2 : 1;
+        if (c->naddr) {
+            c->ptr = 0;
+        }
         return true;
     }
-    if (c->first) {
-        c->ptr = b & (CAM_NREGS - 1);
-        c->first = false;
+    if (c->naddr) {                             /* the register pointer, high byte first */
+        c->ptr = (uint16_t)(c->ptr << 8 | b) & cam_reg_mask(c);
+        c->naddr--;
     } else {
         c->regs[c->ptr] = b;
-        cam_log(c, "sensor reg %02x = %02x", c->ptr, b);
-        c->ptr = (c->ptr + 1) & (CAM_NREGS - 1);
+        cam_log(c, c->reg16 ? "sensor reg %04x = %02x" : "sensor reg %02x = %02x", c->ptr, b);
+        c->ptr = (c->ptr + 1) & cam_reg_mask(c);
     }
     return true;
 }
@@ -80,7 +96,7 @@ static bool cam_i2c_byte(NgageCam *c, uint8_t b)
 static void cam_i2c_load(NgageCam *c)
 {
     c->shift = c->regs[c->ptr];
-    c->ptr = (c->ptr + 1) & (CAM_NREGS - 1);
+    c->ptr = (c->ptr + 1) & cam_reg_mask(c);
     c->nbits = 0;
     c->s_sda_low = !(c->shift & 0x80);
 }
@@ -284,6 +300,100 @@ static void cam_pixel(unsigned x, unsigned y, unsigned w, unsigned h, uint32_t f
     rgb[0] = rgb[1] = rgb[2] = v;
 }
 
+/*
+ * 3650/3660 raw frames (the small preview after a capture): Csu.dll 0x50abfee0 reads Cr Y1 Cb Y0 per pixel pair and
+ * converts with its own matrix (16.16 / 3.13 fixed point) [V]:
+ *   R = 1.1282 Y + 1.5691 Cr' - 0.0098 Cb'    G = 1.1571 Y - 0.8141 Cr' - 0.3925 Cb'    B = 1.1076 Y - 0.0330 Cr' + 1.9875 Cb'
+ * (Cr' = Cr - 128, Cb' = Cb - 128). The pattern uses the exact inverse.
+ */
+static const double cam_m8[3][3] = {
+    { 0x2421 / 8192.0, 0x191b0 / 65536.0, -0x27f / 65536.0 },
+    { 0x1283a / 65536.0, -0xd06c / 65536.0, -0x6478 / 65536.0 },
+    { 0x11b8f / 65536.0, -0x872 / 65536.0, 0x1fcdf / 65536.0 },
+};
+
+static void cam_rgb_to_yuv8(const uint8_t rgb[3], uint8_t *y, uint8_t *cb, uint8_t *cr)
+{
+    static double inv[3][3];
+    static bool init;
+
+    if (!init) {                                /* Cramer: inverse of cam_m8 */
+        const double (*m)[3] = cam_m8;
+        double det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+                   + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) {
+                int a = (j + 1) % 3, b = (j + 2) % 3, c = (i + 1) % 3, d = (i + 2) % 3;
+                inv[i][j] = (m[a][c] * m[b][d] - m[a][d] * m[b][c]) / det;
+            }
+        }
+        init = true;
+    }
+    double v[3];
+    for (int i = 0; i < 3; i++) {
+        v[i] = inv[i][0] * rgb[0] + inv[i][1] * rgb[1] + inv[i][2] * rgb[2];
+    }
+    *y = clamp8((int)floor(v[0] + 0.5));
+    *cr = clamp8((int)floor(v[1] + 128.5));
+    *cb = clamp8((int)floor(v[2] + 128.5));
+}
+
+void ngage_cam_yuv8_to_rgb(const uint8_t q[4], uint8_t rgb0[3], uint8_t rgb1[3])
+{
+    int cr = q[0] - 128, cb = q[2] - 128, y0 = q[3], y1 = q[1];
+    int r = (cr * 0x191b0 + cb * -0x27f) >> 16, g = (cr * 0xd06c + cb * 0x6478) >> 16;
+    int b = (cb * 0x1fcdf + cr * -0x872) >> 16;
+
+    rgb0[0] = clamp8(r + (y0 * 0x2421 >> 13)); rgb0[1] = clamp8(((y0 * 0x1283a) >> 16) - g);
+    rgb0[2] = clamp8(b + ((y0 * 0x11b8f) >> 16));
+    rgb1[0] = clamp8(r + (y1 * 0x2421 >> 13)); rgb1[1] = clamp8(((y1 * 0x1283a) >> 16) - g);
+    rgb1[2] = clamp8(b + ((y1 * 0x11b8f) >> 16));
+}
+
+enum { CAM_FMT_RGB444, CAM_FMT_RGB565, CAM_FMT_YUV, CAM_FMT_YUV8 };
+
+/* w x h pixels of the pattern at dst (w * h * 2 bytes): little-endian 0x0RGB (4444) or RGB565 words, or YUV 4:2:2 in
+   Csu.dll's byte order (YUV8: the 3650/3660's Cr Y1 Cb Y0; YUV: the 7650/6600's Y1 Cr Y0 Cb) */
+static void cam_pattern_wh(uint8_t *dst, unsigned w, unsigned h, uint32_t frame, int fmt)
+{
+    bool yuv8 = fmt == CAM_FMT_YUV8;
+
+    for (unsigned y = 0; y < h; y++) {
+        uint8_t *row = dst + y * w * 2;
+        if (fmt == CAM_FMT_RGB444 || fmt == CAM_FMT_RGB565) {
+            for (unsigned x = 0; x < w; x++) {
+                uint8_t a[3];
+                cam_pixel(x, y, w, h, frame, a);
+                uint16_t p = fmt == CAM_FMT_RGB444 ? (a[0] >> 4) << 8 | (a[1] >> 4) << 4 | a[2] >> 4
+                                                   : (a[0] >> 3) << 11 | (a[1] >> 2) << 5 | a[2] >> 3;
+                row[x * 2] = p;
+                row[x * 2 + 1] = p >> 8;
+            }
+            continue;
+        }
+        for (unsigned x = 0; x + 1 < w; x += 2) {
+            uint8_t a[3], b[3], y0, y1, cb0, cr0, cb1, cr1;
+            cam_pixel(x, y, w, h, frame, a);
+            cam_pixel(x + 1, y, w, h, frame, b);
+            if (yuv8) {
+                cam_rgb_to_yuv8(a, &y0, &cb0, &cr0);
+                cam_rgb_to_yuv8(b, &y1, &cb1, &cr1);
+                row[x * 2] = (cr0 + cr1) / 2;
+                row[x * 2 + 1] = y1;
+                row[x * 2 + 2] = (cb0 + cb1) / 2;
+                row[x * 2 + 3] = y0;
+                continue;
+            }
+            cam_rgb_to_yuv(a, &y0, &cb0, &cr0);
+            cam_rgb_to_yuv(b, &y1, &cb1, &cr1);
+            row[x * 2] = y1;
+            row[x * 2 + 1] = (cr0 + cr1) / 2;
+            row[x * 2 + 2] = y0;
+            row[x * 2 + 3] = (cb0 + cb1) / 2;
+        }
+    }
+}
+
 void ngage_cam_pattern(uint8_t *dst, uint32_t bytes, uint32_t frame, bool rgb444)
 {
     unsigned w, h;
@@ -295,28 +405,314 @@ void ngage_cam_pattern(uint8_t *dst, uint32_t bytes, uint32_t frame, bool rgb444
     default: w = 160; h = bytes / (w * 2); break;
     }
     memset(dst, rgb444 ? 0 : 0x80, bytes);
-    for (unsigned y = 0; y < h; y++) {
-        uint8_t *row = dst + y * w * 2;
-        if (rgb444) {
-            for (unsigned x = 0; x < w; x++) {
-                uint8_t a[3];
-                cam_pixel(x, y, w, h, frame, a);
-                uint16_t p = (a[0] >> 4) << 8 | (a[1] >> 4) << 4 | a[2] >> 4;
-                row[x * 2] = p;
-                row[x * 2 + 1] = p >> 8;
-            }
-            continue;
+    cam_pattern_wh(dst, w, h, frame, rgb444 ? CAM_FMT_RGB444 : CAM_FMT_YUV);
+}
+
+/* ---- JPEG (3650/3660 stills: the sensor compresses them) ------------------------------------------ */
+/* A minimal baseline encoder: JFIF, YCbCr 4:2:2 (H 2, V 1), the Annex K quantisation tables at quality 75 and Huffman
+   tables. 4:2:2 because the phone's decoder shows 4:2:0 with the wrong colours [V run, 3650]: the sensor's own format. */
+
+static const uint8_t jz[64] = {             /* zigzag position -> natural index */
+    0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6, 7, 14, 21,
+    28, 35, 42, 49, 56, 57, 50, 43, 36, 29, 22, 15, 23, 30, 37, 44, 51, 58, 59, 52, 45, 38, 31, 39, 46, 53, 60, 61,
+    54, 47, 55, 62, 63,
+};
+static const uint8_t jq_luma[64] = {
+    16, 11, 10, 16, 24, 40, 51, 61, 12, 12, 14, 19, 26, 58, 60, 55, 14, 13, 16, 24, 40, 57, 69, 56,
+    14, 17, 22, 29, 51, 87, 80, 62, 18, 22, 37, 56, 68, 109, 103, 77, 24, 35, 55, 64, 81, 104, 113, 92,
+    49, 64, 78, 87, 103, 121, 120, 101, 72, 92, 95, 98, 112, 100, 103, 99,
+};
+static const uint8_t jq_chroma[64] = {
+    17, 18, 24, 47, 99, 99, 99, 99, 18, 21, 26, 66, 99, 99, 99, 99, 24, 26, 56, 99, 99, 99, 99, 99,
+    47, 66, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99,
+    99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99,
+};
+static const uint8_t jh_dc_l_bits[16] = { 0, 1, 5, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0 };
+static const uint8_t jh_dc_c_bits[16] = { 0, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0 };
+static const uint8_t jh_dc_vals[12] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 };
+static const uint8_t jh_ac_l_bits[16] = { 0, 2, 1, 3, 3, 2, 4, 3, 5, 5, 4, 4, 0, 0, 1, 0x7d };
+static const uint8_t jh_ac_l_vals[162] = {
+    0x01, 0x02, 0x03, 0x00, 0x04, 0x11, 0x05, 0x12, 0x21, 0x31, 0x41, 0x06, 0x13, 0x51, 0x61, 0x07, 0x22, 0x71, 0x14,
+    0x32, 0x81, 0x91, 0xa1, 0x08, 0x23, 0x42, 0xb1, 0xc1, 0x15, 0x52, 0xd1, 0xf0, 0x24, 0x33, 0x62, 0x72, 0x82, 0x09,
+    0x0a, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3a,
+    0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5a, 0x63, 0x64, 0x65,
+    0x66, 0x67, 0x68, 0x69, 0x6a, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88,
+    0x89, 0x8a, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9a, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7, 0xa8, 0xa9,
+    0xaa, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7, 0xb8, 0xb9, 0xba, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7, 0xc8, 0xc9, 0xca,
+    0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7, 0xd8, 0xd9, 0xda, 0xe1, 0xe2, 0xe3, 0xe4, 0xe5, 0xe6, 0xe7, 0xe8, 0xe9, 0xea,
+    0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa,
+};
+static const uint8_t jh_ac_c_bits[16] = { 0, 2, 1, 2, 4, 4, 3, 4, 7, 5, 4, 4, 0, 1, 2, 0x77 };
+static const uint8_t jh_ac_c_vals[162] = {
+    0x00, 0x01, 0x02, 0x03, 0x11, 0x04, 0x05, 0x21, 0x31, 0x06, 0x12, 0x41, 0x51, 0x07, 0x61, 0x71, 0x13, 0x22, 0x32,
+    0x81, 0x08, 0x14, 0x42, 0x91, 0xa1, 0xb1, 0xc1, 0x09, 0x23, 0x33, 0x52, 0xf0, 0x15, 0x62, 0x72, 0xd1, 0x0a, 0x16,
+    0x24, 0x34, 0xe1, 0x25, 0xf1, 0x17, 0x18, 0x19, 0x1a, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x35, 0x36, 0x37, 0x38, 0x39,
+    0x3a, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5a, 0x63, 0x64,
+    0x65, 0x66, 0x67, 0x68, 0x69, 0x6a, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a, 0x82, 0x83, 0x84, 0x85, 0x86,
+    0x87, 0x88, 0x89, 0x8a, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9a, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7,
+    0xa8, 0xa9, 0xaa, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7, 0xb8, 0xb9, 0xba, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7, 0xc8,
+    0xc9, 0xca, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7, 0xd8, 0xd9, 0xda, 0xe2, 0xe3, 0xe4, 0xe5, 0xe6, 0xe7, 0xe8, 0xe9,
+    0xea, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa,
+};
+
+typedef struct {
+    uint16_t code[256];
+    uint8_t len[256];
+} JHuff;
+
+typedef struct {
+    uint8_t *out;
+    uint32_t cap, n;
+    uint32_t acc;
+    int nacc;
+    bool full;
+    uint8_t q[2][64];               /* natural order */
+    JHuff dc[2], ac[2];
+} JEnc;
+
+static void jput(JEnc *e, uint8_t b)
+{
+    if (e->n < e->cap) {
+        e->out[e->n++] = b;
+    } else {
+        e->full = true;
+    }
+}
+
+static void jbits(JEnc *e, uint32_t v, int n)
+{
+    e->acc = e->acc << n | (v & ((1u << n) - 1));
+    e->nacc += n;
+    while (e->nacc >= 8) {
+        uint8_t b = e->acc >> (e->nacc - 8);
+        jput(e, b);
+        if (b == 0xff) {
+            jput(e, 0);                         /* byte stuffing */
         }
-        for (unsigned x = 0; x + 1 < w; x += 2) {
-            uint8_t a[3], b[3], y0, y1, cb0, cr0, cb1, cr1;
-            cam_pixel(x, y, w, h, frame, a);
-            cam_pixel(x + 1, y, w, h, frame, b);
-            cam_rgb_to_yuv(a, &y0, &cb0, &cr0);
-            cam_rgb_to_yuv(b, &y1, &cb1, &cr1);
-            row[x * 2] = y1;
-            row[x * 2 + 1] = (cr0 + cr1) / 2;
-            row[x * 2 + 2] = y0;
-            row[x * 2 + 3] = (cb0 + cb1) / 2;
+        e->nacc -= 8;
+    }
+}
+
+static void jhuff_build(JHuff *h, const uint8_t bits[16], const uint8_t *vals)
+{
+    unsigned code = 0, k = 0;
+
+    for (int l = 1; l <= 16; l++) {
+        for (int i = 0; i < bits[l - 1]; i++) {
+            h->code[vals[k]] = code++;
+            h->len[vals[k]] = l;
+            k++;
+        }
+        code <<= 1;
+    }
+}
+
+static void jmarker_dht(JEnc *e, int cls, int id, const uint8_t bits[16], const uint8_t *vals)
+{
+    unsigned n = 0;
+
+    for (int i = 0; i < 16; i++) {
+        n += bits[i];
+    }
+    jput(e, 0xff); jput(e, 0xc4);
+    jput(e, (3 + 16 + n) >> 8); jput(e, 3 + 16 + n);
+    jput(e, cls << 4 | id);
+    for (int i = 0; i < 16; i++) {
+        jput(e, bits[i]);
+    }
+    for (unsigned i = 0; i < n; i++) {
+        jput(e, vals[i]);
+    }
+}
+
+static int jcat(int v)
+{
+    int n = 0;
+
+    v = v < 0 ? -v : v;
+    while (v) {
+        n++;
+        v >>= 1;
+    }
+    return n;
+}
+
+/* one 8x8 block (level-shifted samples, natural order): forward DCT, quantise, entropy-code */
+static void jblock(JEnc *e, const float in[64], int t, int *pred)
+{
+    static float cosv[8][8];
+    static bool init;
+    float tmp[64], co[64];
+    int z[64];
+
+    if (!init) {
+        for (int x = 0; x < 8; x++) {
+            for (int u = 0; u < 8; u++) {
+                cosv[x][u] = cosf((2 * x + 1) * u * 3.14159265f / 16);
+            }
+        }
+        init = true;
+    }
+    for (int y = 0; y < 8; y++) {               /* rows */
+        for (int u = 0; u < 8; u++) {
+            float s = 0;
+            for (int x = 0; x < 8; x++) {
+                s += in[y * 8 + x] * cosv[x][u];
+            }
+            tmp[y * 8 + u] = s * (u ? 0.5f : 0.35355339f);
         }
     }
+    for (int u = 0; u < 8; u++) {               /* columns */
+        for (int v = 0; v < 8; v++) {
+            float s = 0;
+            for (int y = 0; y < 8; y++) {
+                s += tmp[y * 8 + u] * cosv[y][v];
+            }
+            co[v * 8 + u] = s * (v ? 0.5f : 0.35355339f);
+        }
+    }
+    for (int k = 0; k < 64; k++) {
+        float q = co[jz[k]] / e->q[t][jz[k]];
+        z[k] = (int)(q < 0 ? q - 0.5f : q + 0.5f);
+    }
+    int d = z[0] - *pred, c = jcat(d);
+    *pred = z[0];
+    jbits(e, e->dc[t].code[c], e->dc[t].len[c]);
+    if (c) {
+        jbits(e, d < 0 ? d - 1 : d, c);
+    }
+    int run = 0;
+    for (int k = 1; k < 64; k++) {
+        if (!z[k]) {
+            run++;
+            continue;
+        }
+        while (run > 15) {
+            jbits(e, e->ac[t].code[0xf0], e->ac[t].len[0xf0]);
+            run -= 16;
+        }
+        c = jcat(z[k]);
+        jbits(e, e->ac[t].code[run << 4 | c], e->ac[t].len[run << 4 | c]);
+        jbits(e, z[k] < 0 ? z[k] - 1 : z[k], c);
+        run = 0;
+    }
+    if (run) {
+        jbits(e, e->ac[t].code[0], e->ac[t].len[0]);        /* EOB */
+    }
+}
+
+uint32_t ngage_cam_jpeg(uint8_t *out, uint32_t cap, unsigned w, unsigned h, uint32_t frame)
+{
+    static JEnc e;
+    static const uint8_t app0[] = { 0xff, 0xe0, 0, 16, 'J', 'F', 'I', 'F', 0, 1, 1, 0, 0, 1, 0, 1, 0, 0 };
+    int pred[3] = { 0, 0, 0 };
+
+    memset(&e, 0, sizeof(e));
+    e.out = out;
+    e.cap = cap;
+    for (int i = 0; i < 64; i++) {              /* quality 75: base * 50 / 100 */
+        int a = (jq_luma[i] * 50 + 50) / 100, b = (jq_chroma[i] * 50 + 50) / 100;
+        e.q[0][i] = a < 1 ? 1 : a > 255 ? 255 : a;
+        e.q[1][i] = b < 1 ? 1 : b > 255 ? 255 : b;
+    }
+    jhuff_build(&e.dc[0], jh_dc_l_bits, jh_dc_vals);
+    jhuff_build(&e.dc[1], jh_dc_c_bits, jh_dc_vals);
+    jhuff_build(&e.ac[0], jh_ac_l_bits, jh_ac_l_vals);
+    jhuff_build(&e.ac[1], jh_ac_c_bits, jh_ac_c_vals);
+
+    jput(&e, 0xff); jput(&e, 0xd8);
+    for (unsigned i = 0; i < sizeof(app0); i++) {
+        jput(&e, app0[i]);
+    }
+    for (int t = 0; t < 2; t++) {               /* DQT, zigzag order */
+        jput(&e, 0xff); jput(&e, 0xdb); jput(&e, 0); jput(&e, 67); jput(&e, t);
+        for (int k = 0; k < 64; k++) {
+            jput(&e, e.q[t][jz[k]]);
+        }
+    }
+    static const uint8_t sof[] = { 0xff, 0xc0, 0, 17, 8 };
+    for (unsigned i = 0; i < sizeof(sof); i++) {
+        jput(&e, sof[i]);
+    }
+    jput(&e, h >> 8); jput(&e, h); jput(&e, w >> 8); jput(&e, w); jput(&e, 3);
+    jput(&e, 1); jput(&e, 0x21); jput(&e, 0);    /* Y 2x1, table 0 */
+    jput(&e, 2); jput(&e, 0x11); jput(&e, 1);    /* Cb */
+    jput(&e, 3); jput(&e, 0x11); jput(&e, 1);    /* Cr */
+    jmarker_dht(&e, 0, 0, jh_dc_l_bits, jh_dc_vals);
+    jmarker_dht(&e, 1, 0, jh_ac_l_bits, jh_ac_l_vals);
+    jmarker_dht(&e, 0, 1, jh_dc_c_bits, jh_dc_vals);
+    jmarker_dht(&e, 1, 1, jh_ac_c_bits, jh_ac_c_vals);
+    static const uint8_t sos[] = { 0xff, 0xda, 0, 12, 3, 1, 0x00, 2, 0x11, 3, 0x11, 0, 63, 0 };
+    for (unsigned i = 0; i < sizeof(sos); i++) {
+        jput(&e, sos[i]);
+    }
+    for (unsigned my = 0; my < h; my += 8) {
+        for (unsigned mx = 0; mx < w; mx += 16) {
+            float Y[2][64], Cb[64], Cr[64];
+            memset(Cb, 0, sizeof(Cb));
+            memset(Cr, 0, sizeof(Cr));
+            for (unsigned yy = 0; yy < 8; yy++) {
+                for (unsigned xx = 0; xx < 16; xx++) {
+                    unsigned x = mx + xx < w ? mx + xx : w - 1, y = my + yy < h ? my + yy : h - 1;
+                    uint8_t p[3];
+                    cam_pixel(x, y, w, h, frame, p);
+                    float r = p[0], g = p[1], b = p[2];
+                    Y[xx / 8][yy * 8 + xx % 8] = 0.299f * r + 0.587f * g + 0.114f * b - 128;
+                    Cb[yy * 8 + xx / 2] += (-0.168736f * r - 0.331264f * g + 0.5f * b) / 2;
+                    Cr[yy * 8 + xx / 2] += (0.5f * r - 0.418688f * g - 0.081312f * b) / 2;
+                }
+            }
+            for (int i = 0; i < 2; i++) {
+                jblock(&e, Y[i], 0, &pred[0]);
+            }
+            jblock(&e, Cb, 1, &pred[1]);
+            jblock(&e, Cr, 1, &pred[2]);
+        }
+    }
+    if (e.nacc) {
+        jbits(&e, 0x7f, 8 - e.nacc);            /* pad with 1 bits */
+    }
+    jput(&e, 0xff); jput(&e, 0xd9);
+    return e.full ? 0 : e.n;
+}
+
+/* ---- a frame for a DMA transfer -------------------------------------------------------------------- */
+
+void ngage_cam_fill(NgageCam *c, uint8_t *dst, uint32_t bytes)
+{
+    static const unsigned sizes[][2] = { { 160, 120 }, { 176, 144 }, { 640, 480 } };
+    bool rgb444 = ngage_cam_rgb444(c);
+    int fmt = rgb444 ? CAM_FMT_RGB444
+            : c->reg16 && c->regs[CAM_REG_MODE] == 7 ? CAM_FMT_RGB565
+            : c->reg16 ? CAM_FMT_YUV8 : CAM_FMT_YUV;
+
+    if (!rgb444 && fmt != CAM_FMT_RGB565 && c->reg16 && c->regs[CAM_REG_JPEG] == 6) {
+        static uint8_t jpg[640 * 482];
+        uint32_t n = ngage_cam_jpeg(jpg, sizeof(jpg), 640, 480, c->frames);
+
+        memset(dst, 0, bytes);
+        if (!n || n * 2 > bytes) {
+            cam_log(c, "JPEG frame: no room (%u bytes of %u)", n, bytes);
+            return;
+        }
+        for (uint32_t i = 0; i < n; i += 2) {       /* two bytes per word, at offsets 3 and 2 */
+            dst[i * 2 + 3] = jpg[i];
+            dst[i * 2 + 2] = i + 1 < n ? jpg[i + 1] : 0;
+        }
+        cam_log(c, "JPEG frame: %u bytes", n, 0);
+        return;
+    }
+    memset(dst, fmt <= CAM_FMT_RGB565 ? 0 : 0x80, bytes);
+    for (unsigned i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
+        unsigned w = sizes[i][0], h = sizes[i][1];
+        if (bytes == w * h * 2) {
+            cam_pattern_wh(dst, w, h, c->frames, fmt);
+            return;
+        }
+        if (bytes == w * (h + 2) * 2) {             /* 3650/3660: a header line, the picture, a spare line */
+            cam_pattern_wh(dst + w * 2, w, h, c->frames, fmt);
+            return;
+        }
+    }
+    cam_pattern_wh(dst, 160, bytes / 320, c->frames, fmt);
 }

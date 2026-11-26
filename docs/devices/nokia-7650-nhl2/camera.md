@@ -117,9 +117,32 @@ blank [V run].
   DosServer function 404 (DSClient 0x50a1aba0, argument 1); the Bluetooth stack starts after BTTestServer frees btldd
   and looks normal; cause not found. The owner chose the old behaviour (2026-11-26).
 
+## Nokia 3650 and 3660 (2026-11-26)
+
+`-M nokia3650` / `-M nokia3660` (`NgageModel.camera`, `cam_nhl8`; no slide). Viewfinder, capture, the saved JPEG in
+Images: all [V run]; `python3 tests/ngage-boot-check.py --model nokia3650 --camera` (and 3660). Their camerapdd
+drives the same receiver, interrupt 86, DMA source 0x1012102C and buffer 0x0A000000 (0x97000 bytes) [V], with
+another sensor:
+
+| What | 3650 / 3660 |
+|---|---|
+| I2C | address 0x08 / 0x09 (7-bit 0x04), register number 16 bits high byte first, 8-bit data (0x5040c780) [V] |
+| identification | 3650: none (13 registers read and cached); 3660: register 0xC007 = 0x36 selects sensor variant 2 (0x503ea1c4), else variant 1 [V]; the model answers 0 (variant 1) |
+| mode table | 3650 0x5040ee24 (20 entries), 3660 0x503ea350 (24): picture-mode mask, state mask, variant mask, receiver writes, sensor writes (16-bit register, value), frame size. Mode 2 uploads 8051 code to 0x8165-0x81A1 [V]; the model stores every write |
+| frame layout | w x (h + 2) x 2: a header line, the picture, a spare line; the driver hands out buffer + 0x140 (0x5040db2c) [V] |
+| viewfinder, 3650 (12-bit screen) | state 5: CCP control 6, sensor 0xC005 = 2: RGB 4444, 160x122 [V run] |
+| viewfinder, 3660 (16-bit screen) | state 6: control 0, 0xC005 = 7: RGB565 little-endian, copied into the bitmap as it is (Csu.dll 0x50aa0c88, display mode 7) [V; byte order V run] |
+| still | states 7-9 (quality in 0xC20C): 0xC102 = 6, the sensor's own JPEG in 640x482 x 2 bytes, two bytes of the file per 32-bit word at byte offsets 3 and 2; 0x5040e87c checks FF D8, compacts the bytes and finds FF D9 [V] |
+| preview after a still | state 10: 0xC102 = 4, raw YUV 160x122, bytes Cr Y1 Cb Y0 with Csu.dll's own matrix (0x50abfee0: R = 1.128 Y + 1.569 Cr', G = 1.157 Y - 0.814 Cr' - 0.393 Cb', B = 1.108 Y + 1.988 Cb') [V] |
+
+The model's JPEG (`ngage_cam_jpeg`): baseline, JFIF, YCbCr 4:2:2, quality 75, the standard Huffman tables (identical
+to libjpeg's, `tests/ngage-cam-jpeg-check.py`); the phone's gallery shows it [V run]. Two wrong turns, kept as
+regression tests: the preview read as the 7650's YUV order (white came out magenta, black green), and the 3660's
+viewfinder sent as YUV (it is RGB565).
+
 ## Open
 
 - Host camera as a source (a later step; the owner asked for a pattern only).
 - Sensor type 2 (the other module) is not exercised; neither are the night mode and the QCIF still size.
-- The 3650/3660: same receiver, but a sensor at 0x04 with 16-bit registers and JPEG stills from the sensor itself
-  (FF D8 / FF D9 checked in the buffer) [V static].
+- 3650/3660: the camcorder (176x144 video, mode state 6 with control 0 on the 3650 [I]) is untried; the 3660's sensor
+  variant 2 is not exercised.

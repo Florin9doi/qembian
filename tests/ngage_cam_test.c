@@ -3,7 +3,7 @@
  * with camerapdd.pdd's own pin sequences, the CCP receiver registers, and the test pattern read back through
  * Csu.dll's converter.
  *   cc -std=gnu11 -Wall -o build/ngage_cam_test tests/ngage_cam_test.c \
- *      src/qemu-ngage/hw/arm/ngage_cam.c && build/ngage_cam_test
+ *      src/qemu-ngage/hw/arm/ngage_cam.c -lm && build/ngage_cam_test
  */
 #include <assert.h>
 #include <stdio.h>
@@ -296,6 +296,158 @@ static void test_viewfinder_rgb444(void)
     assert((ramp & 0xf) == (ramp >> 4 & 0xf) && (ramp & 0xf) == (ramp >> 8));
 }
 
+/* 3650/3660 camerapdd (0x5040c780 / 0x5040c6b0): address 0x08/0x09, register number high byte first */
+static int write_reg16(uint16_t reg, uint8_t v)
+{
+    return (start() || put(0x08) || put(reg >> 8) || put(reg & 0xff) || put(v) || stop()) ? -1 : 0;
+}
+
+static int read_reg16(uint16_t reg, uint8_t *v)
+{
+    if (start() || put(0x08) || put(reg >> 8) || put(reg & 0xff) || stop() || start() || put(0x09)) {
+        return -1;
+    }
+    int r = get(1);
+    if (r < 0) {
+        return -1;
+    }
+    *v = r;
+    return stop();
+}
+
+/* the 3650/3660 sensor: 7-bit address 0x04, 16-bit register numbers; the 7650's address is not answered */
+static void test_sensor_nhl8(void)
+{
+    uint8_t v;
+
+    reset();
+    ngage_cam_set_sensor(&cam, CAM_I2C_ADDR_NHL8, true);
+    assert(write_reg16(CAM_REG_JPEG, 0x06) == 0);
+    assert(cam.regs[0xc102] == 0x06 && cam.regs[0x02] == 0);
+    assert(write_reg16(0x8165, 0xc0) == 0);              /* the firmware upload range (mode table entry 2) */
+    assert(read_reg16(0x8165, &v) == 0 && v == 0xc0);
+    assert(read_reg16(CAM_REG_JPEG, &v) == 0 && v == 0x06);
+    /* the self-test (0x5040d... reads, inverts, writes, reads back) */
+    assert(write_reg16(0x0010, 0x5a) == 0 && read_reg16(0x0010, &v) == 0 && v == 0x5a);
+    assert(start() == 0 && put(0x78) == -1 && stop() == 0);     /* 0x3C: not this sensor */
+    /* the 7650's 8-bit sensor still wraps at 0x100 */
+    reset();
+    assert(write_reg(0xff, 0x11) == 0 && cam.regs[0xff] == 0x11 && cam.regs[0x100] == 0);
+}
+
+/* 3650/3660 viewfinder: 160x122 transfers (0x9880): a header line, 160x120 RGB444, a spare line; the driver hands
+   out buffer + 0x140 [V 0x5040db2c] */
+static void test_fill_header_line(void)
+{
+    static uint8_t f[160 * 122 * 2], g[160 * 120 * 2];
+
+    reset();
+    ngage_cam_set_sensor(&cam, CAM_I2C_ADDR_NHL8, true);
+    ngage_cam_ccp_write(&cam, CAM_CCP_CTRL, 6);
+    ngage_cam_fill(&cam, f, sizeof(f));
+    ngage_cam_pattern(g, sizeof(g), 0, true);
+    assert(memcmp(f + 0x140, g, sizeof(g)) == 0);
+    /* the 7650's 0x9600 transfer: no header line */
+    ngage_cam_fill(&cam, f, sizeof(g));
+    assert(memcmp(f, g, sizeof(g)) == 0);
+}
+
+/*
+ * 3650/3660 stills: the sensor sends a JPEG (register 0xC102 = 6), two bytes per 32-bit word at byte offsets 3 and 2;
+ * camerapdd 0x5040e87c checks FF D8 in the first word, compacts the bytes and finds FF D9 within the buffer [V].
+ */
+static void test_fill_jpeg(void)
+{
+    static uint8_t f[0x96a00], j[0x96a00 / 2];
+    uint32_t n = 0;
+    bool eoi = false;
+
+    reset();
+    ngage_cam_set_sensor(&cam, CAM_I2C_ADDR_NHL8, true);
+    cam.regs[CAM_REG_JPEG] = 6;
+    ngage_cam_fill(&cam, f, sizeof(f));
+    uint32_t w0 = f[0] | f[1] << 8 | f[2] << 16 | (uint32_t)f[3] << 24;
+    assert(w0 >> 24 == 0xff && (w0 >> 16 & 0xff) == 0xd8);          /* the driver's own test */
+    for (uint32_t i = 0; i + 3 < sizeof(f) && !eoi; i += 4) {        /* the driver's compaction */
+        j[n++] = f[i + 3];
+        j[n++] = f[i + 2];
+        eoi = n >= 2 && j[n - 2] == 0xff && j[n - 1] == 0xd9;
+        if (!eoi && n >= 3 && j[n - 3] == 0xff && j[n - 2] == 0xd9) {
+            eoi = true;
+            n--;
+        }
+    }
+    assert(eoi && n > 1000 && n < 100000);
+    /* a JPEG: SOI, JFIF, SOF0 640x480 with 3 components; Huffman tables and quantisation tables present */
+    assert(j[0] == 0xff && j[1] == 0xd8 && j[2] == 0xff && j[3] == 0xe0 && !memcmp(j + 6, "JFIF", 4));
+    const uint8_t *sof = memmem(j, n, "\xff\xc0", 2);
+    assert(sof && (sof[5] << 8 | sof[6]) == 480 && (sof[7] << 8 | sof[8]) == 640 && sof[9] == 3);
+    assert(memmem(j, n, "\xff\xc4", 2) && memmem(j, n, "\xff\xdb", 2) && memmem(j, n, "\xff\xda", 2));
+    /* the same file as the encoder makes; a full decode is checked with PIL in tests/ngage-cam-jpeg-check.py */
+    static uint8_t ref[0x96a00 / 2];
+    assert(ngage_cam_jpeg(ref, sizeof(ref), 640, 480, 0) == n && !memcmp(ref, j, n));
+    /* raw stills (0xC102 = 4) are YUV again, with the header line */
+    cam.regs[CAM_REG_JPEG] = 4;
+    ngage_cam_fill(&cam, f, sizeof(f));
+    assert(!(f[3] == 0xff && f[2] == 0xd8));
+    assert(ngage_cam_jpeg(ref, 100, 640, 480, 0) == 0);              /* too small: 0, no overrun */
+}
+
+/*
+ * Regression "preview_magenta_green" (3650): the still's preview showed white as magenta and black as green. The
+ * 3650/3660 Csu.dll reads raw frames as Cr Y1 Cb Y0 with its own matrix (0x50abfee0), not the 7650's Y1 Cr Y0 Cb, so
+ * the luma landed in the chroma. The 16-bit sensor's raw frames (CCP control 0, 0xC102 = 4) use its order.
+ */
+static void test_fill_yuv_nhl8(void)
+{
+    static uint8_t f[160 * 122 * 2];
+    static const int bars[8][3] = { { 255, 255, 255 }, { 255, 255, 0 }, { 0, 255, 255 }, { 0, 255, 0 },
+                                    { 255, 0, 255 }, { 255, 0, 0 }, { 0, 0, 255 }, { 0, 0, 0 } };
+
+    reset();
+    ngage_cam_set_sensor(&cam, CAM_I2C_ADDR_NHL8, true);
+    cam.regs[CAM_REG_JPEG] = 4;
+    ngage_cam_fill(&cam, f, sizeof(f));
+    for (int b = 0; b < 8; b++) {
+        unsigned x = (b * 160 / 8 + 10) & ~1u, y = 60;
+        uint8_t p0[3], p1[3];
+        ngage_cam_yuv8_to_rgb(f + 0x140 + (y * 160 + x) * 2, p0, p1);
+        if (!near(p0, bars[b][0], bars[b][1], bars[b][2]) || !near(p1, bars[b][0], bars[b][1], bars[b][2])) {
+            fprintf(stderr, "3650 bar %d: %d,%d,%d\n", b, p0[0], p0[1], p0[2]);
+            assert(0);
+        }
+    }
+    /* the grey ramp stays grey */
+    uint8_t p0[3], p1[3];
+    ngage_cam_yuv8_to_rgb(f + 0x140 + (110 * 160 + 80) * 2, p0, p1);
+    assert(abs(p0[0] - p0[1]) <= 6 && abs(p0[1] - p0[2]) <= 6);
+}
+
+/*
+ * Regression "viewfinder_3660_colours": the 3660 (16-bit screen) runs its viewfinder in sensor mode 0xC005 = 7 with
+ * CCP control 0; Csu.dll (0x50aa0c88) copies those frames into a 64K-colour bitmap as they are, so they are little-
+ * endian RGB565 (the model sent YUV: odd colours). The 3650 (mode 2, control 6) stays RGB 4444.
+ */
+static void test_fill_rgb565_3660(void)
+{
+    static uint8_t f[160 * 122 * 2];
+    static const uint16_t bars[8] = { 0xffff, 0xffe0, 0x07ff, 0x07e0, 0xf81f, 0xf800, 0x001f, 0x0000 };
+
+    reset();
+    ngage_cam_set_sensor(&cam, CAM_I2C_ADDR_NHL8, true);
+    cam.regs[CAM_REG_MODE] = 7;
+    ngage_cam_fill(&cam, f, sizeof(f));
+    for (int b = 0; b < 8; b++) {
+        unsigned x = b * 160 / 8 + 10, y = 60;
+        const uint8_t *p = f + 0x140 + (y * 160 + x) * 2;
+        assert((p[0] | p[1] << 8) == bars[b]);
+    }
+    cam.regs[CAM_REG_MODE] = 2;                        /* the 3650's viewfinder: control 6 = RGB 4444 */
+    ngage_cam_ccp_write(&cam, CAM_CCP_CTRL, 6);
+    ngage_cam_fill(&cam, f, sizeof(f));
+    assert((f[0x140 + (60 * 160 + 10) * 2] | f[0x140 + (60 * 160 + 10) * 2 + 1] << 8) == 0x0fff);
+}
+
 int main(void)
 {
     test_identify();
@@ -305,6 +457,11 @@ int main(void)
     test_ccp();
     test_pattern();
     test_viewfinder_rgb444();
+    test_sensor_nhl8();
+    test_fill_header_line();
+    test_fill_jpeg();
+    test_fill_yuv_nhl8();
+    test_fill_rgb565_3660();
     printf("ngage_cam_test: ok\n");
     return 0;
 }

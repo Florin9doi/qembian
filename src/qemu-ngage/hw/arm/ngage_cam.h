@@ -21,9 +21,16 @@
 /* the sensor's I2C bus: two open-drain lines on the GPIO port 0x0C150200 [V camerapdd 0x503d6b98-0x503d6c04] */
 #define CAM_GPIO_SCL      0x0080    /* 0x0C15020C (input) / 0x0C150210 (1 = pull low) */
 #define CAM_GPIO_SDA      0x0100
-#define CAM_I2C_ADDR      0x3c      /* camerapdd sends 0x78 (write) / 0x79 (read) [V] */
-#define CAM_NREGS         0x100     /* 8-bit register numbers: the 7650's camerapdd reads 0..0x7F at power-up
-                                       [V 0x503d749c], the 6600's campdd 0..0x9F [V 0x503e0bf8] */
+#define CAM_I2C_ADDR      0x3c      /* 7650/6600: camerapdd sends 0x78 (write) / 0x79 (read) [V] */
+#define CAM_I2C_ADDR_NHL8 0x04      /* 3650/3660: 0x08 / 0x09, 16-bit register numbers (high byte first) [V
+                                       camerapdd 0x5040c780 / 0x503e8908] */
+#define CAM_NREGS         0x10000   /* 8-bit register numbers on the 7650 (reads 0..0x7F at power-up, 0x503d749c)
+                                       and the 6600 (0..0x9F, 0x503e0bf8); 16-bit on the 3650/3660 [V] */
+#define CAM_REG_MODE      0xc005    /* 3650/3660: 2 viewfinder (12-bit screen: RGB 4444, CCP control 6), 6 still,
+                                       7 viewfinder for a 16-bit screen (3660): RGB565, copied into the bitmap as it
+                                       is (3660 Csu.dll 0x50aa0c88, display mode 7) [V; little-endian: V run] */
+#define CAM_REG_JPEG      0xc102    /* 3650/3660: 6 = the sensor compresses stills to JPEG, 4 = raw (mode tables
+                                       0x5040ee24 / 0x503ea350, states 7-9 vs 4) [V] */
 
 /* CCP receiver, physical 0x0C121000 (registers +0x00..+0x3C) [V camerapdd + its mode table 0x503d8780] */
 #define CAM_CCP_BASE      0x0c121000
@@ -43,8 +50,12 @@ typedef struct NgageCam {
     bool m_scl_low, m_sda_low, s_sda_low;
     bool scl, sda;                  /* the line levels after the last change */
     int state;                      /* CAM_I2C_* in ngage_cam.c */
-    uint8_t shift, nbits, ptr, tx;
-    bool rd, first;                 /* read transfer; the next written byte is the register pointer */
+    uint8_t shift, nbits, tx;
+    uint16_t ptr;
+    bool rd;                        /* a read transfer */
+    uint8_t naddr;                  /* register-pointer bytes still to come in this write */
+    uint8_t addr;                   /* the sensor's 7-bit I2C address (CAM_I2C_ADDR*) */
+    bool reg16;                     /* 16-bit register numbers (3650/3660) */
     uint8_t regs[CAM_NREGS];
     /* CCP receiver */
     uint32_t ccp[CAM_CCP_SIZE / 4];
@@ -54,7 +65,9 @@ typedef struct NgageCam {
     void *opaque;
 } NgageCam;
 
+/* addr / reg16: the sensor's I2C address and register width (set again after init by the board) */
 void ngage_cam_init(NgageCam *c);
+void ngage_cam_set_sensor(NgageCam *c, uint8_t addr, bool reg16);
 /* GPIO port: the value written to 0x0C150210 (bits 7/8 = pull SCL/SDA low) */
 void ngage_cam_gpio_drive(NgageCam *c, uint16_t drive);
 /* GPIO port: the bus lines as 0x0C15020C shows them (bits 7/8; 1 = high) */
@@ -73,7 +86,21 @@ bool ngage_cam_rgb444(const NgageCam *c);
    YUV 4:2:2 (bytes Y1 Cr Y0 Cb per pixel pair); sized from the transfer: 160x120 viewfinder, 176x144 or 640x480
    capture, else 160 wide; frame moves the marker */
 void ngage_cam_pattern(uint8_t *dst, uint32_t bytes, uint32_t frame, bool rgb444);
+/*
+ * A frame as the current mode sends it, into a DMA transfer of `bytes`:
+ *   - RGB444 (CCP control bits 1-2 set), else RGB565 (16-bit sensor with CAM_REG_MODE = 7), else JPEG (16-bit sensor
+ *     with CAM_REG_JPEG = 6), else YUV 4:2:2 (the
+ *     7650/6600's Y1 Cr Y0 Cb, the 3650/3660's Cr Y1 Cb Y0: 16-bit sensor);
+ *   - layout from the size: w x h x 2 (7650, 6600), or w x (h + 2) x 2 = a header line, the picture and a spare line
+ *     (3650/3660: 160x122, 640x482; the driver hands out the buffer + one line [V 0x5040db2c +0x140]);
+ *   - JPEG: two bytes of the file per 32-bit word, at byte offsets 3 and 2 (the driver compacts them, 0x5040e87c) [V].
+ */
+void ngage_cam_fill(NgageCam *c, uint8_t *dst, uint32_t bytes);
+/* a baseline JPEG (YCbCr 4:2:2, quality 75, the standard Huffman tables) of the test pattern; its length, 0 = no room */
+uint32_t ngage_cam_jpeg(uint8_t *out, uint32_t cap, unsigned w, unsigned h, uint32_t frame);
 /* the converter camera's Csu.dll applies (0x50a606cc) [V]: YUV pair -> two RGB pixels (for tests) */
 void ngage_cam_yuv_to_rgb(const uint8_t q[4], uint8_t rgb0[3], uint8_t rgb1[3]);
+/* the 3650/3660 Csu.dll converter (0x50abfee0) [V]: bytes Cr Y1 Cb Y0 -> two RGB pixels (for tests) */
+void ngage_cam_yuv8_to_rgb(const uint8_t q[4], uint8_t rgb0[3], uint8_t rgb1[3]);
 
 #endif

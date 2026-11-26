@@ -24,7 +24,8 @@ closely enough. References are firmware on screen: build/evidence/<model>/boot-r
     --fresh: "Locked" in the title, the idle area unpainted). Cause: the view server killed Phone.app
     (ViewSrv 11) while the start-up time query, shown on every boot because the clock is never
     valid, stayed up; answering it at once avoids it, which is what this check does.
-  --camera (7650; 6600 with --idle, no slide: fails while BTTestServer holds the camera, docs camera.md): after the time query, OK twice, Camera (left softkey): the viewfinder must show the board's
+  --camera (7650; 3650 / 3660 (no slide); 6600 with --idle, no slide: fails while BTTestServer holds the camera, docs
+    camera.md): after the time query, OK twice, Camera (left softkey): the viewfinder must show the board's
     test pattern (ngage_cam.c: eight colour bars), the slide closed (qom-set slide-closed) must stop it ("Open
     cover") and opening it must bring it back. Regressions "viewfinder_colours_wrong" (the viewfinder is 0x0RGB
     4444, not YUV: white came out cyan) and "camera_open_cover" (the slide line read closed: "Open cover" for ever).
@@ -34,8 +35,10 @@ import argparse, pathlib, shutil, subprocess, sys, tempfile, time
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 FLASH = {'ngage': ROOT / 'build/ngage/phones/test.flash',
          'nokia6600': ROOT / 'build/ngage/phones/nhl10-agent.flash',
-         'nokia7650': ROOT / 'build/ngage/phones/nhl2-agent.flash'}
-EVIDENCE = {'ngage': 'ngage', 'nokia6600': 'nhl10', 'nokia7650': 'nhl2'}
+         'nokia7650': ROOT / 'build/ngage/phones/nhl2-agent.flash',
+         'nokia3650': ROOT / 'build/ngage/phones/nhl8-agent.flash',
+         'nokia3660': ROOT / 'build/ngage/phones/nhl8x-agent.flash'}
+EVIDENCE = {'ngage': 'ngage', 'nokia6600': 'nhl10', 'nokia7650': 'nhl2', 'nokia3650': 'nhl8', 'nokia3660': 'nhl8x'}
 
 
 def load(p):
@@ -222,7 +225,7 @@ def main():
             joy = joystick(SESS, tmp)
         cam = None
         if a.camera and best <= a.limit and not frozen:
-            cam = camera(SESS, tmp)
+            cam = camera(SESS, tmp, has_slide=a.model == 'nokia7650')
     finally:
         subprocess.run(SESS + ['stop'], capture_output=True)
     if frozen:
@@ -230,9 +233,11 @@ def main():
         return 1
     ok = best <= a.limit
     if a.camera:
-        cok = cam is not None and cam[0] == 8 and cam[1] < 4 and cam[2] == 8
-        print('%s camera check: %s (viewfinder bars right: %s of 8 open, %s closed, %s reopened; shots in %s)'
-              % (a.model, 'PASS' if cok else 'FAIL', *(cam or ('-', '-', '-')), tmp))
+        cok = cam is not None and cam[0] == 8 and (len(cam) == 1 or (cam[1] < 4 and cam[2] == 8))
+        steps = ('open', 'slide closed', 'reopened')
+        print('%s camera check: %s (viewfinder bars right of 8: %s; shots in %s)'
+              % (a.model, 'PASS' if cok else 'FAIL',
+                 ', '.join('%s %s' % (n, st) for n, st in zip(cam or [], steps)) or 'none', tmp))
         ok = ok and cok
     if a.joystick:
         print('%s joystick check: %s (menu before/after right differ by %.1f)'

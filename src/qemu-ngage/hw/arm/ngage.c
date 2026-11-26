@@ -107,7 +107,8 @@ typedef struct {
                                        finds a valid clock (H-nhl10-rtc) */
     uint32_t md5_entries[2];        /* ROM offsets of the bootstrap's digest entries (H-ngage-md5);
                                        0 = the N-Gage's 0x8F00 / 0x8F18 */
-    bool camera;                    /* the camera (ngage_cam.c): 7650, 6600 */
+    bool camera;                    /* the camera (ngage_cam.c): 7650, 6600, 3650, 3660 */
+    bool cam_nhl8;                  /* 3650/3660: the sensor at 0x04 with 16-bit registers, JPEG stills */
     bool slide;                     /* the 7650's keypad slide (the camera lens is behind it) */
 } NgageModel;
 
@@ -489,14 +490,15 @@ static void ngage_cam_frame(void *opaque)
         g_autofree uint8_t *buf = g_malloc(ngage_cam_dma_bytes);
         int ch = ngage_cam_dma_ch;
 
-        ngage_cam_pattern(buf, ngage_cam_dma_bytes, ngage_cam.frames, ngage_cam_rgb444(&ngage_cam));
+        ngage_cam_fill(&ngage_cam, buf, ngage_cam_dma_bytes);
         address_space_write(&address_space_memory, ngage_cam_dma_dst, MEMTXATTRS_UNSPECIFIED, buf,
                             ngage_cam_dma_bytes);
         ngage_cam_dma_ch = -1;
         ngage_dma_finish(ch);
         if (ngage_log_hot(&nlog)) {
             qemu_log_mask(LOG_UNIMP, "ngage-cam: frame %u, %u bytes %s to %08x (DMA ch %d)\n", ngage_cam.frames,
-                          ngage_cam_dma_bytes, ngage_cam_rgb444(&ngage_cam) ? "RGB444" : "YUV422",
+                          ngage_cam_dma_bytes, ngage_cam_rgb444(&ngage_cam) ? "RGB444" :
+                          ngage_cam.reg16 && ngage_cam.regs[CAM_REG_JPEG] == 6 ? "JPEG" : "YUV422",
                           ngage_cam_dma_dst, ch);
         }
     }
@@ -580,6 +582,9 @@ static void ngage_cam_setup(MemoryRegion *sys, qemu_irq irq)
 
     ngage_cam.log = ngage_cam_log;
     ngage_cam_init(&ngage_cam);
+    if (ngm->cam_nhl8) {
+        ngage_cam_set_sensor(&ngage_cam, CAM_I2C_ADDR_NHL8, true);
+    }
     ngage_cam_irq_line = irq;
     ngage_cam_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, ngage_cam_frame, NULL);
     memory_region_init_io(&mr, NULL, &ngage_ccp_ops, NULL, "ngage.ccp", CAM_CCP_SIZE);
@@ -1819,6 +1824,7 @@ static const NgageModel ngage_nhl8 = {
     .nos_rx_dfc = 0x8000be38,           /* nos_standin.S RX_DFC / RX_FLAG with this ROM's RAM base */
     .nos_rx_flag = 0x8000be30,
     .flash_manuf = NGAGE_FLASH_MANUF, .flash_device = NGAGE_FLASH_DEVICE,
+    .camera = true, .cam_nhl8 = true,   /* camerapdd: the 7650's receiver, its own sensor (docs/.../camera.md) */
 };
 
 static const uint32_t ngage_nhl8x_nos_exports[][2] = {
@@ -1846,6 +1852,7 @@ static const NgageModel ngage_nhl8x = {
      */
     .nos_item14 = 0x2186404,
     .flash_manuf = NGAGE_FLASH_MANUF, .flash_device = NGAGE_FLASH_DEVICE,
+    .camera = true, .cam_nhl8 = true,   /* as the 3650 (sensor variant 1: register 0xC007 != 0x36) */
 };
 
 /* the NOS exports enosdriver.ldd imports (hidden module 0x504128B0, nos_standin_nhl10.S) */
@@ -2028,7 +2035,7 @@ static void ngage_init(MachineState *machine)
         ngage_lprf_setup();                                 /* Bluetooth, CBus dev 5, CTSI 2 */
         ngage_mmc_init(sys, in, ngage_mmc_file);            /* MMC 21-24, DMA channels 6.. [I] */
         if (ngm->camera) {
-            ngage_cam_setup(sys, in[CAM_IRQ]);              /* 7650, 6600: camera (IrqCCPStatus) */
+            ngage_cam_setup(sys, in[CAM_IRQ]);              /* camera (IrqCCPStatus) */
         }
         memory_region_init_io(&t->mr, NULL, &ngage_timer_ops, t, "ngage.timers",
                               0x20 * NGAGE_TIMERS);
