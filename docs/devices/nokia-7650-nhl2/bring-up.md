@@ -20,6 +20,10 @@ kernel-data layout). It runs on the N-Gage board as `-M nokia7650` (an `NgageMod
 - **Keypad slide (2026-11-26):** the switch line 0x0C15020C bit 9 (H-nhl2-slide); the phone starts with it open.
   Closing it (F7, the window's Slide button, `qom-set /machine slide-closed true`) locks the keypad as on the
   phone; opening unlocks.
+- **Clock (2026-11-26):** boots on the host's local time (H-uem-rtc: UEM RTC counters + the NOS stand-in's date hand-over),
+  no time query after the first boot (H-nhl10-rtc, now on for the 7650: its rtc.dll and cbus.dll are the 6600's code,
+  relocated). A factory-fresh phone still asks once (Startup's FirstBoot.dat). Check: `python3 tests/ngage-boot-check.py
+  --model nokia7650 --clock`. Details: docs/research/ngage-uem-rtc.md.
 - Open: self-test `59 02` from object 0x36 is unanswered (the N-Gage table answers 59 01); the reply
   table is the N-Gage's, unchecked for the 7650; IrDA, Bluetooth and sound are untried. Same "boots,
   not really working yet" level as the 6600 (docs/roadmap.md).

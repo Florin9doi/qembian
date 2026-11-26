@@ -247,7 +247,8 @@ verdict is "it does boot but that's mostly it". Parked for the 7650; to make it 
 1. Answer the unanswered ISI requests after idle (TSY 5A 00, SIM 09 09/29/23, SMS 02 1E/16, DSY 0B 11 {01 00})
    and give the phone a network state (MTC/NET replies), as the N-Gage table does.
 2. The menu and the main apps (Phone, Messaging, Camera, Gallery), each until it opens without a stall.
-3. Time and date: no longer asked on a restart (H-nhl10-rtc); the clock still starts at rtc.dll's default date.
+3. Time and date: no longer asked on a restart (H-nhl10-rtc); every boot comes up on the host's local time (H-uem-rtc,
+   2026-11-26).
 4. A first-boot hint in the phone window: the screen is white for ~60 s while C: is formatted.
 5. Memory card (mmc.pdd, new driver), power key (UEM), sound, camera, IrDA, Bluetooth.
 6. Fixed 2026-11-18: the restart hang (owner: hangs on the home screen when not --fresh). Phone.app was killed by

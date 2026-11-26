@@ -56,6 +56,7 @@
 #include "exec/target_page.h"
 #include "chardev/char-fe.h"
 #include "system/system.h"
+#include "system/rtc.h"
 #include "qemu/cutils.h"
 #include "ui/console.h"
 #include "exec/cpu-common.h"
@@ -362,6 +363,73 @@ static void ngage_lprf_setup(void)
     ngage_lprf_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, ngage_lprf_expire, NULL);
 }
 
+/*
+ * H-uem-rtc: the UEM's real-time clock (CBus dev 1), on models with uem_rtc [V rtc.dll 7650/6600, read statically:
+ * docs/research/6600-rtc-clock.md, docs/research/ngage-uem-rtc.md]. The UEM counts time since its last reset:
+ * reg 0x11 seconds, 0x12 minutes, 0x13 hours, 0x01 days (0xFF = not running). rtc.dll never writes them; it only
+ * resets them (reg 2 bit 7) when it finds the clock invalid. The date the count starts from is not in the UEM: the
+ * NOS keeps it in its permanent memory and hands it to rtc.dll at start-up (request 1, nos_standin.S), and rtc.dll
+ * sets the kernel's time to that date with the UEM's time of day, plus the days. The board starts the count at
+ * the host's midnight (in QEMU's -rtc base: the launchers pass base=localtime) and gives that midnight to the
+ * stand-in as the stored date (NOS device +0x48/+0x4C), so every boot comes up at the host's time.
+ */
+static int64_t ngage_uem_zero;          /* wall-clock seconds (mktimegm domain) at which the count was 0 */
+static bool ngage_uem_zero_set;
+
+static int64_t ngage_uem_now(void)
+{
+    struct tm tm;
+
+    qemu_get_timedate(&tm, 0);
+    return mktimegm(&tm);
+}
+
+static int64_t ngage_uem_elapsed(void)
+{
+    int64_t now = ngage_uem_now();
+
+    if (!ngage_uem_zero_set) {
+        ngage_uem_zero = now - now % 86400;     /* power applied at midnight */
+        ngage_uem_zero_set = true;
+    }
+    return MAX(now - ngage_uem_zero, 0);
+}
+
+/* The UEM counter register r (dev 1), or -1 if r is not one. */
+static int ngage_uem_counter(unsigned r)
+{
+    int64_t t;
+
+    if (!ngm->uem_rtc) {
+        return -1;
+    }
+    t = ngage_uem_elapsed();
+    switch (r) {
+    case 1 << 5 | 0x01: return MIN(t / 86400, 0xfe);     /* 0xFF would read as "not running" */
+    case 1 << 5 | 0x11: return t % 60;
+    case 1 << 5 | 0x12: return t / 60 % 60;
+    case 1 << 5 | 0x13: return t / 3600 % 24;
+    }
+    return -1;
+}
+
+/*
+ * The date the NOS hands over (a TTime, microseconds), 0 if this model has no UEM clock. Anchored on the kernel's own
+ * TTime of 2000-01-01 00:00, its boot-time base (0x80006758 after 7650 ekern 0x5031f11c, TDateTime(2000, January, 0))
+ * [V read in a run]: a plain count from 0001-01-01 came out 378 days early on the phone.
+ */
+#define NGAGE_TTIME_2000 0x00e03ab44a676000ULL
+#define NGAGE_UNIX_2000  946684800LL
+
+static uint64_t ngage_uem_base_ttime(void)
+{
+    if (!ngm->uem_rtc) {
+        return 0;
+    }
+    ngage_uem_elapsed();
+    return NGAGE_TTIME_2000 + (uint64_t)(ngage_uem_zero - NGAGE_UNIX_2000) * 1000000;
+}
+
 static uint64_t ngage_cbus_read(void *opaque, hwaddr addr, unsigned size)
 {
     NgageCbus *c = opaque;
@@ -385,6 +453,11 @@ static void ngage_cbus_commit_write(NgageCbus *c)
     c->written[r] = true;
     if (r >> 5 == NGAGE_CBUS_LPRF) {
         ngage_lprf_write(&ngage_lprf, r & 0x1f, c->lo);
+    }
+    if (ngm->uem_rtc && r == (1 << 5 | 0x02) && (c->lo & 0x80)) {
+        ngage_uem_zero = ngage_uem_now();           /* H-uem-rtc: reset pulse, the count restarts at 0 */
+        ngage_uem_zero_set = true;
+        qemu_log_mask(LOG_UNIMP, "ngage-cbus: UEM RTC reset (H-uem-rtc)\n");
     }
     if (ngage_log_hot(&count[r]))
     qemu_log_mask(LOG_UNIMP, "ngage-cbus: W dev %u reg %02x = %04x%s (fmt %02x cmd %03x) pc=%08x\n",
@@ -433,6 +506,12 @@ static void ngage_cbus_write(void *opaque, hwaddr addr, uint64_t val, unsigned s
                  */
                 v = 0xc0;
                 src = " (UEM RTC calibration, H-nhl10-rtc)";
+            }
+            int uem = ngage_uem_counter(r);
+
+            if (uem >= 0) {
+                v = uem;
+                src = " (UEM RTC counter, H-uem-rtc)";
             }
             if (r >> 5 == NGAGE_CBUS_LPRF) {
                 v = ngage_lprf_read(&ngage_lprf, r & 0x1f);
@@ -1340,6 +1419,11 @@ static uint64_t ngage_nos_read(void *opaque, hwaddr addr, unsigned size)
     if (addr >= 0x100) {
         return ngage_isi_fetched_word(addr - 0x100);
     }
+    if (addr == 0x48 || addr == 0x4c) {
+        /* H-uem-rtc: the date the NOS keeps for the RTC (TTime lo/hi; 0 = none: the stand-in passes rtc.dll's own) */
+        uint64_t t = ngage_uem_base_ttime();
+        return addr == 0x48 ? (uint32_t)t : (uint32_t)(t >> 32);
+    }
     return addr == 0x28 ? n->result : (addr < 0x24 ? n->a[addr >> 2] : 0);
 }
 
@@ -1790,6 +1874,7 @@ static const NgageModel ngage_rh29 = {
     .nos_rx_dfc = 0x8000c578,           /* nos_standin.S RX_DFC / RX_FLAG (Q50, Q56) */
     .nos_rx_flag = 0x8000c570,
     .flash_manuf = NGAGE_FLASH_MANUF, .flash_device = NGAGE_FLASH_DEVICE,
+    .uem_rtc = true,
 };
 
 /*
@@ -1817,6 +1902,7 @@ static const NgageModel ngage_nem4 = {
     .nos_rx_dfc = 0x8000c680 + 0x200,   /* nos_standin.S RX_DFC / RX_FLAG with this ROM's RAM */
     .nos_rx_flag = 0x8000c680 + 0x1f8,
     .flash_manuf = NGAGE_FLASH_MANUF, .flash_device = NGAGE_FLASH_DEVICE,
+    .uem_rtc = true,
 };
 
 /*
@@ -1865,6 +1951,7 @@ static const NgageModel ngage_nhl2 = {
     /* bootstrap 0x2A8C checks {start, end, MD5} entries at ROM 0x7FD0 (PPM) / 0x7FE8 (MCU,
      * 0x50009000-0x50EF9FFF, stored digest wrong as on the N-Gage) and halts at 0x2A84 [V] */
     .md5_entries = { 0x7fd0, 0x7fe8 },
+    .uem_rtc = true,                    /* rtc.dll and cbus.dll are the 6600's code (relocated) [V] */
     .camera = true,
     .slide = true,
 };
@@ -1894,6 +1981,7 @@ static const NgageModel ngage_nhl8 = {
     .nos_rx_dfc = 0x8000be38,           /* nos_standin.S RX_DFC / RX_FLAG with this ROM's RAM base */
     .nos_rx_flag = 0x8000be30,
     .flash_manuf = NGAGE_FLASH_MANUF, .flash_device = NGAGE_FLASH_DEVICE,
+    .uem_rtc = true,
     .camera = true, .cam_nhl8 = true,   /* camerapdd: the 7650's receiver, its own sensor (docs/.../camera.md) */
 };
 
@@ -1922,6 +2010,7 @@ static const NgageModel ngage_nhl8x = {
      */
     .nos_item14 = 0x2186404,
     .flash_manuf = NGAGE_FLASH_MANUF, .flash_device = NGAGE_FLASH_DEVICE,
+    .uem_rtc = true,
     .camera = true, .cam_nhl8 = true,   /* as the 3650 (sensor variant 1: register 0xC007 != 0x36) */
 };
 

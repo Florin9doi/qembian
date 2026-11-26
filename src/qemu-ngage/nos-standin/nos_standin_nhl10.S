@@ -43,6 +43,7 @@
         .equ    HWCHUNK_SIZE,   0x46000         @ H-nhl10-hwchunk: address space the NOS's chunks took [I]
         .endif
         .equ    RTC_DONE,       RAM + 0x1f0     @ the RTC hand-over was made (N-Gage Q49)
+        .equ    RTC_DFC,        RAM + 0x600     @ H-uem-rtc: the hand-over TDfc {0, 0, callback, argument}
         .equ    RX_FLAG,        RAM + 0x1f8     @ board: a delivery waits (ngage.c nos_rx_flag)
         .equ    RX_DFC,         RAM + 0x200     @ the delivery TDfc (ngage.c nos_rx_dfc)
         .equ    RX_RING_IDX,    RAM + 0x2f0     @ next ring slot
@@ -278,6 +279,36 @@ slot\slot:
         trapobj 70              @ plain NOS exports (1, 2)
         trapobj 71              @ the NOS object enosdriver keeps at 0x80002184
 
+@ ---- RTC hand-over DFC (H-uem-rtc; queued once from common) ------------------------------
+rtc_dfc_fn:
+        stmfd   sp!, {r4, lr}
+        ldr     r0, =RTC_DONE
+        ldr     r0, [r0]                        @ the RTC object
+        @ H-uem-rtc: A, B, C = the date the NOS keeps for the RTC, from the board (device +48/+4C, a TTime;
+        @ copied to the stack). 0 there = none: the RTC's own current time (+0x10), as before.
+        add     r2, r0, #0x10
+        sub     sp, sp, #16
+        ldr     r4, =DEV
+        ldr     r1, [r4, #0x48]
+        ldr     r3, [r4, #0x4c]
+        orrs    ip, r1, r3
+        addne   r2, sp, #8
+        strne   r1, [r2]
+        strne   r3, [r2, #4]
+        mov     r3, r2
+        str     r2, [sp]
+        mov     r1, #1
+        ldr     ip, [r0]
+        mov     lr, pc
+        ldr     pc, [ip, #0x20]
+        add     sp, sp, #16
+        ldr     r4, =DEV
+        str     r0, [r4, #4]
+        mov     r0, #0xfb00
+        str     r0, [r4]                        @ event: RTC handed over
+        ldmfd   sp!, {r4, pc}
+        .ltorg
+
 common:
         @ RTC hand-over (as nos_standin.S, N-Gage Q49): once rtc.dll has registered (variant
         @ slot 1, [variant + 0x20] here; slots start at +0x1C), call its request 1 (vtable +0x20)
@@ -295,19 +326,19 @@ common:
         cmp     r0, #0
         beq     2f
         str     r0, [r4]                        @ once
-        add     r2, r0, #0x10
-        mov     r3, r2
-        sub     sp, sp, #8
-        str     r2, [sp]
-        mov     r1, #1
-        ldr     ip, [r0]
+        @ H-uem-rtc: the hand-over runs as a DFC, as in the NOS's own kernel context. Called here, at thread level,
+        @ the tick DFC ran inside rtc.dll's SetUniversalTime (it waits for a tick between setting the time and moving
+        @ the kernel's second counter, 0x5030AD10..AD1C on the 7650) and stepped that counter one second at a time
+        @ from 2000 to the new date: minutes of boot for a date years away [V run nhl2]. As a DFC it runs to the end
+        @ first; the tick ISR still sets the flag SetUniversalTime waits for (7650 0x50309530) [V].
+        ldr     r0, =RTC_DFC
+        ldr     r1, =rtc_dfc_fn
+        str     r1, [r0, #8]
+        mov     r1, #0
+        str     r1, [r0, #12]
+        ldr     ip, =KERN_ADD_DFC
         mov     lr, pc
-        ldr     pc, [ip, #0x20]
-        add     sp, sp, #8
-        ldr     r4, =DEV
-        str     r0, [r4, #4]
-        mov     r0, #0xfb00
-        str     r0, [r4]                        @ event: RTC handed over
+        bx      ip                              @ Kern::Add(dfc)
 2:      ldmfd   sp!, {r0-r4, ip, lr}
 
         @ atomic exchange with the device (IRQ/FIQ off), as nos_standin.S

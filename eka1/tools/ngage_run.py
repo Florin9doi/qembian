@@ -475,7 +475,7 @@ def main():
     for p in (log, mon, ser):
         p.unlink(missing_ok=True)
     mach = m['machine'] + (',ppm=%s' % a.ppm if a.ppm else '') + (',isi=%s' % a.isi if a.isi else '')
-    cmd = [str(QEMU), '-M', mach, '-bios', a.rom, '-display', 'none', '-serial', 'file:%s' % ser,
+    cmd = [str(QEMU), '-M', mach, '-bios', a.rom, '-rtc', os.environ.get('NGAGE_RTC', 'base=localtime'), '-display', 'none', '-serial', 'file:%s' % ser,
            '-monitor', 'unix:%s,server,nowait' % mon, '-d', a.debug, '-D', str(log)] + a.extra
     if a.brk or a.watch or a.trace:
         s_ = socket.socket(); s_.bind(('127.0.0.1', 0)); port = s_.getsockname()[1]; s_.close()

@@ -122,7 +122,7 @@ class Daemon:
         s_ = socket.socket(); s_.bind(('127.0.0.1', 0)); port = s_.getsockname()[1]; s_.close()
         mach = nr.M['machine'] + (',ppm=%s' % a.ppm if a.ppm else '') + (',isi=%s' % a.isi if a.isi else '') \
             + (',flash=%s' % a.flash if a.flash else '') + (',mmc=%s' % a.mmc if a.mmc else '')
-        cmd = [str(nr.QEMU), '-M', mach, '-bios', a.rom, '-display', 'none',
+        cmd = [str(nr.QEMU), '-M', mach, '-bios', a.rom, '-rtc', os.environ.get('NGAGE_RTC', 'base=localtime'), '-display', 'none',
                '-serial', 'file:%s' % (d / 'serial'),
                '-serial', 'file:%s' % (d / 'serial2'), '-serial', 'file:%s' % (d / 'serial3'),
                '-monitor', 'unix:%s,server,nowait' % (d / 'mon'),

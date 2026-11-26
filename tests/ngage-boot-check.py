@@ -30,8 +30,14 @@ closely enough. References are firmware on screen: build/evidence/<model>/boot-r
     test pattern (ngage_cam.c: eight colour bars), the slide closed (qom-set slide-closed) must stop it ("Open
     cover") and opening it must bring it back. Regressions "viewfinder_colours_wrong" (the viewfinder is 0x0RGB
     4444, not YUV: white came out cyan) and "camera_open_cover" (the slide line read closed: "Open cover" for ever).
+  --clock (7650, N-Gage, QD, 3650, 3660): the UEM RTC and the NOS hand-over (H-uem-rtc) give the kernel the host's local time: the hand-over
+    must come within 60 s of power-on and the kernel's clock must be within 2 minutes of the host's. Regressions
+    "clock_not_host_time" (the clock started at rtc.dll's default date, 2002/2003, instead of the host's) and
+    "rtc_handover_second_crawl" (the hand-over ran at thread level: the tick DFC inside SetUniversalTime walked the
+    kernel's second counter one second at a time from 2000 to the new date, minutes of white screen). Fresh or kept
+    flash: the hand-over comes before Startup's first-boot query.
 """
-import argparse, pathlib, shutil, subprocess, sys, tempfile, time
+import argparse, datetime, pathlib, shutil, subprocess, sys, tempfile, time
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 FLASH = {'ngage': ROOT / 'build/ngage/phones/nem4-agent.flash',
@@ -183,12 +189,15 @@ def main():
     ap.add_argument('--joystick', action='store_true', help='also check joystick navigation in the menu')
     ap.add_argument('--idle', action='store_true', help='also check that the idle screen comes up drawn')
     ap.add_argument('--camera', action='store_true', help='7650: viewfinder test pattern and the slide')
+    ap.add_argument('--clock', action='store_true', help='7650/N-Gage/QD/3650/3660: the phone boots on the host\'s local time')
     a = ap.parse_args()
     joy = 0.0
     SESS = [sys.executable, str(ROOT / 'eka1/tools/ngage_sess.py'), '-s',
             'agent-ngchk' if a.model == 'ngageqd' else 'agent-%schk' % a.model]
     REF = ROOT / 'build/evidence' / EVIDENCE[a.model] / 'boot-ref-timequery.png'
     a.flash = a.flash or str(FLASH[a.model])
+    if a.clock:
+        return clock_main(a, SESS)
     if a.idle:
         return idle_main(a, SESS, REF)
     if not a.save_ref and not REF.exists():
@@ -248,6 +257,58 @@ def main():
         ok = ok and joy > 1.0
     print('%s boot check: %s (best mean difference %.1f, limit %.1f; last shot %s)'
           % (a.model, 'PASS' if ok else 'FAIL', best, a.limit, shot))
+    return 0 if ok else 1
+
+
+# kernel time words [V 7650 ekern: UniversalTime 0x5030ABF8 = base + ticks * 15625 us]: base TTime (64-bit), the
+# 64-bit tick count (1/64 s), and the base's TTime for 2000-01-01 00:00 (ngage.c NGAGE_TTIME_2000)
+# (found by the 7650 UniversalTime's code: the same words in the N-Gage, QD, 3650 and 3660 kernels [V])
+KTIME = {m: (0x80006758, 0x800004ec) for m in ('nokia7650', 'ngage', 'ngageqd', 'nokia3650', 'nokia3660')}
+TTIME_2000 = 0x00e03ab44a676000
+
+
+def words(sess, va, n):
+    out = subprocess.run(sess + ['x', '0x%x' % va, str(n)], capture_output=True, text=True).stdout
+    w = []
+    for line in out.splitlines():
+        if ':' in line:
+            w += [int(x, 16) for x in line.split(':', 1)[1].split()]
+    return w[:n]
+
+
+def clock_main(a, SESS):
+    if a.model not in KTIME:
+        sys.exit('--clock: no kernel time addresses for %s' % a.model)
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix='ngchk-', dir=ROOT / 'build/ngage'))
+    fl = tmp / 'phone.flash'
+    if pathlib.Path(a.flash).exists():
+        shutil.copy(a.flash, fl)
+    log = ROOT / 'build/ngage' / ('sess-' + SESS[-1]) / 'qemu.log'
+    subprocess.run(SESS + ['stop'], capture_output=True)
+    subprocess.run(SESS + ['start', '--model', a.model, '--flash', str(fl)], check=True, capture_output=True)
+    handed, diff_s = None, None
+    try:
+        t0 = time.time()
+        while time.time() - t0 < 60:
+            time.sleep(1)
+            if log.exists() and b'RTC hand-over' in log.read_bytes():
+                handed = time.time() - t0
+                break
+        if handed is not None:
+            time.sleep(3)
+            subprocess.run(SESS + ['pause'], capture_output=True)
+            base_va, ticks_va = KTIME[a.model]
+            b, t = words(SESS, base_va, 2), words(SESS, ticks_va, 2)
+            subprocess.run(SESS + ['cont'], capture_output=True)
+            ttime = (b[0] | b[1] << 32) + (t[0] | t[1] << 32) * 15625
+            phone = datetime.datetime(2000, 1, 1) + datetime.timedelta(microseconds=ttime - TTIME_2000)
+            diff_s = abs((phone - datetime.datetime.now()).total_seconds())
+    finally:
+        subprocess.run(SESS + ['stop'], capture_output=True)
+    ok = handed is not None and diff_s is not None and diff_s < 120
+    print('%s clock check: %s (hand-over after %s s, need < 60; phone clock %s s from the host, need < 120)'
+          % (a.model, 'PASS' if ok else 'FAIL', 'no' if handed is None else '%.0f' % handed,
+             '?' if diff_s is None else '%.0f' % diff_s))
     return 0 if ok else 1
 
 
