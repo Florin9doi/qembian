@@ -60,7 +60,7 @@ class NosStandin(unittest.TestCase):
         def exports(name):
             h = struct.unpack_from('<24I', rom, mods[name]['address'] - B)
             return struct.unpack_from('<%dI' % h[15], rom, h[16] - B)
-        build = (REPO / 'src/qemu-ngage/nos-standin/build.sh').read_text().split('ngage_rm51', 1)[1]
+        build = (REPO / 'src/qemu-ngage/nos-standin/build.sh').read_text().split('build nos_standin_nhl10.S 0x528943a4', 1)[1].split('\nbuild ', 1)[0]
         d = {k: int(v, 16) for k, v in re.findall(r'--defsym (\w+)=(0x[0-9a-f]+)', build)}
         ek = exports('ekern.exe')
         for name, ordinal in (('KERN_VARIANT', 426), ('SET_POWER_MODEL', 344), ('POWER_MODEL_CTOR', 451),

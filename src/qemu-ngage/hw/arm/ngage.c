@@ -1171,6 +1171,7 @@ static const MemoryRegionOps ngage_dbg_ops = {
 #include "ngage_nhl10_nos_stub.h"
 #include "ngage_nem4_nos_stub.h"
 #include "ngage_rm51_nos_stub.h"
+#include "ngage_rh51_nos_stub.h"
 #include "ngage_nhl2_nos_stub.h"
 #include "ngage_nhl8_nos_stub.h"
 #include "ngage_nhl8x_nos_stub.h"
@@ -1953,6 +1954,41 @@ static const NgageModel ngage_rm51 = {
     .flash_manuf = 0xec, .flash_device = 0x22fa, .flash_amd = true,
 };
 
+/*
+ * Nokia 7610 (RH-51) and 6670 (RH-67), V 4.20 (S60 2nd Edition FP1, Symbian 7.0s): one core image
+ * (RH51_52_67_68PE706420.C1), a phone's own PPM (.26); docs/devices/nokia-7610-rh51/bring-up.md.
+ * ekern is the 3230's byte for byte, 0x22000 lower (kernel-data layout identical) [V]; the bootstrap's chip
+ * ID and combination tables are the 3230's [V]. Bank table: ROM 0..16 MB in chip 0, 9 MB in chip 1 (PPM at
+ * flash 0x02A00000), an 8 MB device window at 0x04000000 (C:) [V: bootstrap table ROM 0x650].
+ * NOS: nosstarter entry 0x528929E4, data 0x80002230 (0x5054 bytes from 0x52B0357C), bss 0x80007284 + 0xC55D0;
+ * the hidden NOS module (header 0x5042D620) exports 1, 2, 4 [V].
+ */
+static const uint32_t ngage_rh51_nos_exports[][2] = {
+    { 0x52898f10, NGAGE_RH51_NOS_SYM_nos_export1 },
+    { 0x52898ee0, NGAGE_RH51_NOS_SYM_nos_export2 },
+    { 0x52898ea4, NGAGE_RH51_NOS_SYM_nos_export4 },
+};
+
+static const NgageModel ngage_rh51 = {
+    .name = "nokia7610",
+    .uem_rtc = true,
+    .nchips = 3,
+    .rom_map = { { 0, 0x01000000, 0 }, { 0x01000000, 0x00900000, 1 } },
+    .nrom_map = 2,
+    .nos_alias = 0x52800000,
+    .stub = ngage_rh51_nos_stub, .stub_len = sizeof(ngage_rh51_nos_stub),
+    .stub_va = NGAGE_RH51_NOS_STUB_VA,
+    .screen_chunk_ptr = 0x80001780,     /* the 3230's kernel data [V same ekern] */
+    .screen_rgb565 = true,
+    .nos_exports = ngage_rh51_nos_exports, .nnos_exports = ARRAY_SIZE(ngage_rh51_nos_exports),
+    .trace_mask_or = 0x40000000,
+    .nos_rx_dfc = 0x80007284 + 0x200,   /* the stub's RX_DFC / RX_FLAG (RAM = the NOS bss) */
+    .nos_rx_flag = 0x80007284 + 0x1f8,
+    .flash_manuf = 0xec, .flash_device = 0x22fa, .flash_amd = true,  /* as the 3230 (same tables) [V tables] */
+};
+
+static NgageModel ngage_rh67;           /* the 6670: ngage_rh51 under its own name (same core image) */
+
 static void ngage_init(MachineState *machine)
 {
     MemoryRegion *sys = get_system_memory();
@@ -2058,6 +2094,7 @@ static void ngage_init(MachineState *machine)
         }
         ngage_keys_init(sys, in[25], ngm == &ngage_rm51 ? NGAGE_KPD_RM51
             : ngm == &ngage_nem4 ? NGAGE_KPD_NEM4
+            : (ngm == &ngage_rh51 || ngm == &ngage_rh67) ? NGAGE_KPD_RH51
             : (ngm == &ngage_nhl10 || ngm == &ngage_nhl2 || ngm == &ngage_nhl8) ? NGAGE_KPD_NHL10
             : (ngm == &ngage_nhl8x) ? NGAGE_KPD_NHL8X
             : NGAGE_KPD_NGAGE);  /* 7650: the 6600's ekeyb (94% same code, same key lists) [V] */                       /* keypad, IrqCTSI_IRQ (Q53) */
@@ -2187,6 +2224,20 @@ static void ngage_init_nhl10(MachineState *machine)
 static void ngage_init_rm51(MachineState *machine)
 {
     ngm = &ngage_rm51;
+    ngage_init(machine);
+}
+
+static void ngage_init_rh51(MachineState *machine)
+{
+    ngm = &ngage_rh51;
+    ngage_init(machine);
+}
+
+static void ngage_init_rh67(MachineState *machine)
+{
+    ngage_rh67 = ngage_rh51;
+    ngage_rh67.name = "nokia6670";
+    ngm = &ngage_rh67;
     ngage_init(machine);
 }
 
@@ -2343,8 +2394,43 @@ static const TypeInfo ngage_rm51_machine_type = {
     .interfaces = arm_machine_interfaces,
 };
 
+/* Nokia 7610 and 6670 (one core image) */
+static void ngage_rh51_class_init(ObjectClass *oc, const void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+
+    ngage_machine_class_init(oc, data);
+    mc->desc = "Nokia 7610 (RH-51, DCT4 UPP, S60 2nd FP1, Symbian 7.0s EKA1) bring-up board";
+    mc->init = ngage_init_rh51;
+}
+
+static const TypeInfo ngage_rh51_machine_type = {
+    .name = MACHINE_TYPE_NAME("nokia7610"),
+    .parent = TYPE_MACHINE,
+    .class_init = ngage_rh51_class_init,
+    .interfaces = arm_machine_interfaces,
+};
+
+static void ngage_rh67_class_init(ObjectClass *oc, const void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+
+    ngage_machine_class_init(oc, data);
+    mc->desc = "Nokia 6670 (RH-67, DCT4 UPP, S60 2nd FP1, Symbian 7.0s EKA1; the 7610's core) bring-up board";
+    mc->init = ngage_init_rh67;
+}
+
+static const TypeInfo ngage_rh67_machine_type = {
+    .name = MACHINE_TYPE_NAME("nokia6670"),
+    .parent = TYPE_MACHINE,
+    .class_init = ngage_rh67_class_init,
+    .interfaces = arm_machine_interfaces,
+};
+
 static void ngage_machine_init(void)
 {
+    type_register_static(&ngage_rh51_machine_type);
+    type_register_static(&ngage_rh67_machine_type);
     type_register_static(&ngage_machine_type);
     type_register_static(&ngage_rh29_machine_type);
     type_register_static(&ngage_nhl2_machine_type);

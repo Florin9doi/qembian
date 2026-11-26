@@ -282,6 +282,19 @@ Evidence: [devices/nokia-3230-rm51/bring-up.md](devices/nokia-3230-rm51/bring-up
 Not modelled / not working (3230): sound, network, calls, SMS, RTC (time/date asked at every boot), camera, MMC,
 Bluetooth, radio; first boot ~150 s (C: formatted twice).
 
+## Nokia 7610 (RH-51) / 6670 (RH-67), S60 2nd FP1, EKA1, on the ngage board (-M nokia7610 / nokia6670, ngage.c ngage_rh51)
+
+Evidence: [devices/nokia-7610-rh51/bring-up.md](devices/nokia-7610-rh51/bring-up.md). The 3230's pieces apply (H-rm51-flash,
+H-rm51-bt-uart, H-rm51-audio, the 6600's H-nos-standin, H-ngage-md5, H-nhl10-rtc); 7610/6670-specific:
+
+| Hack | Where | Proper fix |
+|---|---|---|
+| **H-rh51-nos:** the 6600's NOS stand-in assembled with V 4.20's addresses (the 3230's ekern exports − 0x22000, NOS bss 0x80007284, enosdriver export 2 0x50429EC4) at its NOS entry 0x528929E4; NOS exports 1/2/4 jump into it | `nos-standin/build.sh`, `ngage_rh51_nos_stub.h`; test `test_rh51_defsyms_match_rom` | the real NOS |
+| **H-rh51-joy-ctsi:** the joystick's GPIO lines (0x0C120C04 bits 3-7) raise the keypad's CTSI bit instead of their own IrqGPIOnLow interrupts, which the board does not model; ekeyb's keypad ISR scans them anyway | `ngage_keys.c` (`row == -3`); test `test_rh51_joystick_raises_keypad_irq` | a GPIO interrupt controller |
+| ISI replies: the 3230's table [I], CheckCrc 0x5B [V] | `isi-replies-rh51.txt` | per-request parsers |
+
+Not modelled / not working (7610, 6670): sound, network, calls, SMS, RTC, camera, MMC, Bluetooth; first boot ~3 min.
+
 ## Nokia 6630 (RM-1, S60 2nd FP2, EKA1, OMAP1610) on the 9500's board (-M nokia6630, src/qemu-ngage/hw/arm/nokia9500.c nokia6630_init + nokia6630_soc.c)
 
 Evidence: [devices/nokia-6630-rm1/bring-up.md](devices/nokia-6630-rm1/bring-up.md). QEMU models the OMAP310/1510 only;

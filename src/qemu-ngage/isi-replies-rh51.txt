@@ -1,0 +1,83 @@
+# ISI replies for the Nokia 7610 (RH-51) and 6670 (RH-67), V 4.20 (one core image): seeded from isi-replies-rm51.txt (the 3230,
+# the same kernel and ISA_IF generation); every line [I] for these phones until a run confirms it
+# (docs/devices/nokia-7610-rh51/bring-up.md).
+reply 00 01 02 00 5b                                      # isaapi CheckCrcMsgL: V 4.20 compares data[1] with 0x5B (Thumb cmp at 0x503520F8; the 3230: 0xC0) [V]
+reply 00 00 01 00 00 00                                   # isa_if_driver channel open (EStart RIsaApi::Open 0x38) {00 00 00}: EXPERIMENT [I]
+# Indications (ind UNIT OBJ RES MSG BYTES): UNIT = the subscribing object (decimal), sent when it
+# subscribes (res 00 msg 00 to object 0x10). Object 0x54 (84) is DosServer's (Nokia.dsy) channel:
+# its subscription lists 15 C0, 09 EF, 09 ED, 08 10, ... The values are the N-Gage's [I].
+ind 84 54 15 C0 01 03                                     # MTC_STATE_INFO_IND: NORMAL, START (N-Gage line) [I]
+ind 84 54 09 EF 05 08 08                                  # SIM_IND (N-Gage line: sae publishes SIM status 7 there) [I]
+ind 84 54 08 10 02 01                                     # PN_SECURITY 0x10 {02 01} (N-Gage line) [I]
+
+# --- Seeded from the N-Gage table (src/qemu-ngage/isi-replies.txt), same DCT4 ISI; each [I] for the 6600
+# until its own parser is read. Answered by resource + request id only.
+reply 17 08 09 01 01 13 04 01 00                          # N-Gage: BB5: EM op 0x08
+reply 17 0A 0B 01 02 16 04 07 07 15 04 01 00              # N-Gage: BB5: EM battery info
+reply 35 02 03 00 00                                      # N-Gage: BB5: self-test run, status 0 = passed
+reply 35 00 01 00 00                                      # N-Gage: BB5: self-test status 0
+reply 59 01 02 00 00                                      # N-Gage: self-test last step (N95: 59 42 -> 43, any payload) [I]
+reply 3A 05 06 echo                                       # N-Gage: BB5: PN_LIGHT, echo the request with status 0
+reply 15 0B 6E 00 00                                      # N-Gage: BB5: MTC_STARTUP_SYNQ_REQ -> RESP (MTC replies are id + 0x63)
+reply 15 02 65 01 01 00 00                                # N-Gage: BB5: MTC_STATE_QUERY: current NORMAL, target NORMAL
+reply 15 01 64 00 00                                      # N-Gage: BB5: MTC_STATE_REQ -> OK
+reply 15 04 67 00 00                                      # N-Gage: BB5: MTC_POWER_ON_REQ -> OK
+reply 15 12 75 00 00                                      # N-Gage: BB5: MTC_SHUTDOWN_SYNC_REQ -> OK
+reply 09 19 1A 2F 24                                      # N-Gage: BB5: SIM_NETWORK_INFO read (service 2F): data not available
+reply 0A 00 01 00 01 00 04 04 00                          # N-Gage: NET_MODEM_REG_STATUS_GET: [10] 00 OK, [11] 1 sub-block, status at sb+2: 04 = searching [V parser 0x5093b710, table 0x50937f0c] (06 = denied: "SIM card registration failed")
+reply 31 19 1A len=12                                     # N-Gage: GPDS_STATUS_RESP: isimsg reads offsets 10, 11, 20, 21 and a tail from 22 [V]; all 0 [I] ("1A 00 00" made phonetsy panic USER 21, q68)
+reply 1C 10 11 00 00                                      # N-Gage: unknown 1C request, OK [I]
+reply 0B 11 12 @06 06 01 06 08 00 00 00 00 00 00              # N-Gage: audio 0B 11 {06 01} = phonetsy GetHandsfreeMode (IPC 0x2733): subtype 06, exactly 1 sub-block, u16 BE at sb+4 (0x000D = handsfree) [V parser 0x5093d2cc]; 0 = not handsfree [I]
+reply 0B 00 01 01 00                                      # N-Gage: BB5: audio server start, OK
+reply 23 04 05 len=18 00 01 01 10                         # N-Gage: BB5: PN_PERMANENT_DATA read
+reply 09 60 61 FA 31                                      # N-Gage: phonetsy SIM query {FA 00}: parser 0x5093e5b4 reads [11]: 30 = TRUE, 31 = FALSE, else -19 [V]; 31 [I] (PIN/lock off)
+reply 09 3B 3C FA 2A                                      # N-Gage: DSY SIM IMSI-equal check {FA}: {FA, 2A = equal} (as N73) [I]
+reply 09 3D 3E len=42 FA 01 31 31 32 00 00 00 00 00 39 31 31 # N-Gage: phonetsy SIM emergency numbers {FA 00}: [11] 01 OK, Mid(12,40) = 5 x 8-byte ASCII slots (frame >= 52 or USER 21) [V parser 0x5093eb14]; "112", "911" [I]
+reply 09 21 22 len=38 2C 01                               # N-Gage: phonetsy SIM service {2C}: [10] must be 2C, [11] 01 OK, Mid(12,35) (frame >= 47) [V parser 0x5093de14]; empty name, flag 0 [I]
+reply 09 33 34 len=52 3E 01                               # N-Gage: phonetsy SIM string read {3E}: [10] must be 3E, [11] 01 OK, Mid(12,50) (frame >= 62) [V parser 0x5093dec4]; empty [I]
+reply 1B 02 03 echo                                       # N-Gage: phonetsy product-profile read: [10] status 00, [11] sub-block count, value at sb+5 [V parser 0x5093dc2c]; the request's sub-block echoed [I]
+reply 1F 01 03 00 00                                      # N-Gage: SoundDevice.mda tone play: 1F 03 with [10] != 14 = finished [V receiver 0x505ae7f8; meaning I]
+reply 1F 04 06 0D 00                                      # N-Gage: SoundDevice.mda tone stop: 1F 06 with [10] = 0D = stopped [V receiver; meaning I]
+reply 09 31 32 len=13 3B 01                               # N-Gage: phonetsy ReadSimAlsLine {3B 00 00}: [11] status, Mid(13,10) for 01 (frame >= 23), data[5] bit 7 clear -> ALS value 3, KErrNone [V parser 0x5093e208]
+reply 09 13 14 len=7 11 01                                # N-Gage: phonetsy SIM service table {11}: [11] 01 OK (else MenuEng blocks), Mid(12,5) = GSM SST (frame >= 17) [V parser 0x5093ee54]; no services [I]
+reply 02 0B 0C 00 00                                      # N-Gage: phonetsy SMS (obj 4C) 02 0B: [10] cause 00 = OK [V handler 0x50947bbc]
+reply 02 14 15 00 00                                      # N-Gage: phonetsy SMS (obj 4C) 02 14 {01 00}: [10] = parameter set count; 0 [I, branch 0x509470ec not traced]
+# --- Nokia.dsy (DosServer, object 0x54): docs/devices/nokia-6600-nhl10/bring-up.md "Nokia.dsy replies"
+reply 09 C0 C1 00 01                                      # DSY SIM C0 {00 00}: [11] 01 = OK -> 0x5041a324 + DosSrv(1) [V handler 0x50419f14]; [10] not read
+reply 09 2D 2E 3A 01 00                                   # DSY SIM 2D {3A 00}: [10] 3A, [11] 01, [12] 0A/5A/A0/A5/AA select DosSrv 0x5041c284 (2/3/4), else 0 [V 0x5041a170]; 00 [I]
+reply 09 2B 2C len=16 3A 01 00                            # DSY SIM 2B {3A 00}: [10] 3A, [11] 01, [12] bit 0, a 16-bit field read too (padded) [V 0x5041a1fc; I values]
+reply 08 11 12 05 00                                      # DSY security code state: [10] 05 = start-up OK, no code (c20c(0), c1f4(7), continues) [V handler 0x5041a5a4, meaning I]; [11] 12/13 flags, 00 none [I]
+reply 53 00 01 01 00                                      # DSY 0x53 query {04 00}: handler 0x5041a4d4 reads [10] only [V]; 01 -> DosSrv c278(0) [I meaning]; 00 silent, 02 = retry
+reply 0B 11 12 @05 05 01 02 08 08 00 00 00 00 00 00       # DSY audio query {05 08} (second DSY class, parser 0x504159cc): [10] 05, [11] 1 sub-block, sb {02, 08, 08 (sb+2), 00, u16 sb+4 = 0000} [V]; value [I]; tid echoed
+# --- Restart hang (owner 2026-11-18, regression locked_after_restart): Phone.app's idle construction calls
+# RMobilePhone::GetALSLine synchronously (sssettings 0x51032D44); unanswered, the view server killed Phone
+# (ViewSrv 11). docs/research/6600-tsy-sim-replies.md
+reply 09 29 2A @35 35 FF 00                               # GetALSLine: [10] 35, [11] FF = no error, line "not available" (SIM without ALS) [V parser MMGSMWCDMA 0x51433018]
+reply 09 23 24 @25 25 01 00                               # MMCUSTOMTSY SIM list count: [11] 01 OK, [12] count 0 = done [V 0x5145D254]
+# 3230 TSY (object 0x45), from the 9500's table (the same 7.0s multimode TSY generation; parsers read there) [I for the 3230]:
+reply 09 09 0A 01 01                                      # SIM 09 09 {01 00}: 9500 handler reads [1]: 01 = OK [I here]
+reply 09 1D 1E 2D 01 08 09 10 10 00 00 00 00 10           # SIM IMSI {2D 00}: 001010000000001 [I here]
+reply 09 0F 10 len=13 0B 00                               # 3230 SIM service 0B record read (Phone -> vmbx RVmbxNumber::GetAlsLine -> MMGSMWCDMA builder 0x507C1BB8, handler 0x507C1C7C, stall 6): [10] 0B, [11] != 01 = no more records -> the request completes (vmbx ignores the error, ALS line stays 1); 01 = record present -> the TSY asks for location [12..13]+1 (docs/research/rm51-tsy-als.md) [V]
+# 3230 DSY audio (docs/research/rm51-dsy-audio.md, stall 7): 0B 11 {01 00} (tid 9, sender 0x5083A210) waits in a nested
+# scheduler; handler 0x5083A800 (subtype 01 at 0x5083A98E): [10] 01, [11] count != 0, sub-block {02, len, 00 id, ..,
+# u16 value at [16..17]}; the first reply only caches the value, the second ends the wait (the DSY sends it twice) [V];
+# value 0 [I]. 0B 23 {00 00} has no reply handler (msg 0x24 is outside the receiver's 01..1B table): left unanswered [V]
+reply 0B 11 12 @01 01 01 02 08 00 00 00 00 00 00
+# 3230 audio: MMFDevSound.dll speaks resource 0xE8 to the modem's audio side itself (objects 0x55, 0x56;
+# docs/research/rm51-audio-e8.md, stall 7). E8 20 = play start: answered 0x2B "play ended" (handler 0x5078715A ->
+# KErrUnderflow, a normal end: every tone ends at once, no audio) [V handler, I that MMF treats it as normal];
+# E8 2A = stop: DevSound's Stop waits synchronously on both objects and ignores the content [V 0x5078BD54/0x5078BCA4]
+reply E8 2A 2B 00 00
+# Answered 0x2B alone, the tone ended before it started: Wserv's key-click call never completed. Now
+# 0x21 started (handler 0x507870F2, reads nothing) then 0x2B ended [I order]:
+reply E8 20 21
+reply+ E8 20 2B 00 00
+reply E8 23 24 00 00                                      # DevSound "data written" notice (0x5078AF60, sent without waiting); 0x24 only re-arms the receive [V 0x50787102]
+# Stall 8 (docs/research/rm51-keysound.md): at play end DevSound sends 0B 19 {h 06 01 00 00 00} and {h 01 00 00 00 00}
+# from object 0x56 and waits synchronously for each (0x5078BBAE, 0x5078BC70), content not parsed [V]: unanswered, the
+# key-sound server's thread hung there and Wserv's next key click (SendReceive 1) blocked every key.
+reply 0B 19 1A 00 00
+# DevSound's audio close 0B 04 {h 00} (0x5078A984: the byte the 0B 00 -> 01 reply gave, sent after the play-end 0B 19s)
+# waits synchronously on object 0x56 like the others, content not parsed [V docs/research/rm51-audio-e8.md; I that 05
+# is the id]: unanswered, the key-sound server hung after the second key click and every key after it was lost
+reply 0B 04 05 00 00

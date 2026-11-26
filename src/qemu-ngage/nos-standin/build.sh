@@ -10,6 +10,7 @@
 #   nos_standin.S (NHL-8) -> ../hw/arm/ngage_nhl8_nos_stub.h  (Nokia 3650, -M nokia3650)
 #   nos_standin.S (NHL-8X) -> ../hw/arm/ngage_nhl8x_nos_stub.h (Nokia 3660, -M nokia3660)
 #   nos_standin_nhl10.S (RM-51) -> ../hw/arm/ngage_rm51_nos_stub.h (Nokia 3230, -M nokia3230)
+#   nos_standin_nhl10.S (RH-51) -> ../hw/arm/ngage_rh51_nos_stub.h (Nokia 7610 / 6670, -M nokia7610 / nokia6670)
 #   doc_standin_ra2.S    -> ../hw/arm/ngage_ra2_doc_stub.h   (Nokia 9500 TrueFFS stand-in, -M nokia9500)
 #   doc_standin_p910.S   -> ../hw/arm/ngage_p910_doc_stub.h  (P910i TrueFFS dispatcher stand-in, -M p910i)
 #   doc_standin_ra2.S    -> ../hw/arm/ngage_rm12_doc_stub.h  (Nokia 7710: the 9500's stand-in at its DiskOnChip.dll, -M nokia7710)
@@ -60,6 +61,14 @@ build nos_standin_nhl10.S 0x528943a4 ngage_rm51 ../hw/arm/ngage_rm51_nos_stub.h 
       --defsym POWER_MODEL_CTOR=0x50357044 --defsym KERN_ADD_DFC=0x5036221c \
       --defsym HWCHUNK_CTOR=0x50349380 --defsym HWCHUNK_CREATE=0x503493f8 \
       --defsym RAM=0x8000755c --defsym ENOS_DELIVER=0x50452484
+# Nokia 7610 (RH-51) / 6670 (RH-67) V 4.20: the 3230's stub; their ekern is the 3230's byte for byte, 0x22000 lower
+# (ordinals 426, 344, 451, 7, 454, 93 at 3230 - 0x22000), NOS bss 0x80007284, enosdriver export 2 0x50429EC4
+# (docs/devices/nokia-7610-rh51/bring-up.md)
+build nos_standin_nhl10.S 0x528929e4 ngage_rh51 ../hw/arm/ngage_rh51_nos_stub.h \
+      --defsym KERN_VARIANT=0x5032c2ac --defsym SET_POWER_MODEL=0x50335388 \
+      --defsym POWER_MODEL_CTOR=0x50335044 --defsym KERN_ADD_DFC=0x5034021c \
+      --defsym HWCHUNK_CTOR=0x50327380 --defsym HWCHUNK_CREATE=0x503273f8 \
+      --defsym RAM=0x80007284 --defsym ENOS_DELIVER=0x50429ec4
 build nos_standin.S       0x5148c1c4 ngage_nhl2  ../hw/arm/ngage_nhl2_nos_stub.h --defsym NHL2=1
 # Nokia 3650 (NHL-8 V 04.17) and 3660 (NHL-8X V 05.08): the N-Gage's stub at their NOS entries, with their own
 # ekern addresses (the 506-export numbering: ordinals 469, 394, 493, 7, 479, 64 as the N-Gage), read from the ROMs

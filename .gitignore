@@ -39,6 +39,10 @@ src/standins/_shared/isireplies.h
 # Nokia 6680 (RM-36, EKA1)
 /eka1/rm36_rom/
 /eka1/rm36/
+/eka1/rh51_rom/
+/eka1/rh51/
+/eka1/rh67_rom/
+/eka1/rh67/
 # Nokia 9300 (RAE-6)
 /eka1/rae6_rom/
 /eka1/rae6/

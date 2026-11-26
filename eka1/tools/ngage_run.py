@@ -74,6 +74,24 @@ MODELS = {
         containers=0x800003b8,              # as the 6600 (17 users agree)
         code=(0x5033bf9c, 0x51b00000),
         ttb=0x0A074000),                    # [I] as the 6600
+    'nokia7610': dict(                      # Nokia 7610 V 4.20 (RH-51): ekern = the 3230's, 0x22000 lower [V]
+        machine='nokia7610', root=ROOT / 'eka1/rh51',
+        rom=ROOT / 'eka1/rh51/output/rom/ROM.bin', ppm=ROOT / 'eka1/rh51/extracted/RH51PE706420.26',
+        isi=ROOT / 'src/qemu-ngage/isi-replies-rh51.txt',
+        fatal=0x5031cb34,                   # the 3230's 0x5033EB34 - 0x22000 [V same bytes]
+        cur_thread=0x800017d4,              # as the 3230 (identical ekern)
+        containers=0x800003b8,
+        code=(0x50319f9c, 0x51a00000),
+        ttb=0x0A074000),                    # [I] as the 6600
+    'nokia6670': dict(                      # Nokia 6670 V 4.20 (RH-67): the 7610's core image, its own PPM
+        machine='nokia6670', root=ROOT / 'eka1/rh67',
+        rom=ROOT / 'eka1/rh67/output/rom/ROM.bin', ppm=ROOT / 'eka1/rh67/extracted/RH67PE706420.26',
+        isi=ROOT / 'src/qemu-ngage/isi-replies-rh51.txt',
+        fatal=0x5031cb34,
+        cur_thread=0x800017d4,
+        containers=0x800003b8,
+        code=(0x50319f9c, 0x51a00000),
+        ttb=0x0A074000),
     'nokia6630': dict(
         machine='nokia6630', root=ROOT / 'eka1/rm1/core',
         rom=ROOT / 'eka1/rm1/core/ROM.bin', ppm=ROOT / 'eka1/rm1/core',

@@ -5,13 +5,15 @@
 typedef struct {
     unsigned host;              /* Linux key number (QEMU input layer) */
     const char *name;
-    int row, col;               /* position in ekeyb's matrix; -1 = not in it; -2 = 6600 joystick bit */
+    int row, col;               /* position in ekeyb's matrix; -1 = not in it; -2 = 6600 joystick bit;
+                                   -3 = 7610 joystick: col = GPIO 0x0C120C04 bit */
 } NgageKey;
 
 /* nhl10: the Nokia 6600 key table, GPIO sense line and joystick port */
 /* key layouts: the N-Gage's matrix, the 6600's (two sub-matrices + joystick port; also the 7650), the 3230's */
 /* NGAGE_KPD_NGAGE: the N-Gage QD's matrix; NGAGE_KPD_NEM4: the first N-Gage (the 6600's ports, its own grid) */
-typedef enum { NGAGE_KPD_NGAGE, NGAGE_KPD_NHL8X, NGAGE_KPD_NHL10, NGAGE_KPD_RM51, NGAGE_KPD_NEM4 } NgageKpdLayout;
+typedef enum { NGAGE_KPD_NGAGE, NGAGE_KPD_NHL8X, NGAGE_KPD_NHL10, NGAGE_KPD_RM51, NGAGE_KPD_NEM4,
+               NGAGE_KPD_RH51 /* 7610/6670: the 6600 matrix, line 5 and joystick on GPIO */ } NgageKpdLayout;
 void ngage_keys_init(MemoryRegion *sys, qemu_irq irq, NgageKpdLayout layout);
 /* CTSI status 2 (0x0C150102): raise bits (bit 4 = Bluetooth module), same interrupt source */
 void ngage_ctsi2_raise(uint16_t bits);

@@ -21,7 +21,7 @@ OMAP1510: [devices/nokia-9500-ra2/bring-up.md](devices/nokia-9500-ra2/bring-up.m
 the same board, S90 Desk: [devices/nokia-7710-rm12/bring-up.md](devices/nokia-7710-rm12/bring-up.md)), the **Sony Ericsson P800**
 (`-M p800`, the P910i's board, UIQ 2.0 home screen: [devices/se-p800/bring-up.md](devices/se-p800/bring-up.md)) and the **Sony Ericsson
 P910i** (`-M p910i`, a PNX4000 board modelled from the phone's code, UIQ 2.1 home screen:
-[devices/se-p910i/bring-up.md](devices/se-p910i/bring-up.md)). All eight phones (+ the 3230, `-M nokia3230`: [devices/nokia-3230-rm51/bring-up.md](devices/nokia-3230-rm51/bring-up.md), and the 6630, `-M nokia6630`, S60 FP2 on an OMAP1610: [devices/nokia-6630-rm1/bring-up.md](devices/nokia-6630-rm1/bring-up.md), and the N70, `-M nokian70`, S60 FP3 on the 6630's board: [devices/nokia-n70-rm84/bring-up.md](devices/nokia-n70-rm84/bring-up.md), and the 9210 Communicator, `-M nokia9210`, Symbian 6.0 on its own board: [devices/nokia-9210-rae3/bring-up.md](devices/nokia-9210-rae3/bring-up.md)): `docs/device-matrix.md` 2.2b.
+[devices/se-p910i/bring-up.md](devices/se-p910i/bring-up.md)). All eight phones (+ the 3230, `-M nokia3230`: [devices/nokia-3230-rm51/bring-up.md](devices/nokia-3230-rm51/bring-up.md), the 7610 and 6670, `-M nokia7610` / `nokia6670`: [devices/nokia-7610-rh51/bring-up.md](devices/nokia-7610-rh51/bring-up.md), and the 6630, `-M nokia6630`, S60 FP2 on an OMAP1610: [devices/nokia-6630-rm1/bring-up.md](devices/nokia-6630-rm1/bring-up.md), and the N70, `-M nokian70`, S60 FP3 on the 6630's board: [devices/nokia-n70-rm84/bring-up.md](devices/nokia-n70-rm84/bring-up.md), and the 9210 Communicator, `-M nokia9210`, Symbian 6.0 on its own board: [devices/nokia-9210-rae3/bring-up.md](devices/nokia-9210-rae3/bring-up.md)): `docs/device-matrix.md` 2.2b.
 
 Related documents:
 
@@ -74,6 +74,7 @@ blank or white for a long time. **That is not a hang.** It happens once: the pho
 |---|---|---|---|
 | N-Gage QD | ~40 s to the logo, ~95 s to the UI | ~7 s | EStart formats C: |
 | Nokia 6600 | ~60 s format, then the time query | ~20 s | EStart formats C: |
+| Nokia 7610 / 6670 | **~3 min** white screen, then the time query | ~30 s to the time query | as the 3230 |
 | Nokia 3230 | **~150 s** white screen, then the NOKIA splash | ~30 s to the time query | C: is formatted **twice**: EStart, then the restore-factory-settings script (`FORMAT C:` in RfsServer), ~0.7 s per 64 KB sector |
 | Nokia 6630 | **~3.5 min** logo / white screen, then the home-city list | (a kept NAND: open, stall 26) | mednand formats the NAND's user area (C:) |
 | Nokia N70 | **~3.5 min** NOKIA logo (C: formatted), then the city list; ~5 min to the home screen | (a kept NAND: not checked yet) | as the 6630 |

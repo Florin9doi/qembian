@@ -153,7 +153,10 @@ class Nem4Keypad(unittest.TestCase):
         t = (HW / 'ngage.c').read_text()
         self.assertIn('ngm == &ngage_nem4 ? NGAGE_KPD_NEM4', t)
         k = (HW / 'ngage_keys.c').read_text()
-        self.assertIn('kpd.nhl10 = layout == NGAGE_KPD_NHL10 || layout == NGAGE_KPD_NEM4;', k)
+        # the whole kpd.nhl10 assignment (it may span lines and name other layouts): NEM-4 is in it
+        m = re.search(r'kpd\.nhl10\s*=([^;]*);', k)
+        self.assertIsNotNone(m)
+        self.assertIn('layout == NGAGE_KPD_NEM4', re.sub(r'/\*.*?\*/', '', m.group(1), flags=re.S))
 
     @unittest.skipUnless((NEM4 / 'ROM.bin').exists(), 'NEM-4 ROM not extracted in eka1/nem4')
     def test_matrix_positions_from_ekeyb(self):
