@@ -17,8 +17,8 @@ No keypads: each tile is the phone's display(s) under its name (hover it for the
 errors and a crash dump's path). Input goes to the phone under the
 mouse (its tile is outlined): the host keyboard sends key down/up events with the same per-model key
 maps as ngage_phone.py (arrows, Enter, F1/F2 softkeys, F3/F4 call/end, 0-9, ...); a key is released
-on the phone that got the press even if the mouse has moved on. On touch phones (P800, P910i, 7710)
-the mouse on the screen is the pen. Right-click a tile for the phone's switches (7650 slide, P910i
+on the phone that got the press even if the mouse has moved on. On touch phones (P800, P900, P910i, 7710)
+the mouse on the screen is the pen. Right-click a tile for the phone's switches (7650 slide, P800/P900/P910i
 flip, 9300/9500 lid); F7 still toggles the 7650's slide.
 """
 import argparse, math, os, pathlib, signal, subprocess, sys, time
@@ -33,7 +33,9 @@ Qt = QtCore.Qt
 TOUCH = ('p910i', 'p900', 'p800', 'nokia7710')
 # model -> (QMP property, label when it is True, label when False) of its switch
 SWITCHES = {'nokia7650': ('slide-closed', 'Open slide', 'Close slide'),
-            'p910i': ('flip-closed', 'Open flip', 'Close flip')}
+            'p910i': ('flip-closed', 'Open flip', 'Close flip'),
+            'p900': ('flip-closed', 'Open flip', 'Close flip'),
+            'p800': ('flip-closed', 'Open flip', 'Close flip')}
 for _m in np_.COMMUNICATORS:
     SWITCHES[_m] = ('cover-open', 'Close lid', 'Open lid')
 

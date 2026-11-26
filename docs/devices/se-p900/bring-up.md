@@ -66,10 +66,10 @@ entry (0x24000 bytes; the P910i 0x41000).
 | C: | the P910i's DiskOnChip block device and stand-in (H-p910-doc) at the P900's addresses | same udiskonchip code [V] |
 | display | RGB565, DMA finishing 2 ms after enable (H-p800-dma) | videodriver.dll is the P800's generation [V: module]; the logo and the wizard show correct colours [V by eye] |
 | GSM side | `src/qemu-ngage/p900-ose-replies.txt` = the P910i's table | swbp.dll is the P910i's size; `eka1/tools/swbp_waits.py eka1/p900/core --table ...` finds every stub-checked reply number the same [V] |
-| input | the P910i's model (touch, keypad panel, jog, flip pins) | only the pen tested; the P900's keypad driver is critakeypad.dll (P800), not checked |
+| input | the P910i's model (touch, keypad panel, jog, flip pins) | the pen; the flip (the window's Flip button, `flip-closed`) tested by the owner (2026-11-27); the P900's keypad driver is critakeypad.dll (P800), its keys not checked |
 
 ## Open
 
 Unanswered OSE at the home screen (the P910i's and P800's open set): 0x0370 (E3 -> 30), 0x0533/B1, 0x13E0 (8D -> 23),
-0x0A3C, 0x4CF4 and 0xC39F (send-only on the P910i). Not checked: jog dial, flip keypad and the flip switch, Memory
+0x0A3C, 0x4CF4 and 0xC39F (send-only on the P910i). Not checked: jog dial, flip keypad keys, Memory
 Stick, sound, network. The clock starts at 01/01/2004 in the wizard.

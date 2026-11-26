@@ -34,12 +34,11 @@ The phone keeps its flash (C:, settings) in build/ngage/phones/NAME.flash betwee
   F9-F12 = the four command buttons beside the inner screen (Cmd 1 = OK), lid open or closed.
   With the lid closed the same keys drive the cover keypad: 0-9, * and # (or \\), F1/F2 = left/right
   softkey, Enter = select, F3 = call, F4/Esc = end, arrows = scroll (not confirmed).
-- Sony Ericsson P910i: one 208x320 screen; the mouse is the pen (pressed = touching); a Flip button
+- Sony Ericsson P910i, P900, P800: one 208x320 screen; the mouse is the pen (pressed = touching); a Flip button
   (qom-set /machine flip-closed; the phone starts with the flip open). Keys go to the flip keypad's
   pads: with the flip closed 0-9, * and # (or \\), F1-F4 the keys above the digits; with it open the
   QWERTY letters, Backspace, Enter, Space, Shift, comma, period; F5-F7 the corner pads, Enter =
   Confirm, Up/Down = the jog dial, F8 = the side key (p910i_input.c; key names partly [I]).
-  The P800 and P900: the same screen and pen, the same buttons, no Flip button yet.
 - Nokia 7710: one 640x320 touch screen; the mouse is the pen (pressed = touching). Keys
   (nokia7710_input.c, names partly [I]): arrows + Enter = the 5-way key, F1 = Menu, F2 or Home = Desk,
   F3 = call, F4 = end, Esc or Backspace = back, F5-F7 = the other hardware keys. C: is kept in
@@ -210,9 +209,9 @@ class Phone(QtWidgets.QWidget):
             self.lid.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             self.lid.clicked.connect(self.toggle_lid)
             lay.addWidget(self.lid)
-        if model in ('nokia7710', 'p800', 'p900'):
+        if model == 'nokia7710':
             self.labels[0].installEventFilter(self)       # the pen
-        if model == 'p910i':
+        if model in ('p910i', 'p900', 'p800'):
             self.flip = QtWidgets.QPushButton('Close flip')
             self.flip.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             self.flip.clicked.connect(self.toggle_flip)
@@ -290,7 +289,7 @@ class Phone(QtWidgets.QWidget):
         return super().eventFilter(obj, e)
 
     def toggle_flip(self):
-        """The P910i's flip: a GPIO pin read by Exyin and ekeypad (p910i_input.c flip-closed)."""
+        """The P910i's / P900's / P800's flip: a GPIO pin read by Exyin and the keypad driver (p910i_input.c flip-closed)."""
         try:
             closed = bool(self.qmp.cmd('qom-get', path='/machine', property='flip-closed').get('return'))
             self.qmp.cmd('qom-set', path='/machine', property='flip-closed', value=not closed)

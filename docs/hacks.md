@@ -439,7 +439,7 @@ sound) except the DiskOnChip stand-in, which the P800 does not need.
 | **H-p800-dma:** DMA channels finish 2 ms after they are enabled (the P910i: at once; the P900 as the P800, `P910Phone.dma_late`); the panel driver takes the completion only after its own state change | `p910i_lcd.c` `dma_finish` | a PL080 model with transfer timing |
 | **H-p800-ose:** `src/qemu-ngage/p800-ose-replies.txt` = the P910i's table with the P800's own reply numbers where its swbp stubs were read (4398 -> 4E86, 4397 -> 4E85, 4EE8 -> 4F4C, 4EEB -> 4F4F, 0533/A6 -> 16D3 with the emergency numbers 112/911 [I]); other payloads as the P910i's [I]; `eka1/tools/swbp_waits.py` checks every line against the ROM | `p800-ose-replies.txt` | a GSM-side model |
 
-Not modelled / not working (P800): no network, calls, SMS; no sound; the keys (jog dial, flip keypad) not checked:
+Not modelled / not working (P800): no network, calls, SMS; no sound; the flip switch works (owner-tested, 2026-11-27); the keys (jog dial, flip keypad) not checked:
 the board uses the P910i's input model, of which only the pen was tested; Memory Stick (D:), camera, Bluetooth,
 IrDA; unanswered OSE requests 0x0370, 0x0533/B1 (-> 0x16DE), 0x13E0, 0x4C2C (bring-up page).
 
@@ -455,7 +455,7 @@ videodriver.dll generation).
 | **H-p900-ose:** `src/qemu-ngage/p900-ose-replies.txt` = the P910i's table unchanged; `eka1/tools/swbp_waits.py` finds the same reply numbers in the P900's stubs for every line it can check, payloads [I] | `p900-ose-replies.txt` | a GSM-side model |
 
 Not modelled / not working (P900): no network, calls, SMS; no sound; jog dial, flip keypad (critakeypad.dll, the
-P800's driver) and flip not checked; Memory Stick, camera, Bluetooth, IrDA; unanswered OSE 0x0370, 0x0533/B1, 0x13E0.
+P800's driver) not checked (the flip switch works, owner-tested); Memory Stick, camera, Bluetooth, IrDA; unanswered OSE 0x0370, 0x0533/B1, 0x13E0.
 
 ## Hosted EKA2 (src/hosted, tools/hosted/htest.py; docs/hosted-eka2/)
 
