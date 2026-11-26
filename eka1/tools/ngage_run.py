@@ -121,6 +121,18 @@ MODELS = {
         sdram=(0x10000000, 0x08000000),
         objstride=2,                        # container entries {DObject*, key} (as the 7710's kernel) [V run]
         ttb=0x10000000),
+    'nokian90': dict(
+        machine='nokian90', root=ROOT / 'eka1/rm42/core',
+        rom=ROOT / 'eka1/rm42/core/ROM.bin', ppm=ROOT / 'eka1/rm42/core',
+        isi=ROOT / 'src/qemu-ngage/isi-replies-rm42.txt',
+        fatal=0x500203a4,                   # the fault routine after Kern::Fault (0x5002039c: reason + 0x10000, then falls in), as the N70's [V code]
+        cur_thread=0x800018c4,              # ported from the N70 (40 users agree)
+        containers=0x80000488,              # ported from the N70 (16 users agree)
+        code=(0x5000bf9c, 0x51000000),
+        vectors=0xffff0000,
+        sdram=(0x10000000, 0x08000000),
+        objstride=2,                        # [I] as the N70
+        ttb=0x10000000),
     'nokia7650': dict(
         machine='nokia7650', root=ROOT / 'eka1/nhl2',
         rom=ROOT / 'eka1/nhl2/output/rom/ROM.bin', ppm=ROOT / 'eka1/nhl2/extracted/NHL23250.677',

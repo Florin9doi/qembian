@@ -327,6 +327,18 @@ Not modelled / not working (N70): as the 6630 (sound, network and SIM, DRM and t
 camera, USB, the boot-loader chain), and the OMAP1710's own blocks (only its IDs), the memory card (RS-MMC, medmmc.pdd:
 no card), the camera cover switch (ekeyp's "Switch" on GPIO4 bit 5 [I]).
 
+## Nokia N90 (RM-42, S60 2nd FP3, EKA1, OMAP1710) on the 6630's board (-M nokian90, src/qemu-ngage/hw/arm/nokia9500.c rm1_board_init + rm1_patches_n90, nokia6630_soc.c)
+
+Evidence: [devices/nokia-n90-rm42/bring-up.md](devices/nokia-n90-rm42/bring-up.md). Every N70 hack that is not a core
+patch applies unchanged (H-rm84-omap1710, -ram, -nand, -ap-wake, -isc, -keys); the N90's own:
+
+| Hack | Where | Real implementation |
+|---|---|---|
+| **H-rm42-dsp-boot, -dsp-timeout, -bal-run, -eapgwc, -secenvinit, -drmhelper:** the N70's core patches (H-rm84-*, H-rm1-* reasons) at RM-42's addresses (unique 16/16 code match, old words checked) | `nokia9500.c` `rm1_patches_n90`; test `tests/nokian90_board_test.py` | a DSP model, a secure environment |
+| **H-rm42-spi:** the OMAP1710 SPI (0xFFFB0C00) as a register file whose transfers complete at once (STATUS/ISR set, IRQ level-2 49, TX DMA request 1 in DMA mode); the devices behind it are minimal DCS panels: RDDID answers 0x290015 (an ID genericlcd_lcd.ldd knows), every other read 0, writes only logged | `nokia6630_soc.c` `rm1_spi_init` | the real panels' replies (status, power mode) and timing |
+| **H-rm42-display:** the 352x416 main display as a display controller on SoSSI: only register 38 (window) and 48 (memory write) act; the others (timing, power, mode) are ignored; pixel format from register 2A: & 7 == 7 = 0x00RRGGBB as two 16-bit units, else one RGB565 pixel a unit [V trace; I the bits' meaning]; register reads answer 0 | `nokia6630_lcd.h` (controller mode), `nokia9500.c` `rm1_phone_n90` | the controller (chip not identified) and its other modes |
+| **H-rm42-cover:** the cover display (SPI device 1) gets its frame but is not shown | `nokia6630_soc.c` (logged only) | a second panel view |
+
 ## Nokia 6680 (RM-36, S60 2nd FP2, EKA1, OMAP1610) on the 6630's board (-M nokia6680, src/qemu-ngage/hw/arm/nokia9500.c rm1_board_init + rm1_patches_6680, nokia6630_soc.c)
 
 Evidence: [devices/nokia-6680-rm36/bring-up.md](devices/nokia-6680-rm36/bring-up.md). The board, keys, NAND layout and

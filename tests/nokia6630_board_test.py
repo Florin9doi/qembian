@@ -121,7 +121,7 @@ class LaterPatches(unittest.TestCase):
 class Board(unittest.TestCase):
     def test_devices_mapped(self):
         body = func(BOARD, 'static void rm1_board_init(MachineState *machine, const Rm1Phone *ph)')
-        for call in ('rm1_display_init(sys, mpu);', 'rm1_gpio_init(sys, mpu);', 'rm1_wdt_init(sys);',
+        for call in ('rm1_display_init(sys, mpu, ph->lcd_w, ph->lcd_h, ph->lcd_ctrl);', 'rm1_gpio_init(sys, mpu);', 'rm1_wdt_init(sys);',
                      'rm1_ssi_init(sys, mpu, ra2_isi);', 'rm1_nand_init(sys, mpu, nand, ra2_flash);'):
             self.assertIn(call, body)
 

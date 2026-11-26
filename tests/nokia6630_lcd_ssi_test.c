@@ -11,6 +11,15 @@
  *    interrupt (ssi.pdd's start-up drain read ate it and the link never came up).
  *  rm1_ssi_ctrl_pending: the modem answers hello with hello (clears the phone's "Ctrl pending" flag) and
  *    only then link up (0x10000000), else every non-hello word is ignored.
+ * Nokia N90 (controller mode, 352x416; docs/devices/nokia-n90-rm42/bring-up.md):
+ *  rm42_lcd_hires: the console is 352x416 and pixels past x 175 / y 207 land (the 6630's size clipped them).
+ *  rm42_lcd_window_38_48: register 38 {x0, y0, x1, y1} (16-bit LE) + 48 write a rectangle; DCS 2A/2B/2C mean
+ *    nothing there (the N90 writes its register 2A = 0x81 / 0x87).
+ *  rm42_lcd_logo_stripes: with register 2A = 0x87 a pixel is two 16-bit units, 0x00RRGGBB low half first (as
+ *    single RGB565 units the logo came out twice as wide, every other column black; as RGB666 the UI was noise).
+ *  rm42_lcd_early_logo_doubled: with 2A = 0x81 (the start-up logo, CPU FIFO) each unit is one RGB565 pixel (paired,
+ *    the logo came out twice, side by side, in the top half, in pink).
+ *  rm42_lcd_reads_zero: register reads answer 0 (no DCS RDDID queue).
  */
 #include <assert.h>
 #include <stdio.h>
@@ -120,6 +129,77 @@ static void lcd_tests(void)
     assert(l.fb[0] == 0x123456);
 }
 
+static void ctrl_reg(Rm1Lcd *l, uint8_t reg, const uint8_t *p, unsigned n)  /* genericlcd 0x50049290 */
+{
+    dcs(l, reg, p, n);
+}
+
+static void ctrl_window(Rm1Lcd *l, unsigned x0, unsigned y0, unsigned x1, unsigned y1)
+{
+    uint8_t w[8] = { x0, x0 >> 8, y0, y0 >> 8, x1, x1 >> 8, y1, y1 >> 8 };
+
+    ctrl_reg(l, 0x38, w, 8);
+    ctrl_reg(l, 0x48, NULL, 0);
+}
+
+static void lcd_ctrl_tests(void)
+{
+    static Rm1Lcd l;
+    uint8_t v;
+    unsigned y0, y1;
+
+    l.w = 352;
+    l.h = 416;
+    l.ctrl = true;
+    rm1_lcd_reset(&l);
+    l.mem_read = mem_read;
+    rm1_sossi_write(&l, 0x0c, 0x67);
+    assert(l.xe == 351 && l.ye == 415);
+
+    /* rm42_lcd_early_logo_doubled: register 2A = 0x81, a FIFO word = two RGB565 pixels, low half first */
+    v = 0x81;
+    ctrl_reg(&l, 0x2a, &v, 1);
+    ctrl_window(&l, 300, 400, 301, 400);
+    rm1_sossi_write(&l, 0x10, 0x001fffff);          /* white, then blue [V words like 0873EF7F] */
+    assert(l.fb[400 * 352 + 300] == 0xffffff);      /* rm42_lcd_hires: past 176x208 */
+    assert(l.fb[400 * 352 + 301] == 0x0000ff);
+    assert(rm1_lcd_take_dirty(&l, &y0, &y1) && y0 == 400 && y1 == 401);
+
+    /* rm42_lcd_window_38_48: the rectangle wraps inside the window; DCS commands do not move it */
+    ctrl_window(&l, 10, 20, 11, 21);
+    rm1_sossi_write(&l, 0x10, 0xffffffff);
+    rm1_sossi_write(&l, 0x10, 0xffffffff);
+    assert(l.fb[20 * 352 + 10] == 0xffffff && l.fb[21 * 352 + 11] == 0xffffff);
+    assert(l.fb[20 * 352 + 12] == 0 && l.fb[22 * 352 + 10] == 0);
+
+    /* rm42_lcd_logo_stripes: register 2A = 0x87, LCD DMA of 16-bit units: a pixel is a unit pair, 0x00RRGGBB */
+    v = 0x87;
+    ctrl_reg(&l, 0x2a, &v, 1);
+    ctrl_window(&l, 0, 0, 351, 415);
+    rm1_sossi_write(&l, 0x10, 0x00123456);
+    assert(l.fb[0] == 0x123456);
+    {
+        static const uint32_t row[2] = { 0x00ffffff, 0x00000099 };   /* white, the logo's blue */
+        uint32_t src = 0x10002000;
+
+        memcpy(guest + 0x2000, row, sizeof(row));
+        ctrl_window(&l, 0, 1, 1, 1);
+        RM1_D(&l, 0xbc0) = 0x141;                   /* 16-bit elements [V CSDP] */
+        RM1_D(&l, 0xbc2) = 0x0000;
+        RM1_D(&l, 0xbc8) = src;
+        RM1_D(&l, 0xbca) = src >> 16;
+        RM1_D(&l, 0xbe0) = 4;                       /* 2 units a pixel [V 704 units a 352-pixel row] */
+        RM1_D(&l, 0xbe4) = 1;
+        RM1_D(&l, 0xbc2) |= 0x80;
+        rm1_lcd_dma_run(&l);
+    }
+    assert(l.fb[352] == 0xffffff && l.fb[353] == 0x000099);
+
+    /* rm42_lcd_reads_zero: reading a register (04 is RDDID on a DCS panel) gives 0 */
+    ctrl_reg(&l, 0x04, NULL, 0);
+    assert(rm1_sossi_read(&l, 0x10) == 0 && rm1_sossi_read(&l, 0x10) == 0);
+}
+
 static void ssi_tests(void)
 {
     static Rm1SsiLink s;
@@ -158,6 +238,7 @@ static void ssi_tests(void)
 int main(void)
 {
     lcd_tests();
+    lcd_ctrl_tests();
     ssi_tests();
     printf("nokia6630_lcd_ssi_test: ok\n");
     return 0;

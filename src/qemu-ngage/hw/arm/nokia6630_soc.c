@@ -304,9 +304,10 @@ static bool panel_update(void *opaque)
     if (!surf || !rm1_lcd_take_dirty(&s->l, &y0, &y1)) {
         return true;
     }
-    memcpy((uint32_t *)surface_data(surf) + y0 * RM1_LCD_W, s->l.fb + y0 * RM1_LCD_W,
-           (y1 - y0) * RM1_LCD_W * 4);
-    qemu_console_update(s->con, 0, y0, RM1_LCD_W, y1 - y0);
+    unsigned w = rm1_lcd_w(&s->l);
+
+    memcpy((uint32_t *)surface_data(surf) + y0 * w, s->l.fb + y0 * w, (y1 - y0) * w * 4);
+    qemu_console_update(s->con, 0, y0, w, y1 - y0);
     return true;
 }
 
@@ -315,7 +316,7 @@ static void panel_invalidate(void *opaque)
     Rm1Display *s = opaque;
 
     s->l.dirty_y0 = 0;
-    s->l.dirty_y1 = RM1_LCD_H;
+    s->l.dirty_y1 = rm1_lcd_h(&s->l);
 }
 
 static const GraphicHwOps panel_ops = {
@@ -334,16 +335,21 @@ static void display_reset(void *opaque)
     panel_invalidate(s);
 }
 
-void rm1_display_init(MemoryRegion *sys, struct omap_mpu_state_s *mpu)
+void rm1_display_init(MemoryRegion *sys, struct omap_mpu_state_s *mpu, unsigned w, unsigned h, bool ctrl)
 {
     Rm1Display *s = g_new0(Rm1Display, 1);
+
+    assert(w <= RM1_LCD_MAX_W && h <= RM1_LCD_MAX_H);
+    s->l.w = w;
+    s->l.h = h;
+    s->l.ctrl = ctrl;
 
     s->l.mem_read = lcd_mem_read;
     rm1_lcd_reset(&s->l);
     s->irq = qdev_get_gpio_in(mpu->ih[0], 25);
     s->done = timer_new_ns(QEMU_CLOCK_VIRTUAL, lcddma_done, s);
     s->con = qemu_graphic_console_create(NULL, 0, &panel_ops, s);
-    qemu_console_resize(s->con, RM1_LCD_W, RM1_LCD_H);
+    qemu_console_resize(s->con, rm1_lcd_w(&s->l), rm1_lcd_h(&s->l));
     memory_region_init_io(&s->sossi_mr, NULL, &sossi_ops, s, "omap1610.sossi", 0x40);
     memory_region_add_subregion_overlap(sys, 0xfffbac00, &s->sossi_mr, 10);
     memory_region_init_io(&s->dma_mr, NULL, &lcddma_ops, s, "omap1610.lcddma", 0x40);
@@ -612,6 +618,140 @@ void rm1_nand_init(MemoryRegion *sys, struct omap_mpu_state_s *mpu, const char *
     memory_region_init_io(mr, NULL, &nand_ops, NULL, "omap1610.nand", 0x100);
     memory_region_add_subregion_overlap(sys, 0xfffbcc00, mr, 10);
     qemu_register_reset(nand_reset_cb, NULL);
+}
+
+/*
+ * OMAP1710 SPI (0xFFFB0C00; VA 0x580B0C00 in the Nokia N90's espi.dll). Layout from the kernel's accessors
+ * espi imports (ekern 0x5000F778..0x5000F7FC: base + offset) and espi's use of them [V Ghidra]:
+ *   10 SYSCONFIG (bit 1 soft reset)  14 SYSSTATUS (bit 0 reset done: espi polls it 50 times, else
+ *   Kern::Fault "Hw-error:SPI reset failed")  18 ISR (read, then written back to clear: bit 0 read done,
+ *   1 write done, 2 and 3 errors -9/-10)  1C IER (5 for a read, 10 for a write)  24 SET1 (bit 0 clock on,
+ *   bits 1-3 prescaler, bit 5 a flag)  28 SET2  2C CTRL (bit 0 read, bit 1 write, bits 2-6 word length - 1,
+ *   bits 7-9 the device)  30 STATUS (bit 0 read done, bit 1 write done)  34 TX  38 RX.
+ * Interrupt "Lv2_SPI": entry 81 of the kernel's name table = level-2 line 49 [V]. DMA mode (SET1 bit 5, espi's
+ * mode 2): espi starts system DMA channel 0 (CSDP 0x602, CDSA 0xFFFB0C34 = TX, CCR sync 1) and then writes CTRL;
+ * the SPI raises DMA request 1 until CTRL or SET1 bit 5 is cleared and sends each word the DMA writes to TX [V
+ * catches on the kernel's DMA write helper 0x5000E640].
+ * H-rm42-spi: a transfer completes at once. The devices are the N90's DCS panels over 9-bit SPI (bit 8 = data,
+ * genericlcd_lcd.ldd sends DCS 11 Sleep Out first [V trace]): a read answers RDDID (04) with an ID the LCD
+ * driver knows (0x290015: its panel type 0x2000, which is also its default for an unknown ID; 0x5004C4C8),
+ * anything else 0 [I].
+ */
+typedef struct {
+    MemoryRegion mr;
+    qemu_irq irq, drq_tx;
+    uint32_t r[0x40 / 4];
+    uint8_t last_cmd[8];                /* per device: the last DCS command byte */
+} Rm1Spi;
+
+#define RM1_SPI_ID 0x290015u            /* RDDID as genericlcd_lcd.ldd reads it (low byte 0x15, bits 16-23 0x29) */
+
+static uint32_t rm1_spi_answer(uint8_t last_cmd)
+{
+    return last_cmd == 0x04 ? RM1_SPI_ID : 0;
+}
+
+static void spi_update(Rm1Spi *s)
+{
+    qemu_set_irq(s->irq, (s->r[0x18 / 4] & s->r[0x1c / 4] & 0xf) != 0);
+    qemu_set_irq(s->drq_tx, (s->r[0x24 / 4] & 0x20) && (s->r[0x2c / 4] & 2));
+}
+
+/* one word out to device DEV (BITS long): DCS command bytes (9-bit words with bit 8 clear) are remembered */
+static void spi_send(Rm1Spi *s, unsigned dev, unsigned bits, uint32_t tx)
+{
+    tx &= bits >= 32 ? 0xffffffffu : (1u << bits) - 1;     /* DMA elements are 32 bits wide */
+    qemu_log_mask(LOG_UNIMP, "nokia6630: SPI dev%u tx %u bits %x\n", dev, bits, tx);
+    if (bits == 9 && !(tx & 0x100)) {
+        s->last_cmd[dev & 7] = tx;
+    }
+    s->r[0x30 / 4] |= 2;
+    s->r[0x18 / 4] |= 2;
+}
+
+static void spi_reset(void *opaque)
+{
+    Rm1Spi *s = opaque;
+
+    memset(s->r, 0, sizeof(s->r));
+    memset(s->last_cmd, 0, sizeof(s->last_cmd));
+    spi_update(s);
+}
+
+static uint64_t spi_read(void *opaque, hwaddr addr, unsigned size)
+{
+    Rm1Spi *s = opaque;
+
+    addr &= 0x3c;
+    switch (addr) {
+    case 0x14: return 1;                                /* SYSSTATUS: reset done */
+    }
+    return s->r[addr / 4];
+}
+
+static void spi_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
+{
+    Rm1Spi *s = opaque;
+    unsigned dev = (val >> 7) & 7, bits = ((val >> 2) & 0x1f) + 1;
+
+    addr &= 0x3c;
+    switch (addr) {
+    case 0x10:
+        if (val & 2) {
+            spi_reset(s);
+        }
+        s->r[addr / 4] = val & ~2u;
+        return;
+    case 0x14:
+    case 0x30:
+        return;                                         /* read-only */
+    case 0x18:
+        s->r[addr / 4] &= ~val;
+        spi_update(s);
+        return;
+    case 0x2c:
+        s->r[addr / 4] = val;
+        if ((val & 2) && !(s->r[0x24 / 4] & 0x20)) {   /* write: TX to the device (DMA mode: spi_update) */
+            spi_send(s, dev, bits, s->r[0x34 / 4]);
+        }
+        if (val & 1) {                                  /* read: the device's answer to RX */
+            s->r[0x38 / 4] = rm1_spi_answer(s->last_cmd[dev]);
+            qemu_log_mask(LOG_UNIMP, "nokia6630: SPI dev%u rx %u bits -> %x\n", dev, bits, s->r[0x38 / 4]);
+            s->r[0x30 / 4] |= 1;
+            s->r[0x18 / 4] |= 1;
+        }
+        spi_update(s);
+        return;
+    }
+    s->r[addr / 4] = val;
+    if (addr == 0x34 && (s->r[0x24 / 4] & 0x20) && (s->r[0x2c / 4] & 2)) {   /* a word from the DMA */
+        uint32_t ctl = s->r[0x2c / 4];
+
+        spi_send(s, (ctl >> 7) & 7, ((ctl >> 2) & 0x1f) + 1, val);
+    }
+    if (addr == 0x1c || addr == 0x24 || addr == 0x34) {
+        spi_update(s);
+    }
+}
+
+static const MemoryRegionOps spi_ops = {
+    .read = spi_read,
+    .write = spi_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid = { .min_access_size = 1, .max_access_size = 4 },
+    .impl = { .min_access_size = 4, .max_access_size = 4 },
+};
+
+void rm1_spi_init(MemoryRegion *sys, struct omap_mpu_state_s *mpu)
+{
+    Rm1Spi *s = g_new0(Rm1Spi, 1);
+
+    s->irq = qdev_get_gpio_in(mpu->ih[1], 49);
+    s->drq_tx = mpu->drq[1];
+    memory_region_init_io(&s->mr, NULL, &spi_ops, s, "omap1710.spi", 0x40);
+    memory_region_add_subregion_overlap(sys, 0xfffb0c00, &s->mr, 10);
+    spi_reset(s);
+    qemu_register_reset(spi_reset, s);
 }
 
 /*

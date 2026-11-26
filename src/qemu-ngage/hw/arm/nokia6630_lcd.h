@@ -14,6 +14,16 @@
  * (bit 7 enable/busy, bits 12-13 = 3 double-indexed source), C4 CTRL (bit 1 interrupt enable, bit 3 block
  * done, bit 8 to the SoSSI), C8/CA source address, D8 element index, DA/F4 frame index, E0 elements a
  * frame, E4 frames. A run sends every element to the A channel, clears CCR bit 7, sets CTRL bit 3.
+ *
+ * Controller mode (Rm1Lcd.ctrl, the Nokia N90's 352x416 display, genericlcd_lcd.ldd): the B channel carries a
+ * display controller's register writes (register byte, then its value bytes) instead of DCS. 38 = window
+ * {x0, y0, x1, y1} as four 16-bit little-endian values (full screen 0 0 351 415), 48 = memory write from the
+ * window's corner. Pixel format by register 2A: 0x87 (the UI's set-up, LCD DMA of 16-bit units from a 0x00RRGGBB
+ * frame buffer) = two units a pixel, low half first; 0x81 (the start-up logo, CPU FIFO words) = one RGB565 pixel a
+ * unit [V trace: words 0873EF7F, DMA CSDP 0x141 with 704 units a 352-pixel row; I which bits of 2A]. The
+ * other registers (04..2A, 56, 58: timing, power, mode) change nothing shown and reads answer
+ * 0 [V trace of the N90's boot; I which controller]. Pixels arrive as on the 6630 (A FIFO / LCD DMA).
+ * Size: Rm1Lcd.w x .h, 0 = the 6630's 176x208.
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 #ifndef NOKIA6630_LCD_H
@@ -25,6 +35,8 @@
 
 #define RM1_LCD_W 176
 #define RM1_LCD_H 208
+#define RM1_LCD_MAX_W 352               /* the Nokia N90 */
+#define RM1_LCD_MAX_H 416
 
 typedef struct Rm1Lcd {
     uint32_t reg[9];                    /* SoSSI 0x00..0x20 */
@@ -37,7 +49,12 @@ typedef struct Rm1Lcd {
     unsigned rq_n, rq_i;
     uint32_t reo0;
     bool reo_first;
-    uint32_t fb[RM1_LCD_W * RM1_LCD_H]; /* the panel's frame memory, 0x00RRGGBB */
+    unsigned w, h;                      /* the panel's size (0: RM1_LCD_W x RM1_LCD_H); rows are w apart in fb */
+    bool ctrl;                          /* controller mode (38 window, 48 write) instead of DCS */
+    uint8_t creg[0x80];                 /* controller mode: register values (first value byte) */
+    uint16_t lo;                        /* controller mode, 24 bits: the first 16-bit unit of a pixel */
+    bool have_lo;
+    uint32_t fb[RM1_LCD_MAX_W * RM1_LCD_MAX_H]; /* the panel's frame memory, 0x00RRGGBB */
     unsigned dirty_y0, dirty_y1;        /* rows changed since the last rm1_lcd_take_dirty (y1 exclusive) */
     uint16_t d[32];                     /* LCD DMA 0xBC0..0xBFF */
     /* the board: read guest memory for the DMA */
@@ -45,18 +62,29 @@ typedef struct Rm1Lcd {
     void *opaque;
 } Rm1Lcd;
 
+static inline unsigned rm1_lcd_w(const Rm1Lcd *l)
+{
+    return l->w ? l->w : RM1_LCD_W;
+}
+
+static inline unsigned rm1_lcd_h(const Rm1Lcd *l)
+{
+    return l->h ? l->h : RM1_LCD_H;
+}
+
 static inline void rm1_lcd_reset(Rm1Lcd *l)
 {
     memset(l->reg, 0, sizeof(l->reg));
+    memset(l->creg, 0, sizeof(l->creg));
     l->b_left = l->nprm = 0;
     l->xs = l->ys = l->cx = l->cy = 0;
-    l->xe = RM1_LCD_W - 1;
-    l->ye = RM1_LCD_H - 1;
+    l->xe = rm1_lcd_w(l) - 1;
+    l->ye = rm1_lcd_h(l) - 1;
     l->writing = l->reo_first = false;
     l->rq_n = l->rq_i = 0;
     l->reo0 = 0;
     memset(l->d, 0, sizeof(l->d));
-    l->dirty_y0 = RM1_LCD_H;
+    l->dirty_y0 = rm1_lcd_h(l);
     l->dirty_y1 = 0;
 }
 
@@ -65,8 +93,8 @@ static inline void rm1_lcd_px(Rm1Lcd *l, uint32_t rgb)
     if (!l->writing) {
         return;
     }
-    if (l->cx < RM1_LCD_W && l->cy < RM1_LCD_H) {
-        l->fb[l->cy * RM1_LCD_W + l->cx] = rgb;
+    if (l->cx < rm1_lcd_w(l) && l->cy < rm1_lcd_h(l)) {
+        l->fb[l->cy * rm1_lcd_w(l) + l->cx] = rgb;
         if (l->cy < l->dirty_y0) {
             l->dirty_y0 = l->cy;
         }
@@ -94,6 +122,16 @@ static inline uint32_t rm1_rgb444(uint16_t v)
 
 static inline void rm1_lcd_unit16(Rm1Lcd *l, uint16_t v)
 {
+    if (l->ctrl && (l->creg[0x2a] & 7) == 7) {     /* 24 bits: 0x00RRGGBB as two units, low half first */
+        if (!l->have_lo) {
+            l->lo = v;
+            l->have_lo = true;
+            return;
+        }
+        l->have_lo = false;
+        rm1_lcd_px(l, (l->lo | (uint32_t)v << 16) & 0xffffff);
+        return;
+    }
     rm1_lcd_px(l, l->reo0 == 0x92859cc5 ? rm1_rgb444(v) : rm1_rgb565(v));
 }
 
@@ -108,16 +146,33 @@ static inline void rm1_lcd_word(Rm1Lcd *l, uint32_t w)
     }
 }
 
+static inline unsigned rm1_lcd_clamp(unsigned v, unsigned n)
+{
+    return v < n ? v : n - 1;
+}
+
 static inline void rm1_lcd_cmd_done(Rm1Lcd *l)
 {
+    if (l->ctrl) {
+        if (l->cmd < sizeof(l->creg) && l->nprm) {
+            l->creg[l->cmd] = l->prm[0];
+        }
+        if (l->cmd == 0x38 && l->nprm >= 8) {
+            l->xs = rm1_lcd_clamp(l->prm[0] | l->prm[1] << 8, rm1_lcd_w(l));
+            l->ys = rm1_lcd_clamp(l->prm[2] | l->prm[3] << 8, rm1_lcd_h(l));
+            l->xe = rm1_lcd_clamp(l->prm[4] | l->prm[5] << 8, rm1_lcd_w(l));
+            l->ye = rm1_lcd_clamp(l->prm[6] | l->prm[7] << 8, rm1_lcd_h(l));
+        }
+        return;
+    }
     switch (l->cmd) {
     case 0x2a:
-        l->xs = l->prm[1] < RM1_LCD_W ? l->prm[1] : RM1_LCD_W - 1;
-        l->xe = l->prm[3] < RM1_LCD_W ? l->prm[3] : RM1_LCD_W - 1;
+        l->xs = rm1_lcd_clamp(l->prm[1], rm1_lcd_w(l));
+        l->xe = rm1_lcd_clamp(l->prm[3], rm1_lcd_w(l));
         break;
     case 0x2b:
-        l->ys = l->prm[1] < RM1_LCD_H ? l->prm[1] : RM1_LCD_H - 1;
-        l->ye = l->prm[3] < RM1_LCD_H ? l->prm[3] : RM1_LCD_H - 1;
+        l->ys = rm1_lcd_clamp(l->prm[1], rm1_lcd_h(l));
+        l->ye = rm1_lcd_clamp(l->prm[3], rm1_lcd_h(l));
         break;
     }
 }
@@ -130,6 +185,16 @@ static inline void rm1_lcd_cmd(Rm1Lcd *l, uint8_t c)
     l->cmd = c;
     l->nprm = 0;
     l->writing = false;
+    if (l->ctrl) {
+        l->rq_n = l->rq_i = 0;          /* register reads answer 0 */
+        if (c == 0x48) {
+            l->writing = true;
+            l->have_lo = false;
+            l->cx = l->xs;
+            l->cy = l->ys;
+        }
+        return;
+    }
     switch (c) {
     case 0x2c:
         l->writing = true;
@@ -250,7 +315,7 @@ static inline bool rm1_lcd_take_dirty(Rm1Lcd *l, unsigned *y0, unsigned *y1)
     }
     *y0 = l->dirty_y0;
     *y1 = l->dirty_y1;
-    l->dirty_y0 = RM1_LCD_H;
+    l->dirty_y0 = rm1_lcd_h(l);
     l->dirty_y1 = 0;
     return true;
 }

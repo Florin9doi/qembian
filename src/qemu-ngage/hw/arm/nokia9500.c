@@ -1184,6 +1184,8 @@ typedef struct Rm1Phone {
     const char *images;                     /* the ppm= hint */
     void (*patch)(uint8_t *core, gsize len);
     bool omap1710;                          /* report the OMAP1710's ID registers (rm1_omap1710_ids) */
+    unsigned lcd_w, lcd_h;                  /* the main display (0: the 6630's 176x208) */
+    bool lcd_ctrl;                          /* behind a display controller (nokia6630_lcd.h "Controller mode") */
 } Rm1Phone;
 static const Rm1Phone *rm1_phone;
 
@@ -1330,13 +1332,14 @@ static void rm1_board_init(MachineState *machine, const Rm1Phone *ph)
     memory_region_add_subregion(sys, OMAP_EMIFF_BASE, machine->ram);
     mpu = omap1610_mpu_init(machine->ram, machine->cpu_type);
     rm1_gptimers_init(sys, mpu);
-    rm1_display_init(sys, mpu);
+    rm1_display_init(sys, mpu, ph->lcd_w, ph->lcd_h, ph->lcd_ctrl);
     rm1_gpio_init(sys, mpu);
     rm1_wdt_init(sys);
     rm1_ssi_init(sys, mpu, ra2_isi);
     rm1_keys_init(mpu, ph->omap1710);
     if (ph->omap1710) {
         rm1_omap1710_ids(sys);
+        rm1_spi_init(sys, mpu);
     }
     {
         g_autofree char *nand = g_build_filename(ra2_images, "nand.img", NULL);
@@ -1421,9 +1424,31 @@ static void rm1_patches_6680(uint8_t *core, gsize len)
     rm1_patch(core, len, "H-rm36-drmhelper", 0x50ac14c0, 0x1c0444a5, 0x46c04770);
 }
 
+/*
+ * Nokia N90 (RM-42 V 5.0607.7, S60 2nd FP3, Symbian 8.1a, OMAP1710): the N70's patches (H-rm84-*) at RM-42's
+ * addresses, each found by a unique 16/16 masked code match with the old word identical [V eka1/rm42/core/ROM.bin]
+ * (docs/devices/nokia-n90-rm42/bring-up.md).
+ */
+static void rm1_patches_n90(uint8_t *core, gsize len)
+{
+    rm1_patch(core, len, "H-rm42-dsp-boot", 0x505f41c4, 0x1afffffb, 0xe1a00000);
+    rm1_patch(core, len, "H-rm42-dsp-timeout", 0x505e9cb8, 0xe3e02020, 0xe3a02000);
+    rm1_patch(core, len, "H-rm42-bal-run", 0x505296f0, 0xe92d40f0, 0xe3a00000);
+    rm1_patch(core, len, "H-rm42-bal-run", 0x505296f4, 0xe24dd008, 0xe12fff1e);
+    rm1_patch(core, len, "H-rm42-bal-run", 0x50529628, 0xe92d4030, 0xe3a00000);
+    rm1_patch(core, len, "H-rm42-bal-run", 0x5052962c, 0xe24dd00c, 0xe12fff1e);
+    rm1_patch(core, len, "H-rm42-eapgwc", 0x5052ef48, 0x2600d12c, 0x2600e02c);
+    rm1_patch(core, len, "H-rm42-eapgwc", 0x50520858, 0xd1282800, 0xe0282800);
+    rm1_patch(core, len, "H-rm42-secenvinit", 0x5050d06c, 0x4657b5f0, 0x47702000);
+    rm1_patch(core, len, "H-rm42-drmhelper", 0x50ac0e4c, 0x4c19b510, 0x42402001);
+    rm1_patch(core, len, "H-rm42-drmhelper", 0x50ac0e50, 0x1c0444a5, 0x46c04770);
+}
+
 static const Rm1Phone rm1_phone_6630 = { "nokia6630", "eka1/rm1/core", rm1_patches_6630, false };
 static const Rm1Phone rm1_phone_6680 = { "nokia6680", "eka1/rm36/core", rm1_patches_6680, false };
 static const Rm1Phone rm1_phone_n70 = { "nokian70", "eka1/rm84/core", rm1_patches_n70, true };
+/* H-rm42-display: the N90's 352x416 main display behind a controller on SoSSI (genericlcd_lcd.ldd) */
+static const Rm1Phone rm1_phone_n90 = { "nokian90", "eka1/rm42/core", rm1_patches_n90, true, 352, 416, true };
 
 static void nokia6630_init(MachineState *machine)
 {
@@ -1438,6 +1463,11 @@ static void nokia6680_init(MachineState *machine)
 static void nokian70_init(MachineState *machine)
 {
     rm1_board_init(machine, &rm1_phone_n70);
+}
+
+static void nokian90_init(MachineState *machine)
+{
+    rm1_board_init(machine, &rm1_phone_n90);
 }
 
 static void nokia9300_init(MachineState *machine)
@@ -1645,6 +1675,27 @@ static const TypeInfo nokian70_type = {
     .interfaces = arm_machine_interfaces,
 };
 
+static void nokian90_class_init(ObjectClass *oc, const void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+
+    ra2_class_props(oc);
+    mc->desc = "Nokia N90 (RM-42, BB5 OMAP1710, S60 2nd FP3, Symbian 8.1a EKA1) bring-up board";
+    mc->init = nokian90_init;
+    mc->ignore_memory_transaction_failures = true;
+    mc->default_cpu_type = ARM_CPU_TYPE_NAME("arm926");
+    /* the bootstrap's memory table (ROM +0xD04): 64 MB at 0x10100000, as the N70's [V] */
+    mc->default_ram_size = 128 * MiB;
+    mc->default_ram_id = "nokian90.sdram";
+}
+
+static const TypeInfo nokian90_type = {
+    .name = MACHINE_TYPE_NAME("nokian90"),
+    .parent = TYPE_MACHINE,
+    .class_init = nokian90_class_init,
+    .interfaces = arm_machine_interfaces,
+};
+
 static void nokia9500_register(void)
 {
     type_register_static(&nokia9300_type);
@@ -1653,6 +1704,7 @@ static void nokia9500_register(void)
     type_register_static(&nokia6630_type);
     type_register_static(&nokia6680_type);
     type_register_static(&nokian70_type);
+    type_register_static(&nokian90_type);
     type_register_static(&nokia7710_type);
 }
 
