@@ -86,6 +86,18 @@ typedef struct {
     unsigned chip;                  /* ... at the start of this chip */
 } NgageRomRange;
 
+/* the camera a phone's driver expects (docs/devices/nokia-7650-nhl2/camera.md) */
+typedef enum NgageCamKind {
+    NGAGE_CAM_NONE,                 /* no camera modelled */
+    NGAGE_CAM_NHL2,                 /* 7650, 6600: camerapdd / campdd, sensor 0x3C with 8-bit registers, YUV stills */
+    NGAGE_CAM_NHL8,                 /* 3650/3660: the sensor at 0x04 with 16-bit registers, JPEG stills */
+    NGAGE_CAM_RM25,                 /* 6260: the 6600's driver; the phone turns every frame 90 degrees for display
+                                       (ngage_cam.h rot90) */
+    NGAGE_CAM_CAMX,                 /* 7610/6670: camxpdd's frames (header, frame start, JPEG stills: ngage_cam.h
+                                       camx) */
+    NGAGE_CAM_RM51,                 /* 3230: the camera module at 0x30 behind a command port (ngage_cam.h cmdport) */
+} NgageCamKind;
+
 typedef struct {
     const char *name;
     unsigned nchips;                /* chips 0..n-1 answer an ID query (the bootstrap halts otherwise) */
@@ -110,8 +122,7 @@ typedef struct {
                                        finds a valid clock (H-nhl10-rtc) */
     uint32_t md5_entries[2];        /* ROM offsets of the bootstrap's digest entries (H-ngage-md5);
                                        0 = the N-Gage's 0x8F00 / 0x8F18 */
-    bool camera;                    /* the camera (ngage_cam.c): 7650, 6600, 3650, 3660 */
-    bool cam_nhl8;                  /* 3650/3660: the sensor at 0x04 with 16-bit registers, JPEG stills */
+    NgageCamKind camera;            /* the camera (ngage_cam.c) and its driver family; NGAGE_CAM_NONE = not modelled */
     bool slide;                     /* the 7650's keypad slide (the camera lens is behind it) */
     bool irda;                      /* the SIR UART behind euart1.pdd ("SIR.PDD", ngage_sir.c) on the 2nd -serial */
 } NgageModel;
@@ -682,17 +693,20 @@ static const MemoryRegionOps ngage_cbus_ops = {
 /* ---- camera (Nokia 7650): CCP receiver, frames, DMA source (ngage_cam.c) -------------------- */
 /*
  * camerapdd.pdd drives the sensor and the UPP's CCP receiver itself (docs/devices/nokia-7650-nhl2/camera.md); the
- * board supplies a test pattern: while the receiver is on (0x0C121038 bit 0) a frame ends every NGAGE_CAM_FRAME_NS.
+ * board supplies a test pattern: while the receiver is on (0x0C121038 bit 0) a frame starts every NGAGE_CAM_FRAME_NS
+ * (the frame-start event, if unmasked: the 7610's driver arms its buffer on it) and ends NGAGE_CAM_START_NS later.
  * If a DMA transfer from the CCP FIFO is armed then, the frame lands in its buffer and the channel completes
  * (remaining count -1), then the frame-end event raises IrqCCPStatus (86) unless masked.
  */
 #define NGAGE_CAM_FRAME_NS  (50 * 1000 * 1000)     /* 20 frames/s; camerapdd's watchdog (70 ms ticks)
                                                       restarts the receiver after two ticks without a frame [V] */
+#define NGAGE_CAM_START_NS  (30 * 1000 * 1000)     /* frame start to frame end: room for the arming DFC [I] */
 
 static NgageCam ngage_cam;
 static QEMUTimer *ngage_cam_timer;
 static qemu_irq ngage_cam_irq_line;
 static int ngage_cam_dma_ch = -1;
+static bool ngage_cam_in_frame;                 /* between the frame-start and frame-end events */
 static uint32_t ngage_cam_dma_dst, ngage_cam_dma_bytes;
 static bool ngage_slide_closed;                 /* machine property slide-closed (7650) */
 
@@ -701,8 +715,10 @@ static void ngage_cam_update(void)
     qemu_set_irq(ngage_cam_irq_line, ngage_cam_irq(&ngage_cam));
     if (!ngage_cam_streaming(&ngage_cam)) {
         timer_del(ngage_cam_timer);
+        ngage_cam_in_frame = false;
     } else if (!timer_pending(ngage_cam_timer)) {
-        timer_mod(ngage_cam_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + NGAGE_CAM_FRAME_NS);
+        timer_mod(ngage_cam_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
+                  (ngage_cam_in_frame ? NGAGE_CAM_START_NS : NGAGE_CAM_FRAME_NS - NGAGE_CAM_START_NS));
     }
 }
 
@@ -710,16 +726,29 @@ static void ngage_cam_frame(void *opaque)
 {
     static uint16_t nlog;
 
+    if (!ngage_cam_in_frame) {
+        ngage_cam_in_frame = true;
+        ngage_cam_frame_start(&ngage_cam);
+        ngage_cam_update();
+        return;
+    }
+    ngage_cam_in_frame = false;
     if (ngage_cam_dma_ch >= 0) {
         g_autofree uint8_t *buf = g_malloc(ngage_cam_dma_bytes);
         int ch = ngage_cam_dma_ch;
 
-        ngage_cam_fill(&ngage_cam, buf, ngage_cam_dma_bytes);
-        address_space_write(&address_space_memory, ngage_cam_dma_dst, MEMTXATTRS_UNSPECIFIED, buf,
-                            ngage_cam_dma_bytes);
+        uint32_t sent = ngage_cam_fill(&ngage_cam, buf, ngage_cam_dma_bytes);
+        address_space_write(&address_space_memory, ngage_cam_dma_dst, MEMTXATTRS_UNSPECIFIED, buf, sent);
         ngage_cam_dma_ch = -1;
-        ngage_dma_finish(ch);
-        if (ngage_log_hot(&nlog)) {
+        if (sent < ngage_cam_dma_bytes) {
+            ngage_dma_finish_bytes(ch, sent);       /* a 7610 JPEG still: shorter than the buffer */
+        } else {
+            ngage_dma_finish(ch);
+        }
+        static uint32_t last_bytes;
+        bool changed = ngage_cam_dma_bytes != last_bytes;     /* a new mode (viewfinder / still): always logged */
+        last_bytes = ngage_cam_dma_bytes;
+        if (ngage_log_hot(&nlog) || changed) {
             qemu_log_mask(LOG_UNIMP, "ngage-cam: frame %u, %u bytes %s to %08x (DMA ch %d)\n", ngage_cam.frames,
                           ngage_cam_dma_bytes, ngage_cam_rgb444(&ngage_cam) ? "RGB444" :
                           ngage_cam.reg16 && ngage_cam.regs[CAM_REG_JPEG] == 6 ? "JPEG" : "YUV422",
@@ -794,7 +823,7 @@ static void ngage_cam_log(void *opaque, const char *msg)
 {
     static uint16_t nlog;
 
-    if (ngage_log_hot(&nlog)) {
+    if (ngage_log_hot(&nlog) || !strncmp(msg, "module", 6) || !strncmp(msg, "camx", 4)) {
         qemu_log_mask(LOG_UNIMP, "ngage-cam: %s\n", msg);
     }
 }
@@ -806,8 +835,22 @@ static void ngage_cam_setup(MemoryRegion *sys, qemu_irq irq)
 
     ngage_cam.log = ngage_cam_log;
     ngage_cam_init(&ngage_cam);
-    if (ngm->cam_nhl8) {
+    switch (ngm->camera) {
+    case NGAGE_CAM_NHL8:
         ngage_cam_set_sensor(&ngage_cam, CAM_I2C_ADDR_NHL8, true);
+        break;
+    case NGAGE_CAM_RM25:
+        ngage_cam.rot90 = true;
+        break;
+    case NGAGE_CAM_CAMX:
+        ngage_cam.camx = true;
+        break;
+    case NGAGE_CAM_RM51:
+        ngage_cam_set_sensor(&ngage_cam, CAM_I2C_ADDR_RM51, false);
+        ngage_cam.cmdport = true;
+        break;
+    default:
+        break;
     }
     ngage_cam_irq_line = irq;
     ngage_cam_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, ngage_cam_frame, NULL);
@@ -2088,7 +2131,7 @@ static const NgageModel ngage_nhl2 = {
      * 0x50009000-0x50EF9FFF, stored digest wrong as on the N-Gage) and halts at 0x2A84 [V] */
     .md5_entries = { 0x7fd0, 0x7fe8 },
     .uem_rtc = true,                    /* rtc.dll and cbus.dll are the 6600's code (relocated) [V] */
-    .camera = true,
+    .camera = NGAGE_CAM_NHL2,
     .irda = true,
     .slide = true,
 };
@@ -2119,8 +2162,7 @@ static const NgageModel ngage_nhl8 = {
     .nos_rx_flag = 0x8000be30,
     .flash_manuf = NGAGE_FLASH_MANUF, .flash_device = NGAGE_FLASH_DEVICE,
     .uem_rtc = true,
-    .camera = true,
-    .cam_nhl8 = true,   /* camerapdd: the 7650's receiver, its own sensor (docs/.../camera.md) */
+    .camera = NGAGE_CAM_NHL8,           /* camerapdd: the 7650's receiver, its own sensor (docs/.../camera.md) */
     .irda = true,
 };
 
@@ -2150,8 +2192,7 @@ static const NgageModel ngage_nhl8x = {
     .nos_item14 = 0x2186404,
     .flash_manuf = NGAGE_FLASH_MANUF, .flash_device = NGAGE_FLASH_DEVICE,
     .uem_rtc = true,
-    .camera = true,
-    .cam_nhl8 = true,   /* as the 3650 (sensor variant 1: register 0xC007 != 0x36) */
+    .camera = NGAGE_CAM_NHL8,           /* as the 3650 (sensor variant 1: register 0xC007 != 0x36) */
     .irda = true,
 };
 
@@ -2165,7 +2206,7 @@ static const uint32_t ngage_nhl10_nos_exports[][2] = {
 static const NgageModel ngage_nhl10 = {
     .name = "nokia6600",
     .uem_rtc = true,
-    .camera = true,                     /* campdd.pdd: the 7650's hardware, sensor at 0x3C (docs/.../camera.md) */
+    .camera = NGAGE_CAM_NHL2,           /* campdd.pdd: the 7650's hardware, sensor at 0x3C (docs/.../camera.md) */
     .irda = true,                       /* euart1.pdd is SIR.PDD, COMM::1 of irda.esk (docs/research/6600-irda.md) */
     .nchips = 4,
     .rom_map = { { 0, 0x00800000, 0 }, { 0x00800000, 0x00700000, 2 }, { 0x00f00000, 0x00800000, 3 } },
@@ -2206,6 +2247,7 @@ static const uint32_t ngage_rm51_nos_exports[][2] = {
 static const NgageModel ngage_rm51 = {
     .name = "nokia3230",
     .uem_rtc = true,
+    .camera = NGAGE_CAM_RM51,           /* campdd: a camera module behind a command port (I2C 0x30) */
     .nchips = 3,
     .rom_map = { { 0, 0x01000000, 0 }, { 0x01000000, 0x00b00000, 1 } },
     .nrom_map = 2,
@@ -2224,6 +2266,7 @@ static const NgageModel ngage_rm51 = {
      * part the phone has], AMD command set (the bootstrap's fallback ID read 0x5FC0 unlocks at 0x555/0x2AA)
      */
     .flash_manuf = 0xec, .flash_device = 0x22fa, .flash_amd = true,
+    .irda = true,
 };
 
 /*
@@ -2244,6 +2287,7 @@ static const uint32_t ngage_rh51_nos_exports[][2] = {
 static const NgageModel ngage_rh51 = {
     .name = "nokia7610",
     .uem_rtc = true,
+    .camera = NGAGE_CAM_CAMX,           /* camxpdd: sensor 0x3C, 44-byte frame header, JPEG stills [V] */
     .nchips = 3,
     .rom_map = { { 0, 0x01000000, 0 }, { 0x01000000, 0x00900000, 1 } },
     .nrom_map = 2,
@@ -2278,6 +2322,8 @@ static const uint32_t ngage_rm25_nos_exports[][2] = {
 static const NgageModel ngage_rm25 = {
     .name = "nokia6260",
     .uem_rtc = true,
+    .camera = NGAGE_CAM_RM25,           /* campdd.pdd: the 6600's driver (128 sensor registers), same hardware;
+                                           viewfinder 176x144 and stills in YUV, shown turned 90 degrees [V run] */
     .nchips = 3,
     .rom_map = { { 0, 0x01000000, 0 }, { 0x01000000, 0x00d00000, 1 } },
     .nrom_map = 2,
@@ -2291,6 +2337,7 @@ static const NgageModel ngage_rm25 = {
     .nos_rx_dfc = 0x80007544 + 0x200,   /* the stub's RX_DFC / RX_FLAG (RAM = the NOS bss) */
     .nos_rx_flag = 0x80007544 + 0x1f8,
     .flash_manuf = 0xec, .flash_device = 0x22fa, .flash_amd = true,  /* as the 3230 [I] */
+    .irda = true,
 };
 
 static void ngage_init(MachineState *machine)
@@ -2405,7 +2452,7 @@ static void ngage_init(MachineState *machine)
             : NGAGE_KPD_NGAGE);  /* 7650: the 6600's ekeyb (94% same code, same key lists) [V] */                       /* keypad, IrqCTSI_IRQ (Q53) */
         ngage_lprf_setup();                                 /* Bluetooth, CBus dev 5, CTSI 2 */
         ngage_mmc_init(sys, in, ngage_mmc_file);            /* MMC 21-24, DMA channels 6.. [I] */
-        if (ngm->camera) {
+        if (ngm->camera != NGAGE_CAM_NONE) {
             ngage_cam_setup(sys, in[CAM_IRQ]);              /* camera (IrqCCPStatus) */
         }
         if (ngm->irda) {

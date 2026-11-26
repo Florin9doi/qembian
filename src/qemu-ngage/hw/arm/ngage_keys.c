@@ -529,6 +529,10 @@ void ngage_keys_init(MemoryRegion *sys, qemu_irq irq, NgageKpdLayout layout)
     if (kpd.rm51) {
         memory_region_init_io(&kpd.gpio_mr, NULL, &gpio_ops, &kpd, "rm51.gpio", 0x20);
         memory_region_add_subregion(sys, 0x0c120c00, &kpd.gpio_mr);
+        /* the camera module's I2C pins (bits 7/8 of +0C / +10, as the 7650's; campdd 0x5040880c) [V]; the 3230's
+           keys are not on this port */
+        memory_region_init_io(&kpd.joy_mr, NULL, &joy_ops, &kpd, "rm51.gpio2", 0x20);
+        memory_region_add_subregion(sys, 0x0c150200, &kpd.joy_mr);
     }
     if (kpd.nhl8x || kpd.nhl10) {
         memory_region_init_io(&kpd.gpio_mr, NULL, &gpio_ops, &kpd, "nhl10.gpio", 0x20);

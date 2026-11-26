@@ -79,6 +79,19 @@ void ngage_dma_finish(int ch)
     }
 }
 
+void ngage_dma_finish_bytes(int ch, uint32_t bytes)
+{
+    if (dma_s && ch >= 0 && ch < 7 && dma_s->dma_busy[ch]) {
+        uint32_t count = dma_s->dma[ch][0x2c / 4];  /* words - 1 as programmed */
+
+        ngage_dma_finish(ch);
+        if (bytes / 4 <= count) {
+            /* camxpdd 0x503e6f18: moved = size - ((remaining + 1) * 4) [V] */
+            dma_s->dma[ch][0x2c / 4] = count - bytes / 4;
+        }
+    }
+}
+
 static void mmc_irqs(NgageMmc *s)
 {
     bool rdy = s->rp < s->nresp;

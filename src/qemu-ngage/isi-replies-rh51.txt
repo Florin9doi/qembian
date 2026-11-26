@@ -17,6 +17,7 @@ reply 17 0A 0B 01 02 16 04 07 07 15 04 01 00              # N-Gage: BB5: EM batt
 reply 35 02 03 00 00                                      # N-Gage: BB5: self-test run, status 0 = passed
 reply 35 00 01 00 00                                      # N-Gage: BB5: self-test status 0
 reply 59 01 02 00 00                                      # N-Gage: self-test last step (N95: 59 42 -> 43, any payload) [I]
+reply+ 59 01 01 08 00 media=00 robj=36                 # H-dct4-selftest-stop: PN_EPOC_TEST msg 1 sub-id 8 to SelfTestServer (isa_if channel 1 = object 0x36: switch 0x5042a4d8) after DosServer's 59 01: SelfTestServer and BTTestServer exit and free the camera channel (camdrv); what really ends the boot test session is not known [I]
 reply 3A 05 06 echo                                       # N-Gage: BB5: PN_LIGHT, echo the request with status 0
 reply 15 0B 6E 00 00                                      # N-Gage: BB5: MTC_STARTUP_SYNQ_REQ -> RESP (MTC replies are id + 0x63)
 reply 15 02 65 01 01 00 00                                # N-Gage: BB5: MTC_STATE_QUERY: current NORMAL, target NORMAL

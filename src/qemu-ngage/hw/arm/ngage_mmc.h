@@ -18,4 +18,7 @@ typedef struct {
 } NgageDmaPeer;
 void ngage_dma_set_peer(const NgageDmaPeer *peer);
 void ngage_dma_finish(int ch);
+/* a transfer that stopped early (the source sent fewer bytes than armed: a 7610 JPEG still): the remaining count
+   left as count - words moved */
+void ngage_dma_finish_bytes(int ch, uint32_t bytes);
 #endif

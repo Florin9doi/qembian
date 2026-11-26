@@ -103,7 +103,7 @@ does not touch the MMC FIFO is offered to the camera). The DMA channel's own int
 
 ## Nokia 6600 (2026-11-26)
 
-`-M nokia6600` has the model too (`NgageModel.camera`; no slide): its campdd.pdd drives the same hardware (sensor
+`-M nokia6600` has the model too (`.camera = NGAGE_CAM_NHL2`; no slide): its campdd.pdd drives the same hardware (sensor
 0x3C, 8-bit registers, reads 0..0x9F; CCP block, interrupt 86, buffer 0x0A000000, 0x97000 bytes) [V]. It is not
 usable as shipped: **BTTestServer opens the camera channel (camdrv) at boot** for SelfTestServer's test session
 and keeps it, so CamServerCore's open fails -11 (it reports -19 and panics "CamServerCore panic" 4) and Camera stays
@@ -119,7 +119,7 @@ blank [V run].
 
 ## Nokia 3650 and 3660 (2026-11-26)
 
-`-M nokia3650` / `-M nokia3660` (`NgageModel.camera`, `cam_nhl8`; no slide). Viewfinder, capture, the saved JPEG in
+`-M nokia3650` / `-M nokia3660` (`.camera = NGAGE_CAM_NHL8`; no slide). Viewfinder, capture, the saved JPEG in
 Images: all [V run]; `python3 tests/ngage-boot-check.py --model nokia3650 --camera` (and 3660). Their camerapdd
 drives the same receiver, interrupt 86, DMA source 0x1012102C and buffer 0x0A000000 (0x97000 bytes) [V], with
 another sensor:
@@ -140,9 +140,52 @@ to libjpeg's, `tests/ngage-cam-jpeg-check.py`); the phone's gallery shows it [V 
 regression tests: the preview read as the 7650's YUV order (white came out magenta, black green), and the 3660's
 viewfinder sent as YUV (it is RGB565).
 
+## Nokia 6260 (2026-11-26)
+
+`-M nokia6260` (`.camera = NGAGE_CAM_RM25`). campdd.pdd is the 6600's driver with small changes [V diff]: it caches 128
+sensor registers (0..0x7F, as the 7650) instead of 160, its variant tables differ, and its power-down touches only bit 7
+of 0x0C15020E/0x0C150212. Same sensor bus, CCP block, interrupt 86, buffer 0x0A000000. Camera is in the Menu
+(Calendar is the left softkey). Viewfinder 176x144 YUV in two buffers (0x0A000000 / 0x0A00C600), stills 640x480 YUV,
+saved under Images [V run].
+- The phone turns every frame 90 degrees anticlockwise for display (the frame's right edge at the top) [V run: the
+  bars came out horizontal]. The model draws the upright picture turned clockwise (`rot90`). Why (the sensor on its
+  side, or the swivel position, H-rm25-switches) is not known [I].
+- BTTestServer holds the camera channel as on the 6600; H-dct4-selftest-stop ends the boot test session (object
+  0x37). Menu still opens ~75 s after power-on [V run].
+
+## Nokia 7610 and 6670 (2026-11-26)
+
+`-M nokia7610` / `nokia6670` (`.camera = NGAGE_CAM_CAMX`): camxpdd.pdd (0x503E2B80) [V static + run]. Camera = left
+softkey (the Camcorder app, Image mode); viewfinder, capture and the saved picture shown [V run, both phones].
+
+| What | Value |
+|---|---|
+| sensor | I2C 0x3C, 8-bit registers, the 7650's pins; register 1 <= 0x52 picks one of two register tables (0x503e4984) [V]; register 0x10 is written inverted and read back as a test (0x503e3908) |
+| CCP | the 7650's block and interrupt 86; mask 0xFFE7: frame end (bit 3) **and frame start (bit 4)** |
+| frame start | the ISR (0x503e5310 -> 0x503e5600) queues a DFC on bit 4 that arms the next buffer (0x503e5b30, through the receiver object at +0x1E0); bits 3 and 4 in one read = an error [V]. Without frame start nothing was armed and a 5 s timer (0x4C4B40 us, callback 0x503e4f4c) closed the camera every time |
+| DMA | the kernel DMA API (channel 2, source 0x1012102C); bytes moved = size - (remaining + 1) * 4 (0x503e6f18) [V] |
+| frames | a 44-byte header, then the picture; mode tables 0x503e7c64 / 0x503e7ee4 (40-byte entries, +0x20 expected size, +0x24 DMA size): 160x120 (0x962C), 320x240, 640x480 (0x9602C: the camera server's start-up frames), 128x96, 176x144, 352x288, and mode 5 = JPEG still (expected 0, DMA 0xED82C) [V] |
+| JPEG still | the sensor's transport, undone by 0x503e6258 (each word byte-reversed) and 0x503e6290: trailing 0xA5 (up to 3) stripped, `FF 00 00` appended as the end; an 0xA5 follows every 0x00 whose two previous bytes (a, b) have b = 2^n - 1 and a | b = 0xFF, and is dropped. Its length (to FF D9) must equal registers 0xF6-0xF8 (high byte first) and register 0xFA needs bits 7 and 6 (0x503e5e6c) [V]. The model sends a 1152x864 JPEG [I: the 7610's still size] |
+
+The viewfinder is YUV in the 7650's byte order (bars right first time). Header content: zeros, never read [I].
+Regressions in `tests/ngage_cam_test.c`: `camx_no_frame_start`, `camx_header_shift` (the bars 22 pixels left),
+`camx_still_rejected` (a port of the driver's decoder checks the stream), `camx_raw_vga_as_jpeg`.
+
+## Nokia 3230 (2026-11-26, not working yet)
+
+campdd.pdd (0x50408670) drives a camera **module** with its own controller: I2C address 0x30 (0x60/0x61), the 7650's
+pins (now mapped on the 3230: `rm51.gpio2`), commands of 8 bytes written to register 0xFE and 8-byte answers read
+from it, byte 0 bit 7 = busy (polled up to 200 times, 0x5040b9c0) [V]. At power-up the driver uploads 0x1FDC bytes of
+module firmware (0x5040d620) through the port, then sends `04` (identify: answer bytes 2-3 -> +0x54, 4-5 -> +0x58),
+`06 01 03`, `06 00 03`, `06 00 07`, `10`, `14 00 01`, `17`, `18 00 00 0d`, `1d 01`; a table of `07 07 10 NN` commands
+(parameter reads, 0x5040d0c6..) follows. Frames: raw, no header (0x9600, 0x25800, 0x96000, 0xC600, 0x31800), the
+7610's frame-start/frame-end ISR design (0x50409688). The model (`cmdport`) answers every command "done" with zeros:
+Camera opens (Image mode) and closes the module again without a viewfinder. Next: the answers the driver checks.
+
 ## Open
 
 - Host camera as a source (a later step; the owner asked for a pattern only).
+- 3230: the module's command protocol (above).
 - Sensor type 2 (the other module) is not exercised; neither are the night mode and the QCIF still size.
 - 3650/3660: the camcorder (176x144 video, mode state 6 with control 0 on the 3650 [I]) is untried; the 3660's sensor
   variant 2 is not exercised.

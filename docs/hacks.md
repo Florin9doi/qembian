@@ -282,9 +282,12 @@ Evidence: [devices/nokia-3230-rm51/bring-up.md](devices/nokia-3230-rm51/bring-up
 | **H-rm51-flash:** Samsung 0xEC/0x22FA (type 14) on QEMU's CFI02 (AMD command set) [I which part]: the bootstrap and medint accept no ST/Intel types; QEMU patch 0020 exports the CFI02 array for loading | `ngage.c` (`flash_amd`), `patches/qemu-ngage/0020` | the phone's real flash parts |
 | **H-rm51-bt-uart:** 0x0C150572 bit 7 forced set (BC02_UART1.pdd's transmitter-ready poll, no timeout); no BlueCore behind it | `ngage.c` `ngage_known` | a UART + BlueCore HCI model |
 | **H-rm51-audio:** no audio. MMFDevSound's ISI resource 0xE8 protocol answered by the table: play `E8 20` -> `21` started + `2B` ended at once (`reply+`), stop `E8 2A`, data notice `E8 23` -> `24`, play-end `0B 19` -> `1A`, close `0B 04` -> `05`, `1F 04`; every tone (key clicks, ringing) ends immediately | `src/qemu-ngage/isi-replies-rm51.txt` | a modem audio model (PCM, timing) |
+| **H-dct4-selftest-stop (2026-11-26; 3230, 7610, 6670, 6260):** after DosServer's `59 01` the table sends SelfTestServer `PN_EPOC_TEST` msg 1 sub-id 8 (`reply+ 59 01 01 08 00 media=00 robj=OBJ`, OBJ = isa_if channel 1: 0x37 on the 3230 and 6260, 0x36 on the 7610/6670, from isa_if_driver's object switch). SelfTestServer answers `59 02` and exits, BTTestServer exits and frees the camera channel it opened at boot (without it Camera stays blank, as on the 6600) [V run]. What ends the boot test session on a phone is not known [I] | `isi-replies-rm51.txt`, `-rh51.txt`, `-rm25.txt` | the modem's own end of the test session |
+| **H-rm51-camera (2026-11-26, partial):** the camera module (I2C 0x30, a controller with firmware the driver uploads, 0x1FDC bytes) behind a command port: 8-byte commands written to register 0xFE, 8-byte answers read from it (byte 0 bit 7 = busy) [V code]. The model takes the commands and answers "done" with zeros; the driver gets through the upload, ID (04), 06, 10, 14, 17, 18, 1D, then the app closes the camera: no viewfinder yet. The I2C pins are the 7650's (0x0C15020C / 0x0C150210 bits 7/8): that port is now mapped on the 3230 too | `ngage_cam.c` (`cmdport`, `ngage_cam_cmd`), `ngage_keys.c` (`rm51.gpio2`) | the module's command protocol (ID answer, `07 07 10 NN` parameter reads, mode set-up) |
 | ISI replies seeded from the 6600 (and `09 09`, `09 1D` from the 9500) [I]; CheckCrc 0xC0, ALS read `09 0F -> 10 {0B 00}`, DSY audio `0B 11 @01` [V parsers] | `isi-replies-rm51.txt` | per-request parsers |
 
-Not modelled / not working (3230): sound, network, calls, SMS, RTC (time/date asked at every boot), camera, MMC,
+Not modelled / not working (3230): sound, network, calls, SMS, RTC (time/date asked at every boot), camera (Camera opens, no
+viewfinder: H-rm51-camera), MMC,
 Bluetooth, radio; first boot ~150 s (C: formatted twice).
 
 ## Nokia 7610 (RH-51) / 6670 (RH-67), S60 2nd FP1, EKA1, on the ngage board (-M nokia7610 / nokia6670, ngage.c ngage_rh51)
@@ -296,9 +299,10 @@ H-rm51-bt-uart, H-rm51-audio, the 6600's H-nos-standin, H-ngage-md5, H-nhl10-rtc
 |---|---|---|
 | **H-rh51-nos:** the 6600's NOS stand-in assembled with V 4.20's addresses (the 3230's ekern exports − 0x22000, NOS bss 0x80007284, enosdriver export 2 0x50429EC4) at its NOS entry 0x528929E4; NOS exports 1/2/4 jump into it | `nos-standin/build.sh`, `ngage_rh51_nos_stub.h`; test `test_rh51_defsyms_match_rom` | the real NOS |
 | **H-rh51-joy-ctsi:** the joystick's GPIO lines (0x0C120C04 bits 3-7) raise the keypad's CTSI bit instead of their own IrqGPIOnLow interrupts, which the board does not model; ekeyb's keypad ISR scans them anyway | `ngage_keys.c` (`row == -3`); test `test_rh51_joystick_raises_keypad_irq` | a GPIO interrupt controller |
+| **H-rh51-camera (2026-11-26):** camxpdd's camera as a test pattern (docs/devices/nokia-7650-nhl2/camera.md "Nokia 7610 and 6670"): the 7650's sensor bus and CCP receiver; a **frame-start event** (CCP status bit 4, raised only when unmasked: the driver arms its buffer on it) 30 ms before each frame end; frames are a 44-byte header (zeros [I]) and the picture (YUV, the 7650's byte order); stills (the 0xED82C transfer) are a 1152x864 JPEG [I size] in the sensor's transport (0xA5 escapes, words byte-reversed, length in sensor registers 0xF6-0xF8, 0xFA = 0xC0) and end the DMA early (remaining count = words not sent) [V code + run] | `ngage_cam.c` (`camx`), `ngage.c` (frame start, `ngage_dma_finish_bytes`), `ngage_mmc.c`; `tests/ngage_cam_test.c` | the host camera; the header's content; the real sensor's settings |
 | ISI replies: the 3230's table [I], CheckCrc 0x5B [V] | `isi-replies-rh51.txt` | per-request parsers |
 
-Not modelled / not working (7610, 6670): sound, network, calls, SMS, RTC, camera, MMC, Bluetooth; first boot ~3 min.
+Not modelled / not working (7610, 6670): sound, network, calls, SMS, RTC, MMC, Bluetooth; first boot ~3 min.
 
 ## Nokia 6260 (RM-25), S60 2nd FP1, EKA1, on the ngage board (-M nokia6260, ngage.c ngage_rm25)
 
@@ -310,9 +314,10 @@ Evidence: [devices/nokia-6260-rm25/bring-up.md](devices/nokia-6260-rm25/bring-up
 |---|---|---|
 | **H-rm25-nos:** the 6600's NOS stand-in assembled with V 5.0536's addresses (the 3230's ekern exports + 0x4000, NOS bss 0x80007544, enosdriver export 2 0x50453C84) at its NOS entry 0x52894194; NOS exports 1/2/4 jump into it | `nos-standin/build.sh`, `ngage_rm25_nos_stub.h`; test `test_rm25_defsyms_match_rom` | the real NOS |
 | **H-rm25-switches:** GPIO 0x0C120C04 bits 22-26 (ekeyb's switch entries 0xB6-0xBB, the swivel/fold positions [I]) held high = not asserted | `ngage_keys.c` (`gpio_idle`); test `test_rm25_switch_lines_idle_high` | the phone's real position sensors, a host key to change them |
+| **H-rm25-camera (2026-11-26):** campdd is the 6600's driver (128 sensor registers instead of 160, other variant tables) on the same hardware: H-nhl2-camera applies. Its frames (viewfinder 176x144, stills 640x480, YUV) are shown turned 90 degrees anticlockwise, so the model sends the pattern turned clockwise (`rot90`); whether the real sensor lies on its side or the swivel position decides it is not known [I] | `ngage.c` (`NGAGE_CAM_RM25`), `ngage_cam.c` | the host camera; the swivel positions (H-rm25-switches) |
 | ISI replies: the 7610's table [I], CheckCrc 0xE4 [V] | `isi-replies-rm25.txt` | per-request parsers |
 
-Not modelled / not working (6260): sound, network, calls, SMS, RTC, camera, MMC, Bluetooth; first boot ~155 s.
+Not modelled / not working (6260): sound, network, calls, SMS, RTC, MMC, Bluetooth; first boot ~155 s.
 
 ## Nokia 6630 (RM-1, S60 2nd FP2, EKA1, OMAP1610) on the 9500's board (-M nokia6630, src/qemu-ngage/hw/arm/nokia9500.c nokia6630_init + nokia6630_soc.c)
 

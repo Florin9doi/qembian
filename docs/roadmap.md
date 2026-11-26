@@ -239,6 +239,7 @@ OMAP1510 [I]. Flash format: Phoenix A2 with 0x28 records; the core is one raw-de
 Same list as the 6600 below (ISI after idle, starting with the self-test `59 02`; menu and apps; time asked
 every boot; first-boot hint; camera, IrDA, Bluetooth, sound). docs/devices/nokia-7650-nhl2/bring-up.md.
 Camera done with a test pattern (2026-11-26, docs/devices/nokia-7650-nhl2/camera.md); the host camera as a source is next if wanted.
+Camera also on the 6260, 7610 and 6670 (2026-11-26, same document); the 3230's camera module (a command port) is open.
 
 ## Nokia 6600 (NHL-10, EKA1): boots, not really working yet (owner, 2026-11-18)
 

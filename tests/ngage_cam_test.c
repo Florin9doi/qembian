@@ -448,6 +448,166 @@ static void test_fill_rgb565_3660(void)
     assert((f[0x140 + (60 * 160 + 10) * 2] | f[0x140 + (60 * 160 + 10) * 2 + 1] << 8) == 0x0fff);
 }
 
+/*
+ * Regression "camx_no_frame_start" (7610/6670): the camera stayed blank and closed itself every 5 s. camxpdd arms its
+ * buffer from a DFC its ISR queues on the frame-start event (status bit 4, unmasked by the mask 0xFFE7); the model
+ * only raised frame end, so no buffer was ever armed and the driver's 5 s timeout reported an error. Frame start is
+ * raised only when unmasked: the 7650's family masks it (0x3F7) and must not see it with the next frame end.
+ */
+static void test_frame_start(void)
+{
+    reset();
+    ngage_cam_ccp_write(&cam, CAM_CCP_ENABLE, 1);
+    ngage_cam_ccp_write(&cam, CAM_CCP_MASK, 0x3ff & ~CAM_ST_FRAME_END);     /* 7650 */
+    ngage_cam_frame_start(&cam);
+    assert(!ngage_cam_irq(&cam));
+    ngage_cam_frame_end(&cam);
+    assert(ngage_cam_ccp_read(&cam, CAM_CCP_STATUS) == CAM_ST_FRAME_END);
+    ngage_cam_ccp_write(&cam, CAM_CCP_MASK, 0xffe7);                        /* 7610 */
+    ngage_cam_frame_start(&cam);
+    assert(ngage_cam_irq(&cam));
+    assert(ngage_cam_ccp_read(&cam, CAM_CCP_STATUS) == CAM_ST_FRAME_START);  /* alone: both = an error */
+    ngage_cam_frame_end(&cam);
+    assert(ngage_cam_ccp_read(&cam, CAM_CCP_STATUS) == CAM_ST_FRAME_END);
+}
+
+/*
+ * Regression "camx_header_shift" (7610/6670): the viewfinder showed the bars 22 pixels to the left (white wrapped to
+ * the right edge). Each camxpdd frame is a 44-byte header and then the picture (38444 = 44 + 160x120x2, stills
+ * 614444); the model wrote the picture from byte 0.
+ */
+static void test_fill_camx_header(void)
+{
+    static uint8_t f[CAM_HDR_CAMX + 640 * 480 * 2], g[640 * 480 * 2];
+    unsigned sizes[2][2] = { { 160, 120 }, { 640, 480 } };
+
+    for (int i = 0; i < 2; i++) {
+        unsigned n = sizes[i][0] * sizes[i][1] * 2;
+        reset();
+        memset(f, 0xee, sizeof(f));
+        ngage_cam_fill(&cam, f, CAM_HDR_CAMX + n);
+        ngage_cam_pattern(g, n, 0, false);
+        for (int k = 0; k < CAM_HDR_CAMX; k++) {
+            assert(f[k] == 0);
+        }
+        assert(memcmp(f + CAM_HDR_CAMX, g, n) == 0);
+    }
+}
+
+/*
+ * Regression "rm25_viewfinder_sideways" (6260): the viewfinder and the stills showed the bars horizontal, white at the
+ * bottom. The phone turns each frame 90 degrees anticlockwise for display; with rot90 the frame carries the upright
+ * picture turned clockwise, so frame pixel (x, y) is upright pixel (y, w - 1 - x) of an h x w picture.
+ */
+static void test_fill_rot90(void)
+{
+    static uint8_t f[176 * 144 * 2];
+    const unsigned w = 176, h = 144;
+    uint8_t p0[3], p1[3];
+
+    reset();
+    cam.rot90 = true;
+    ngage_cam_fill(&cam, f, sizeof(f));
+    /* upright: 144 wide, 176 tall; bar b spans x 18b..18b+17. White (bar 0) is upright x < 18 = frame row y < 18;
+       black (bar 7) frame rows y >= 126. Frame column x maps to upright row w - 1 - x: the bars are in the top three
+       quarters (upright row < 132), i.e. frame x > 43 */
+    ngage_cam_yuv_to_rgb(f + (8 * w + 100) * 2, p0, p1);
+    assert(near(p0, 255, 255, 255));
+    ngage_cam_yuv_to_rgb(f + (135 * w + 100) * 2, p0, p1);
+    assert(near(p0, 0, 0, 0));
+    /* the red corner square (upright top-left: x, y < 18) = frame y < 18, x near w - 1 */
+    ngage_cam_yuv_to_rgb(f + (14 * w + (w - 16)) * 2, p0, p1);
+    assert(near(p0, 255, 0, 0));
+    /* the grey ramp (upright rows >= 132) = frame columns x < 44, along y */
+    ngage_cam_yuv_to_rgb(f + (40 * w + 20) * 2, p0, p1);    /* upright x 40: past the frame-0 marker (x < 14) */
+    uint8_t dark = p0[0];
+    ngage_cam_yuv_to_rgb(f + ((h - 4) * w + 20) * 2, p0, p1);
+    assert(p0[0] > dark + 100 && abs(p0[0] - p0[1]) <= 6);
+    /* not rotated: the plain pattern */
+    static uint8_t g[176 * 144 * 2];
+    cam.rot90 = false;
+    ngage_cam_fill(&cam, f, sizeof(f));
+    ngage_cam_pattern(g, sizeof(g), 0, false);
+    assert(memcmp(f, g, sizeof(g)) == 0);
+}
+
+/* camxpdd 0x503e6258 + 0x503e6290, ported instruction by instruction: the driver's view of a 7610 still. buf has
+   size bytes of stream and room for the 3-byte terminator it appends; returns the JPEG length it finds */
+static uint32_t camx_decode(uint8_t *buf, uint32_t size)
+{
+    for (int32_t i = (int32_t)size - 4; i >= 0; i -= 4) {     /* 6258: words big-endian -> little-endian */
+        uint8_t t = buf[i]; buf[i] = buf[i + 3]; buf[i + 3] = t;
+        t = buf[i + 1]; buf[i + 1] = buf[i + 2]; buf[i + 2] = t;
+    }
+    uint8_t *e = buf + size;
+    if (*--e == 0xa5 && *--e == 0xa5 && *--e == 0xa5) {
+        e--;
+    }
+    e++;
+    e[0] = 0xff; e[1] = 0; e[2] = 0;
+    uint8_t *rd = buf, *wr = buf, r0, r1 = 0, r2 = 0;
+#define TRIG(a, b) ((b) && ((((a) | (b) | (b) << 8) + 1) & ((a) | (b) | (b) << 8)) == 0)
+    goto l62ec;
+l62e8:
+    *wr++ = r1;
+l62ec:
+    r0 = *rd++;
+    if (r0 == 0 && TRIG(r2, r1)) {
+        r2 = *rd++;
+        if (r2 == 0xa5) { *wr++ = r0; goto l637c; }
+        if (r2 == 0) goto end;
+        rd--;
+    }
+    *wr++ = r0;
+l6334:
+    r2 = *rd++;
+    if (r2 == 0 && TRIG(r1, r0)) {
+        r1 = *rd++;
+        if (r1 == 0xa5) { *wr++ = r2; goto l62ec; }
+        if (r1 == 0) goto end;
+        rd--;
+    }
+    *wr++ = r2;
+l637c:
+    r1 = *rd++;
+    if (r1 != 0 || !TRIG(r0, r2)) goto l62e8;
+    r0 = *rd++;
+    if (r0 == 0xa5) { *wr++ = r1; goto l6334; }
+    if (r0 == 0) goto end;
+    rd--;
+    goto l62e8;
+end:
+#undef TRIG
+    return wr - buf - 1;
+}
+
+/*
+ * Regression "camx_still_rejected" (7610/6670): taking a picture blanked the viewfinder and nothing was saved. Stills
+ * are a JPEG in the sensor's transport; the driver decodes it in place and compares the length with registers
+ * 0xF6-0xF8 (and wants 0xFA bits 7/6). The stream must decode to exactly the JPEG.
+ */
+static void test_camx_still(void)
+{
+    static uint8_t f[CAM_CAMX_STILL + 4], jpg[CAM_CAMX_STILL];
+    uint32_t n = ngage_cam_jpeg(jpg, sizeof(jpg), CAM_CAMX_W, CAM_CAMX_H, 0), len;
+
+    reset();
+    cam.camx = true;
+    uint32_t sent = ngage_cam_fill(&cam, f, CAM_CAMX_STILL);
+    assert(n && sent > CAM_HDR_CAMX && sent < CAM_CAMX_STILL && sent % 4 == 0);
+    uint32_t got = cam.regs[CAM_REG_CAMX_LEN] << 16 | cam.regs[CAM_REG_CAMX_LEN + 1] << 8 | cam.regs[CAM_REG_CAMX_LEN + 2];
+    assert(got == n);
+    assert((cam.regs[CAM_REG_CAMX_LEN + 4] & 0xc0) == 0xc0);
+    assert(camx_decode(f + CAM_HDR_CAMX, sent - CAM_HDR_CAMX) == n);
+    assert(memcmp(f + CAM_HDR_CAMX, jpg, n) == 0);
+    /* the escapes were needed: the stream is longer than the JPEG (entropy data has FF 00) */
+    assert(ngage_cam_camx_jpeg(f, sizeof(f), 0, &len) > n && len == n);
+    /* the viewfinder and the raw 640x480 mode (the camera server's start-up frames) stay whole pictures; regression
+       "camx_raw_vga_as_jpeg": the 640x480 transfer was sent as a JPEG and the driver wanted all 0x9602C bytes */
+    assert(ngage_cam_fill(&cam, f, CAM_HDR_CAMX + 160 * 120 * 2) == CAM_HDR_CAMX + 160 * 120 * 2);
+    assert(ngage_cam_fill(&cam, f, CAM_HDR_CAMX + 640 * 480 * 2) == CAM_HDR_CAMX + 640 * 480 * 2);
+}
+
 int main(void)
 {
     test_identify();
@@ -462,6 +622,10 @@ int main(void)
     test_fill_jpeg();
     test_fill_yuv_nhl8();
     test_fill_rgb565_3660();
+    test_frame_start();
+    test_fill_camx_header();
+    test_fill_rot90();
+    test_camx_still();
     printf("ngage_cam_test: ok\n");
     return 0;
 }

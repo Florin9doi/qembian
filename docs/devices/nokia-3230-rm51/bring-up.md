@@ -89,4 +89,5 @@ Backspace C, Left Shift edit, F6 the side key 0xAC [I].
   `31 30`, `43 07`, `5A 00`, DSY `09 29 {37}`, `0B 23`, `1C 29`; `54 0E` (object 0x5B).
 - Guessed replies [I]: `09 09`, `09 1D` (from the 9500's table), the DSY audio value 0, `0B 04 -> 05` (id),
   everything seeded from the 6600's table.
-- Hardware not modelled: the BlueCore (only its UART ready bit), camera, MMC, radio, sound.
+- Hardware not modelled: the BlueCore (only its UART ready bit), MMC, radio, sound. Camera: the module behind a
+  command port is reached but not answered properly yet, no viewfinder (H-rm51-camera, docs/devices/nokia-7650-nhl2/camera.md).

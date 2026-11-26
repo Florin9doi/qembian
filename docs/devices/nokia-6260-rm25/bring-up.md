@@ -57,11 +57,12 @@ python3 eka1/tools/ngage_phone.py --model nokia6260
 ## State (2026-11-26)
 
 Boots to the S60 home screen after the time and date queries; Menu grid; keys (0, Clear, End verified after stall 2)
-and joystick. No sound, network or camera (as the 7610), time and date asked at every boot.
+and joystick; Camera (test pattern). No sound or network (as the 7610), time and date asked at every boot.
 
 ## Open
 
 - GPIO bits 22-26 and the switch read through a driver call (virtual bit 28): the swivel/fold positions [I]; held at
   "not asserted". Which position that means on the phone, and whether the screen or the keys depend on it, is not known.
 - 0xA2 / 0xA3 / 0xAC on F7 / F8 / F6: names [I] (EStdKeyIncVolume / DecVolume, EStdKeyDevice8).
-- Camera, sound, network: not tried.
+- Sound, network: not tried. Camera (Menu > Camera) works with the test pattern (2026-11-26; H-rm25-camera,
+  H-dct4-selftest-stop); its image is turned 90 degrees by the phone, the model compensates [I why].

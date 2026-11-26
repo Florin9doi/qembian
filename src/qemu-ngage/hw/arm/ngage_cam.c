@@ -65,6 +65,14 @@ static uint16_t cam_reg_mask(const NgageCam *c)
     return c->reg16 ? 0xffff : 0xff;
 }
 
+/* ---- 3230 camera module commands ------------------------------------------------------------- */
+
+/* the answer to a command (resp[0] = cmd[0] already, the rest 0) [I: learnt command by command] */
+void ngage_cam_cmd(NgageCam *c, const uint8_t *cmd, unsigned n, uint8_t resp[8])
+{
+    (void)c; (void)cmd; (void)n; (void)resp;
+}
+
 /* ---- I2C slave -------------------------------------------------------------------------------- */
 
 /* a whole byte came in (8 bits, before the acknowledge clock); true = acknowledge it */
@@ -85,6 +93,14 @@ static bool cam_i2c_byte(NgageCam *c, uint8_t b)
     if (c->naddr) {                             /* the register pointer, high byte first */
         c->ptr = (uint16_t)(c->ptr << 8 | b) & cam_reg_mask(c);
         c->naddr--;
+        if (c->cmdport && c->ptr == CAM_CMD_PORT) {
+            c->ncmd = 0;
+            c->nresp = 0;                       /* an answer is read from its first byte */
+        }
+    } else if (c->cmdport && c->ptr == CAM_CMD_PORT) {
+        if (c->ncmd < sizeof(c->cmd)) {
+            c->cmd[c->ncmd++] = b;
+        }
     } else {
         c->regs[c->ptr] = b;
         cam_log(c, c->reg16 ? "sensor reg %04x = %02x" : "sensor reg %02x = %02x", c->ptr, b);
@@ -93,8 +109,31 @@ static bool cam_i2c_byte(NgageCam *c, uint8_t b)
     return true;
 }
 
+/* 3230 module: a whole command arrived (STOP) */
+static void cam_cmd_exec(NgageCam *c)
+{
+    char m[96];
+
+    snprintf(m, sizeof(m), "module cmd %02x %02x %02x %02x %02x %02x %02x %02x (%u bytes)", c->cmd[0], c->cmd[1],
+             c->cmd[2], c->cmd[3], c->cmd[4], c->cmd[5], c->cmd[6], c->cmd[7], c->ncmd);
+    if (c->log) {
+        c->log(c->opaque, m);
+    }
+    memset(c->resp, 0, sizeof(c->resp));        /* byte 0 bit 7 clear: done [V wait loop 0x5040b9c0] */
+    c->resp[0] = c->cmd[0] & 0x7f;             /* bit 7 = busy [V 0x5040b9c0]; the rest of byte 0 [I] */
+    ngage_cam_cmd(c, c->cmd, c->ncmd, c->resp);
+    c->ncmd = 0;
+}
+
 static void cam_i2c_load(NgageCam *c)
 {
+    if (c->cmdport && c->ptr == CAM_CMD_PORT) {
+        c->shift = c->resp[c->nresp & 7];
+        c->nresp++;
+        c->nbits = 0;
+        c->s_sda_low = !(c->shift & 0x80);
+        return;
+    }
     c->shift = c->regs[c->ptr];
     c->ptr = (c->ptr + 1) & cam_reg_mask(c);
     c->nbits = 0;
@@ -114,6 +153,9 @@ static void cam_i2c_update(NgageCam *c)
             c->nbits = 0;
             c->shift = 0;
         } else {
+            if (c->cmdport && c->ncmd && !c->rd) {
+                cam_cmd_exec(c);
+            }
             c->state = CAM_I2C_IDLE;
         }
         sda = !c->m_sda_low;
@@ -234,6 +276,13 @@ bool ngage_cam_irq(const NgageCam *c)
     return (c->status & ~c->ccp[CAM_CCP_MASK / 4] & 0x7ff) != 0;
 }
 
+void ngage_cam_frame_start(NgageCam *c)
+{
+    if (!(c->ccp[CAM_CCP_MASK / 4] & CAM_ST_FRAME_START)) {
+        c->status |= CAM_ST_FRAME_START;
+    }
+}
+
 void ngage_cam_frame_end(NgageCam *c)
 {
     c->status |= CAM_ST_FRAME_END;
@@ -352,9 +401,23 @@ void ngage_cam_yuv8_to_rgb(const uint8_t q[4], uint8_t rgb0[3], uint8_t rgb1[3])
 
 enum { CAM_FMT_RGB444, CAM_FMT_RGB565, CAM_FMT_YUV, CAM_FMT_YUV8 };
 
+/*
+ * Pixel (x, y) of a w x h frame. rot90: the sensor lies on its side (6260): the phone turns every frame 90 degrees
+ * anticlockwise for display (the frame's right edge at the top, its bottom row on the right) [V run], so the frame
+ * carries the upright h x w picture turned 90 degrees clockwise.
+ */
+static void cam_pixel_at(unsigned x, unsigned y, unsigned w, unsigned h, uint32_t frame, bool rot90, uint8_t rgb[3])
+{
+    if (rot90) {
+        cam_pixel(y, w - 1 - x, h, w, frame, rgb);
+    } else {
+        cam_pixel(x, y, w, h, frame, rgb);
+    }
+}
+
 /* w x h pixels of the pattern at dst (w * h * 2 bytes): little-endian 0x0RGB (4444) or RGB565 words, or YUV 4:2:2 in
    Csu.dll's byte order (YUV8: the 3650/3660's Cr Y1 Cb Y0; YUV: the 7650/6600's Y1 Cr Y0 Cb) */
-static void cam_pattern_wh(uint8_t *dst, unsigned w, unsigned h, uint32_t frame, int fmt)
+static void cam_pattern_wh(uint8_t *dst, unsigned w, unsigned h, uint32_t frame, int fmt, bool rot90)
 {
     bool yuv8 = fmt == CAM_FMT_YUV8;
 
@@ -363,7 +426,7 @@ static void cam_pattern_wh(uint8_t *dst, unsigned w, unsigned h, uint32_t frame,
         if (fmt == CAM_FMT_RGB444 || fmt == CAM_FMT_RGB565) {
             for (unsigned x = 0; x < w; x++) {
                 uint8_t a[3];
-                cam_pixel(x, y, w, h, frame, a);
+                cam_pixel_at(x, y, w, h, frame, rot90, a);
                 uint16_t p = fmt == CAM_FMT_RGB444 ? (a[0] >> 4) << 8 | (a[1] >> 4) << 4 | a[2] >> 4
                                                    : (a[0] >> 3) << 11 | (a[1] >> 2) << 5 | a[2] >> 3;
                 row[x * 2] = p;
@@ -373,8 +436,8 @@ static void cam_pattern_wh(uint8_t *dst, unsigned w, unsigned h, uint32_t frame,
         }
         for (unsigned x = 0; x + 1 < w; x += 2) {
             uint8_t a[3], b[3], y0, y1, cb0, cr0, cb1, cr1;
-            cam_pixel(x, y, w, h, frame, a);
-            cam_pixel(x + 1, y, w, h, frame, b);
+            cam_pixel_at(x, y, w, h, frame, rot90, a);
+            cam_pixel_at(x + 1, y, w, h, frame, rot90, b);
             if (yuv8) {
                 cam_rgb_to_yuv8(a, &y0, &cb0, &cr0);
                 cam_rgb_to_yuv8(b, &y1, &cb1, &cr1);
@@ -405,7 +468,7 @@ void ngage_cam_pattern(uint8_t *dst, uint32_t bytes, uint32_t frame, bool rgb444
     default: w = 160; h = bytes / (w * 2); break;
     }
     memset(dst, rgb444 ? 0 : 0x80, bytes);
-    cam_pattern_wh(dst, w, h, frame, rgb444 ? CAM_FMT_RGB444 : CAM_FMT_YUV);
+    cam_pattern_wh(dst, w, h, frame, rgb444 ? CAM_FMT_RGB444 : CAM_FMT_YUV, false);
 }
 
 /* ---- JPEG (3650/3660 stills: the sensor compresses them) ------------------------------------------ */
@@ -678,7 +741,52 @@ uint32_t ngage_cam_jpeg(uint8_t *out, uint32_t cap, unsigned w, unsigned h, uint
 
 /* ---- a frame for a DMA transfer -------------------------------------------------------------------- */
 
-void ngage_cam_fill(NgageCam *c, uint8_t *dst, uint32_t bytes)
+/* the decoder's escape window (camxpdd 0x503e6290): b = 2^n - 1 and a | b = 0xFF */
+static bool camx_trigger(uint8_t a, uint8_t b)
+{
+    uint32_t r = a | b | (uint32_t)b << 8;
+    return b && ((r + 1) & r) == 0;
+}
+
+uint32_t ngage_cam_camx_jpeg(uint8_t *dst, uint32_t cap, uint32_t frame, uint32_t *jpeg_len)
+{
+    static uint8_t jpg[CAM_CAMX_STILL];
+    uint32_t n = ngage_cam_jpeg(jpg, sizeof(jpg), CAM_CAMX_W, CAM_CAMX_H, frame), o = 0;
+    uint8_t p1 = 0, p2 = 0;                     /* the decoder's last two bytes (r1 / r2 start at 0) */
+
+    *jpeg_len = n;
+    if (!n) {
+        return 0;
+    }
+    for (uint32_t i = 0; i < n; i++) {
+        uint8_t ch = jpg[i];
+        if (o + 2 > cap) {
+            return 0;
+        }
+        dst[o++] = ch;
+        if (ch == 0 && camx_trigger(p2, p1)) {
+            dst[o++] = 0xa5;                    /* dropped by the driver; then it is the previous byte */
+            p2 = 0;
+            p1 = 0xa5;
+        } else {
+            p2 = p1;
+            p1 = ch;
+        }
+    }
+    while (o & 3) {
+        if (o >= cap) {
+            return 0;
+        }
+        dst[o++] = 0xa5;
+    }
+    for (uint32_t i = 0; i < o; i += 4) {       /* each word byte-reversed (0x503e6258 swaps them back) */
+        uint8_t t = dst[i]; dst[i] = dst[i + 3]; dst[i + 3] = t;
+        t = dst[i + 1]; dst[i + 1] = dst[i + 2]; dst[i + 2] = t;
+    }
+    return o;
+}
+
+uint32_t ngage_cam_fill(NgageCam *c, uint8_t *dst, uint32_t bytes)
 {
     static const unsigned sizes[][2] = { { 160, 120 }, { 176, 144 }, { 640, 480 } };
     bool rgb444 = ngage_cam_rgb444(c);
@@ -693,26 +801,44 @@ void ngage_cam_fill(NgageCam *c, uint8_t *dst, uint32_t bytes)
         memset(dst, 0, bytes);
         if (!n || n * 2 > bytes) {
             cam_log(c, "JPEG frame: no room (%u bytes of %u)", n, bytes);
-            return;
+            return bytes;
         }
         for (uint32_t i = 0; i < n; i += 2) {       /* two bytes per word, at offsets 3 and 2 */
             dst[i * 2 + 3] = jpg[i];
             dst[i * 2 + 2] = i + 1 < n ? jpg[i + 1] : 0;
         }
         cam_log(c, "JPEG frame: %u bytes", n, 0);
-        return;
+        return bytes;
+    }
+    if (c->camx && bytes == CAM_CAMX_STILL) {       /* 7610/6670 still: the sensor's JPEG */
+        uint32_t len, o;
+
+        memset(dst, 0, CAM_HDR_CAMX);
+        o = ngage_cam_camx_jpeg(dst + CAM_HDR_CAMX, bytes - CAM_HDR_CAMX, c->frames, &len);
+        c->regs[CAM_REG_CAMX_LEN] = len >> 16;
+        c->regs[CAM_REG_CAMX_LEN + 1] = len >> 8;
+        c->regs[CAM_REG_CAMX_LEN + 2] = len;
+        c->regs[CAM_REG_CAMX_LEN + 4] = 0xc0;
+        cam_log(c, "camx JPEG still: %u bytes, %u sent", len, o);
+        return o ? CAM_HDR_CAMX + o : bytes;
     }
     memset(dst, fmt <= CAM_FMT_RGB565 ? 0 : 0x80, bytes);
     for (unsigned i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
         unsigned w = sizes[i][0], h = sizes[i][1];
         if (bytes == w * h * 2) {
-            cam_pattern_wh(dst, w, h, c->frames, fmt);
-            return;
+            cam_pattern_wh(dst, w, h, c->frames, fmt, c->rot90);
+            return bytes;
         }
         if (bytes == w * (h + 2) * 2) {             /* 3650/3660: a header line, the picture, a spare line */
-            cam_pattern_wh(dst + w * 2, w, h, c->frames, fmt);
-            return;
+            cam_pattern_wh(dst + w * 2, w, h, c->frames, fmt, c->rot90);
+            return bytes;
+        }
+        if (bytes == w * h * 2 + CAM_HDR_CAMX) {    /* 7610/6670: a 44-byte header, then the picture */
+            memset(dst, 0, CAM_HDR_CAMX);
+            cam_pattern_wh(dst + CAM_HDR_CAMX, w, h, c->frames, fmt, c->rot90);
+            return bytes;
         }
     }
-    cam_pattern_wh(dst, 160, bytes / 320, c->frames, fmt);
+    cam_pattern_wh(dst, 160, bytes / 320, c->frames, fmt, c->rot90);
+    return bytes;
 }

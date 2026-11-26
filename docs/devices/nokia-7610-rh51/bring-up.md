@@ -63,14 +63,14 @@ Everything after that came from the 3230's work: the BlueCore UART bit, the ALS 
 ## State (2026-11-26)
 
 Both phones boot to the S60 home screen and Menu; keys and joystick work. No sound (DevSound answered "ended" at
-once), no network, no camera (the board's camera model is for the 7650/6600/3650/3660 sensors; not tried), time and
-date asked at every boot.
+once), no network, time and date asked at every boot. **Camera** (left softkey): viewfinder test pattern, stills saved
+and shown, on both phones (2026-11-26; H-rh51-camera, H-dct4-selftest-stop; docs/devices/nokia-7650-nhl2/camera.md).
 
 Unanswered ISI at the home screen (6670): TSY `43 07` (x4), `5A 00`, `31 30`, `31 11` (x4), `02 1E`, `02 16`;
 `41 10` (object 0x42), `54 0E` (object 0x59), DSY `09 29 {37}`.
 
 ## Open
 
-- Camera: both phones have one (CIF on the 7610's 1 MP sensor [I]); `camera` is off.
+- Camera: video recording (Camcorder's video mode) not tried; the still's real size (1152x864 sent [I]).
 - The side keys (0xAA in the matrix at row 1, line 1 = F6 [I which key]); the power key (UEM) as on every board here.
 - GPIO interrupts (IrqGPIOnLow/High) are not modelled; H-rh51-joy-ctsi stands in for the joystick's.
