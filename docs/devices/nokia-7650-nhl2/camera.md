@@ -101,8 +101,25 @@ armed, the pattern is written to its destination and the channel completes (`nga
 then the frame-end event, interrupt 86 unless masked. `ngage_mmc.c`: the DMA engine's peer hook (a transfer that
 does not touch the MMC FIFO is offered to the camera). The DMA channel's own interrupt is not raised for it [I].
 
+## Nokia 6600 (2026-11-26)
+
+`-M nokia6600` has the model too (`NgageModel.camera`; no slide): its campdd.pdd drives the same hardware (sensor
+0x3C, 8-bit registers, reads 0..0x9F; CCP block, interrupt 86, buffer 0x0A000000, 0x97000 bytes) [V]. It is not
+usable as shipped: **BTTestServer opens the camera channel (camdrv) at boot** for SelfTestServer's test session
+and keeps it, so CamServerCore's open fails -11 (it reports -19 and panics "CamServerCore panic" 4) and Camera stays
+blank [V run].
+- Ending the session works like the N-Gage's H-ngage-selftest-stop: `reply+ 59 01 01 08 00 media=00 robj=38` in
+  `isi-replies-nhl10.txt` (after DosServer's own 59 01) sends PN_EPOC_TEST msg 1 sub-id 8 to SelfTestServer (object
+  0x38 = isa_if channel 1, table 0x5040f788; dispatcher 0x503586e8, table 0x50358740: 8 -> 0x50357dd0 ->
+  CActiveScheduler::Stop). SelfTestServer and BTTestServer exit, the camera works: viewfinder in RGB444, VGA capture
+  in YUV, JPEG saved under Images [V run].
+- Not enabled: with it the Menu key does nothing until about 120 s after boot (60 s without it): SysAp waits in
+  DosServer function 404 (DSClient 0x50a1aba0, argument 1); the Bluetooth stack starts after BTTestServer frees btldd
+  and looks normal; cause not found. The owner chose the old behaviour (2026-11-26).
+
 ## Open
 
 - Host camera as a source (a later step; the owner asked for a pattern only).
 - Sensor type 2 (the other module) is not exercised; neither are the night mode and the QCIF still size.
-- The 3650/3660 have a camera too (not looked at).
+- The 3650/3660: same receiver, but a sensor at 0x04 with 16-bit registers and JPEG stills from the sensor itself
+  (FF D8 / FF D9 checked in the buffer) [V static].

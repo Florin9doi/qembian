@@ -294,6 +294,44 @@ static void test_isc_defaults_mirror(void)
     assert(out[10] == 0x20 && out[12] == 0x00 && out[13] == 0x01 && out[14] == 0x01);
 }
 
+/* "robj=XX": a reply+ to a third party (another object than the requester), with its own media byte. Resource 7E:
+   used by no table (the tables loaded by earlier tests stay loaded) */
+static void test_reply_plus_robj(void)
+{
+    static const uint8_t req[] = { 0x00, 0x00, 0x00, 0x7e, 0x06, 0x00, 0x00, 0x54, 0x02, 0x01, 0x08, 0x00 };
+
+    load("reply 7E 01 02 00 00\n"
+         "reply+ 7E 01 01 09 09 media=00 robj=38\n");
+    ngage_isi_isa_send(req, sizeof(req));
+    assert(fetch());
+    assert(got[9] == 0x02 && got[6] == 0x54);           /* the reply: to the requester */
+    assert(fetch());
+    assert(got[0] == 0x00 && got[3] == 0x7e && got[6] == 0x38 && got[9] == 0x01);
+    assert(got[8] == 0x02 && got[10] == 0x09 && got[11] == 0x09);
+    assert(!fetch());
+}
+
+/* "media=XX" on an indication: the frame's media byte; without it, the subscription's (01) */
+static void test_ind_media(void)
+{
+    static const uint8_t sub[] = { 0x01, 0x00, 0x00, 0x00, 0x09, 0x00, 0x10, 0x54, 0x00, 0x00,
+                                   0x00, 0x01, 0x15, 0xc0 };
+    int seen = 0;
+
+    load("ind 84 54 7E 01 09 00 media=00\n");
+    ngage_isi_isa_send(sub, sizeof(sub));
+    while (fetch()) {
+        if (got[3] == 0x15) {
+            assert(got[0] == 0x01);
+            seen |= 1;
+        } else if (got[3] == 0x7e) {
+            assert(got[0] == 0x00 && got[6] == 0x54 && got[10] == 0x09);
+            seen |= 2;
+        }
+    }
+    assert(seen == 3);
+}
+
 int main(void)
 {
     shim_log = g_string_new(NULL);
@@ -317,6 +355,8 @@ int main(void)
     test_reply_plus();
     test_isc_channel_open();
     test_isc_defaults_mirror();
+    test_reply_plus_robj();
+    test_ind_media();
     printf("ngage_isi_test: all passed\n");
     return 0;
 }

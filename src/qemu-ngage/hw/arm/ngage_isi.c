@@ -70,6 +70,7 @@ typedef struct {
     uint8_t rq10[4];            /* "rq10": data positions that take the request's byte 10 (N70 ISC channel) */
     uint8_t nrq10;
     int media, sobj;            /* "media=XX", "sobj=XX": override the media byte / sender object; -1 = mirror */
+    int robj;                   /* "robj=XX": another receiver object (a reply+ to a third party); -1 = the requester */
 } NgageIsiReply;
 
 static NgageIsiReply *replies;
@@ -78,6 +79,7 @@ static unsigned nreplies;
 typedef struct {
     uint8_t unit, obj, res, msg, len;
     uint8_t data[64];
+    int media;                  /* "media=XX": the frame's media byte; -1 = the subscription's (ISA path) */
 } NgageIsiInd;
 
 static NgageIsiInd *inds;
@@ -182,7 +184,7 @@ void ngage_isi_open(uint32_t dlc, uint32_t unit)
             if (inds[i].unit == unit) {
                 uint8_t hdr[10] = { 0, 0, 0, inds[i].res, 0, 0, 0, inds[i].obj, 0, 0 };
                 NgageIsiReply r = { .res = inds[i].res, .resp = inds[i].msg, .len = inds[i].len,
-                                    .media = -1, .sobj = -1 };
+                                    .media = inds[i].media, .sobj = -1, .robj = -1 };
 
                 memcpy(r.data, inds[i].data, inds[i].len);
                 enqueue(c, hdr, sizeof(hdr), &r);
@@ -256,7 +258,7 @@ void ngage_isi_load(const char *path)
     for (char **l = lines; *l; l++) {
         char *h = strchr(*l, '#');
         g_auto(GStrv) t = NULL;
-        NgageIsiReply r = { .sub = -1, .media = -1, .sobj = -1 };
+        NgageIsiReply r = { .sub = -1, .media = -1, .sobj = -1, .robj = -1 };
         unsigned k = 0, pad = 0;
 
         if (h) {
@@ -264,11 +266,15 @@ void ngage_isi_load(const char *path)
         }
         t = g_strsplit_set(g_strstrip(*l), " \t", -1);
         if (t[0] && !strcmp(t[0], "ind")) {
-            NgageIsiInd in = { 0 };
+            NgageIsiInd in = { .media = -1 };
             unsigned j = 0;
 
             for (char **w = t + 1; *w; w++) {
                 if (!**w) {
+                    continue;
+                }
+                if (!strncmp(*w, "media=", 6)) {
+                    in.media = strtoul(*w + 6, NULL, 16);
                     continue;
                 }
                 unsigned v = strtoul(*w, NULL, j == 0 ? 10 : 16);    /* the unit is decimal */
@@ -317,6 +323,10 @@ void ngage_isi_load(const char *path)
             }
             if (!strncmp(*w, "sobj=", 5)) {
                 r.sobj = strtoul(*w + 5, NULL, 16);
+                continue;
+            }
+            if (!strncmp(*w, "robj=", 5)) {
+                r.robj = strtoul(*w + 5, NULL, 16);
                 continue;
             }
             if (!strcmp(*w, "rq10") && k >= 3 && r.len < sizeof(r.data) && r.nrq10 < sizeof(r.rq10)) {
@@ -384,6 +394,9 @@ static void enqueue(NgageIsiChan *c, const uint8_t *req, uint32_t reqlen, const 
     if (c == &isa_chan && r->sobj >= 0) {
         m->b[7] = r->sobj;
     }
+    if (c == &isa_chan && r->robj >= 0) {
+        m->b[6] = r->robj;
+    }
     for (unsigned i = 0; i < r->nrq10; i++) {
         m->b[10 + r->rq10[i]] = reqlen > 10 ? req[10] : 0;
     }
@@ -438,7 +451,7 @@ static void on_send(NgageIsiChan *c, unsigned unit, const uint8_t *b, uint32_t l
                     /* as if the subscriber had asked: the reply swaps devices and objects */
                     uint8_t hdr[10] = { b[0], b[1], b[2], inds[i].res, 0, 0, b[6], inds[i].obj, 0, 0 };
                     NgageIsiReply ir = { .res = inds[i].res, .resp = inds[i].msg, .len = inds[i].len,
-                                         .media = -1, .sobj = -1 };
+                                         .media = inds[i].media, .sobj = -1, .robj = -1 };
 
                     memcpy(ir.data, inds[i].data, inds[i].len);
                     enqueue(c, hdr, sizeof(hdr), &ir);

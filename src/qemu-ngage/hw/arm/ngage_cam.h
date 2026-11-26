@@ -13,15 +13,17 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/* the camera buffer: the variant's hardware chunk at SDRAM physical 0x0A000000, 0x96000 bytes (ecust 0x5032fcd0) [V] */
+/* the camera buffer: the variant's hardware chunk at SDRAM physical 0x0A000000, 0x96000 bytes on the 7650 (ecust
+   0x5032fcd0), 0x97000 on the 6600 (0x5033a0d8) and the 3650/3660 [V] */
 #define CAM_BUF_PHYS      0x0a000000
-#define CAM_BUF_SIZE      0x96000
+#define CAM_BUF_SIZE      0x97000
 
 /* the sensor's I2C bus: two open-drain lines on the GPIO port 0x0C150200 [V camerapdd 0x503d6b98-0x503d6c04] */
 #define CAM_GPIO_SCL      0x0080    /* 0x0C15020C (input) / 0x0C150210 (1 = pull low) */
 #define CAM_GPIO_SDA      0x0100
 #define CAM_I2C_ADDR      0x3c      /* camerapdd sends 0x78 (write) / 0x79 (read) [V] */
-#define CAM_NREGS         0x80      /* camerapdd reads registers 0..0x7F at power-up [V 0x503d749c] */
+#define CAM_NREGS         0x100     /* 8-bit register numbers: the 7650's camerapdd reads 0..0x7F at power-up
+                                       [V 0x503d749c], the 6600's campdd 0..0x9F [V 0x503e0bf8] */
 
 /* CCP receiver, physical 0x0C121000 (registers +0x00..+0x3C) [V camerapdd + its mode table 0x503d8780] */
 #define CAM_CCP_BASE      0x0c121000

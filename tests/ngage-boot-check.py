@@ -24,7 +24,7 @@ closely enough. References are firmware on screen: build/evidence/<model>/boot-r
     --fresh: "Locked" in the title, the idle area unpainted). Cause: the view server killed Phone.app
     (ViewSrv 11) while the start-up time query, shown on every boot because the clock is never
     valid, stayed up; answering it at once avoids it, which is what this check does.
-  --camera (7650): after the time query, OK twice, Camera (left softkey): the viewfinder must show the board's
+  --camera (7650; 6600 with --idle, no slide: fails while BTTestServer holds the camera, docs camera.md): after the time query, OK twice, Camera (left softkey): the viewfinder must show the board's
     test pattern (ngage_cam.c: eight colour bars), the slide closed (qom-set slide-closed) must stop it ("Open
     cover") and opening it must bring it back. Regressions "viewfinder_colours_wrong" (the viewfinder is 0x0RGB
     4444, not YUV: white came out cyan) and "camera_open_cover" (the slide line read closed: "Open cover" for ever).
@@ -143,17 +143,19 @@ def slide(sess, closed):
     ns.Qmp(sess[-1]).cmd('qom-set', path='/machine', property='slide-closed', value=closed)
 
 
-def camera(sess, tmp):
-    """Camera from the idle screen; returns the right viewfinder bars: open, with the slide closed, reopened"""
-    to_idle(sess, tmp)
+def camera(sess, tmp, idle_done=False, has_slide=True):
+    """Camera (left softkey) from the idle screen; returns the right viewfinder bars: open, then (7650) with the
+    slide closed and reopened"""
+    if not idle_done:
+        to_idle(sess, tmp)
     key(sess, 'f1', 0.6)
     res = []
-    for step in ('open', 'closed', 'reopened'):
+    for step in ('open', 'closed', 'reopened') if has_slide else ('open',):
         if step == 'closed':
             slide(sess, True)
         elif step == 'reopened':
             slide(sess, False)
-        n, end = 0, time.time() + 25
+        n, end = 0, time.time() + 40
         while time.time() < end:
             time.sleep(2)
             p = tmp / ('camera-%s.png' % step)
@@ -249,14 +251,23 @@ def idle_main(a, SESS, REF):
     subprocess.run(SESS + ['stop'], capture_output=True)
     subprocess.run(SESS + ['start', '--model', a.model, '--flash', str(fl)], check=True,
                    capture_output=True)
+    cam = None
     try:
         n, m = restart_idle(SESS, tmp, REF, a.secs)
+        if a.camera:
+            key(SESS, 'f2', 0.4)                # leave the menu restart_idle opened
+            time.sleep(3)
+            cam = camera(SESS, tmp, idle_done=True, has_slide=a.model == 'nokia7650')
         st = subprocess.run(SESS + ['status'], capture_output=True, text=True).stdout
     finally:
         subprocess.run(SESS + ['stop'], capture_output=True)
     ok = n > 100 and m > 5.0 and '"frozen"' not in st
     print('%s idle check: %s (wallpaper area: %d colours, need > 100; Menu changed the screen by %.1f, '
           'need > 5; shots in %s)' % (a.model, 'PASS' if ok else 'FAIL', n, m, tmp))
+    if a.camera:
+        cok = cam is not None and cam[0] == 8 and (len(cam) == 1 or (cam[1] < 4 and cam[2] == 8))
+        print('%s camera check: %s (viewfinder bars right: %s)' % (a.model, 'PASS' if cok else 'FAIL', cam))
+        ok = ok and cok
     return 0 if ok else 1
 
 

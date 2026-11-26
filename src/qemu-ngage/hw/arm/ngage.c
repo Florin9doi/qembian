@@ -107,7 +107,8 @@ typedef struct {
                                        finds a valid clock (H-nhl10-rtc) */
     uint32_t md5_entries[2];        /* ROM offsets of the bootstrap's digest entries (H-ngage-md5);
                                        0 = the N-Gage's 0x8F00 / 0x8F18 */
-    bool camera;                    /* the 7650's camera (ngage_cam.c) and keypad slide */
+    bool camera;                    /* the camera (ngage_cam.c): 7650, 6600 */
+    bool slide;                     /* the 7650's keypad slide (the camera lens is behind it) */
 } NgageModel;
 
 static const NgageModel *ngm;
@@ -506,7 +507,7 @@ static void ngage_cam_frame(void *opaque)
 static bool ngage_cam_dma_start(void *opaque, int ch, uint32_t src, uint32_t dst, uint32_t bytes)
 {
     if ((src & 0x00ffffff) != (CAM_CCP_FIFO & 0x00ffffff) || (src >> 24 != 0x10 && src >> 24 != 0x0c) ||
-        !bytes || bytes > 640 * 480 * 2 ||
+        !bytes || bytes > CAM_BUF_SIZE ||
         !address_space_access_valid(&address_space_memory, dst, bytes, true, MEMTXATTRS_UNSPECIFIED)) {
         return false;
     }
@@ -585,7 +586,9 @@ static void ngage_cam_setup(MemoryRegion *sys, qemu_irq irq)
     memory_region_add_subregion(sys, CAM_CCP_BASE, &mr);
     ngage_dma_set_peer(&peer);
     ngage_keys_gpio_peer(ngage_cam_lines, ngage_cam_drive, NULL);
-    ngage_keys_slide(true, ngage_slide_closed);
+    if (ngm->slide) {
+        ngage_keys_slide(true, ngage_slide_closed);
+    }
 }
 
 /* ---- interrupt controller (Q16) ---------------------------------------- */
@@ -1788,6 +1791,7 @@ static const NgageModel ngage_nhl2 = {
      * 0x50009000-0x50EF9FFF, stored digest wrong as on the N-Gage) and halts at 0x2A84 [V] */
     .md5_entries = { 0x7fd0, 0x7fe8 },
     .camera = true,
+    .slide = true,
 };
 
 /*
@@ -1854,6 +1858,7 @@ static const uint32_t ngage_nhl10_nos_exports[][2] = {
 static const NgageModel ngage_nhl10 = {
     .name = "nokia6600",
     .uem_rtc = true,
+    .camera = true,                     /* campdd.pdd: the 7650's hardware, sensor at 0x3C (docs/.../camera.md) */
     .nchips = 4,
     .rom_map = { { 0, 0x00800000, 0 }, { 0x00800000, 0x00700000, 2 }, { 0x00f00000, 0x00800000, 3 } },
     .nrom_map = 3,
@@ -2023,7 +2028,7 @@ static void ngage_init(MachineState *machine)
         ngage_lprf_setup();                                 /* Bluetooth, CBus dev 5, CTSI 2 */
         ngage_mmc_init(sys, in, ngage_mmc_file);            /* MMC 21-24, DMA channels 6.. [I] */
         if (ngm->camera) {
-            ngage_cam_setup(sys, in[CAM_IRQ]);              /* 7650: camera (IrqCCPStatus) + slide */
+            ngage_cam_setup(sys, in[CAM_IRQ]);              /* 7650, 6600: camera (IrqCCPStatus) */
         }
         memory_region_init_io(&t->mr, NULL, &ngage_timer_ops, t, "ngage.timers",
                               0x20 * NGAGE_TIMERS);

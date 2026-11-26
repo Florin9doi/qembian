@@ -148,10 +148,12 @@ static void test_write_read(void)
     uint8_t r[3];
     reset();
     assert(write_reg(0x03, 0x18) == 0);
-    assert(write_reg(0x7f, 0xa5) == 0);
+    assert(write_reg(0xff, 0xa5) == 0);
+    assert(write_reg(0x9f, 0x5a) == 0);               /* the 6600's campdd reads 0..0x9F */
     assert(read_regs(0x03, r, 1) == 0 && r[0] == 0x18);
-    assert(read_regs(0x7e, r, 3) == 0);
-    assert(r[1] == 0xa5 && r[2] == cam.regs[0]);     /* wraps at 0x80 */
+    assert(read_regs(0x9f, r, 1) == 0 && r[0] == 0x5a);
+    assert(read_regs(0xfe, r, 3) == 0);
+    assert(r[1] == 0xa5 && r[2] == cam.regs[0]);     /* wraps at 0x100 */
     /* multi-byte write */
     assert(start() == 0 && put(0x78) == 0 && put(0x10) == 0 && put(0x11) == 0 && put(0x22) == 0 && stop() == 0);
     assert(cam.regs[0x10] == 0x11 && cam.regs[0x11] == 0x22);
