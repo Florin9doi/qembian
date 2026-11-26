@@ -14,10 +14,18 @@
 #define P910_SRAM_BASE 0x68000000
 #define P910_SRAM_SIZE (64 * KiB)
 
-/* one phone on this board: the P910i, or the P800 (UIQ 2.0; same SoC, NOR instead of DiskOnChip) */
+/*
+ * One phone on this board: the P910i, the P900 or the P800 (same SoC; the P800 has NOR instead of
+ * DiskOnChip, the P800 and P900 the older display driver, videodriver.dll).
+ */
 typedef struct {
-    const char *machine;            /* "p910i", "p800" */
+    const char *machine;            /* "p910i", "p900", "p800" */
     bool doc;                       /* DiskOnChip window at 0xB0000000 (p910i_soc.c doc_init) */
+    uint32_t doc_dispatch;          /* udiskonchip's TrueFFS dispatcher (H-p910-doc stand-in goes here) */
+    uint32_t doc_filter;            /* TrueFFS FAT filter, made to return 0 */
+    uint32_t doc_exit;              /* flExit-like destructor call, made to return 0 */
+    bool rgb444;                    /* frame buffer is 12-bit RGB444 in 16 (EColor4K), else RGB565 */
+    bool dma_late;                  /* videodriver.dll: a DMA channel finishes 2 ms after enable (H-p800-dma) */
 } P910Phone;
 extern const P910Phone *p910_phone;
 

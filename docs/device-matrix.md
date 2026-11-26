@@ -103,6 +103,7 @@ instance's `[overrides.sim]`).
 | 9500 Communicator (RA-2, `-M nokia9500`, QEMU's OMAP1510, EKA1) | S80 2nd / Symbian 7.0s | both screens: the cover idle screen (wallpaper, clock, indicators) and the inner 640x200 S80 UI; lock code, first-start wizard (language, time/date, contact card), Desk running (2026-11-18) | OMAP LCD controller (inner, console 0) + the cover panel on Microwire (console 1) | audio path runs without a DSP, no sound | XBUS link to a modem peer, ISI table (SIM, lock code, language list) | the lid is a real switch on the keyboard controller (I2C); QWERTY, command buttons and cover keypad (docs/devices/nokia-9500-ra2/bring-up.md) |
 | 7710 (RM-12 V4.10.0, `-M nokia7710`, the 9500's OMAP1510 board, EKA1) | Series 90 / Symbian 7.0s | the S90 Desk after the first-boot touch calibration and Setup wizard (2026-11-18); touch (mouse = pen) and the 5-way and hardware keys | OMAP LCD controller, 640x320 | audio path without a DSP (the 9500's patches, relocated), no sound | XBUS link, ISI table seeded from the 9500's; no network | the only S90 phone; the 9500's board with a per-phone description; C: kept per phone (`flash=`) (docs/devices/nokia-7710-rm12/bring-up.md, how-it-was-done.md) |
 | P800 (SE-P800 R2D02, `-M p800`, the P910i's board, EKA1) | UIQ 2.0 / Symbian 7.0 | the UIQ home screen (Applications launcher) after the set up wizard and the start-up Power menu; settings kept across boots (2026-11-19) | the P910i's video RAM path, 12-bit RGB444 | silent | the P910i's OSE peer with the P800's reply numbers | the first UIQ phone; same SoC as the P910i, NOR + LFFS instead of DiskOnChip (docs/devices/se-p800/bring-up.md, how-it-was-done.md) |
+| P900 (SE-P900 R5B02, `-M p900`, the P910i's board, EKA1) | UIQ 2.1 / Symbian 7.0 | the UIQ home screen (Applications launcher) after the Language dialog, set up wizard and the start-up Power menu; C: kept across boots (2026-11-27) | the P910i's video RAM path, RGB565; the P800's late DMA completion | silent | the P910i's OSE peer and reply table | the P910i's DiskOnChip with the stand-in at the P900's addresses, 16 MB RAM (docs/devices/se-p900/bring-up.md) |
 | P910i (SE-P910i R5B01, `-M p910i`, its own PNX4000 board, EKA1) | UIQ 2.1 / Symbian 7.0 | the UIQ home screen (Applications launcher) after the Language dialog, set up wizard (calibration, flip keyboard, location, time) and the start-up Power menu (2026-11-18) | the video RAM (208x320 RGB565) behind the panel chip and LCD FIFO | silent (I2C codec writes complete, no PCM) | OSE peer on the GSM link with a reply table: StartSignal, SIM present (empty SIM files), emergency numbers, battery 100 %; no network | first non-Nokia EKA1 phone and first board without a datasheet; touch and keypad panels, jog dial, flip as GPIO pins; "Disk corrupt D:" (Memory Stick) at each boot (docs/devices/se-p910i/bring-up.md, how-it-was-done.md) |
 
 Values from `models/<id>/device.toml` unless noted ([bring-up] = the device's notes under
@@ -167,6 +168,7 @@ sydb): `eka1/tools/ngage_phone.py --model M` is the window, `eka1/tools/ngage_se
 | 9500 (RA-2) | `nokia9500` (QEMU OMAP310/1510 + patches 0003-0017) | DiskOnChip: TrueFFS API stand-in | XBUS peer + ISI table | inner LCD + cover panel (two consoles) | both screens, wizard, Desk |
 | 7710 (RM-12) | `nokia7710` (the 9500's board + patch 0019) | DiskOnChip: the 9500's TrueFFS API stand-in; C: kept | XBUS peer + ISI table | OMAP LCD 640x320 | S90 Desk, touch, keys |
 | P800 (R2D02) | `p800` (the P910i's board) | NOR with LFFS: our StrataFlash model under the phone's medint.pdd | OSE peer + reply table | video RAM, RGB444 | UIQ home screen |
+| P900 (R5B02) | `p900` (the P910i's board) | DiskOnChip: the P910i's TrueFFS dispatcher stand-in; C: kept | OSE peer + reply table | video RAM, RGB565 | UIQ home screen |
 | P910i (R5B01) | `p910i` (PNX4000 from the phone's code) | DiskOnChip: TrueFFS dispatcher stand-in; NOR (Z:, ROLF A:) | OSE peer + reply table | video RAM | UIQ home screen |
 
 Method notes for the next one: docs/eka1-ngage.md (tools), docs/devices/se-p910i/how-it-was-done.md (a board
@@ -193,7 +195,7 @@ cheapest next steps in section 3.
 
 | Axis | Covered | Not covered |
 |---|---|---|
-| Platform release | 3rd (9.1), FP1 (9.2), FP2 (9.3), 5th (9.4), ^3 PR1.0, ^3 PR1.1, Anna, Belle Refresh, Belle FP2; UIQ 3.0 (P1i, P990i); EKA1: S60 1.x / 6.1 (N-Gage QD, 7650), S60 2nd / 7.0s (6600), S80 2nd / 7.0s (9500), UIQ 2.1 / 7.0 (P910i), UIQ 2.0 / 7.0 (P800), S80 1st / 6.0 (9210), S60 2nd FP1 / 7.0s (3230), FP2 / 8.0a (6630), FP3 / 8.1a (N70), S90 / 7.0s (7710) | ^3 PR1.2, Belle, Belle FP1; UIQ 3.1/3.3; EKA1: none (Symbian 6.0 = S80 1st since the 9210, 2026-11-20) |
+| Platform release | 3rd (9.1), FP1 (9.2), FP2 (9.3), 5th (9.4), ^3 PR1.0, ^3 PR1.1, Anna, Belle Refresh, Belle FP2; UIQ 3.0 (P1i, P990i); EKA1: S60 1.x / 6.1 (N-Gage QD, 7650), S60 2nd / 7.0s (6600), S80 2nd / 7.0s (9500), UIQ 2.1 / 7.0 (P910i, P900), UIQ 2.0 / 7.0 (P800), S80 1st / 6.0 (9210), S60 2nd FP1 / 7.0s (3230), FP2 / 8.0a (6630), FP3 / 8.1a (N70), S90 / 7.0s (7710) | ^3 PR1.2, Belle, Belle FP1; UIQ 3.1/3.3; EKA1: none (Symbian 6.0 = S80 1st since the 9210, 2026-11-20) |
 | Memory model | moving, multiple, flexible | - |
 | CPU | ARM926, ARM1136, ARM1176 | Cortex-A8 (non-Nokia S60 only; optional) |
 | SoC family | OMAP1710, OMAP2420, RAPIDO, RAPIDO + BCM2727, BCM2763 (701, 808), PNX4008 (P1i/P990i, our kernel); EKA1 boards: DCT4 UPP (N-Gage QD, 7650, 6600), OMAP1510 (9500, 7710, QEMU's model), OMAP1610 (6630) and OMAP1710 (N70) on QEMU's 1510 + patches, PNX4000 (P910i, modelled from its code) | [unverified] Freescale (E71/6120c class) |
@@ -267,6 +269,8 @@ Tested device (the reference) and the phones that work today (2026-11-18; detail
     hardware keys, C: kept per phone (`docs/devices/nokia-7710-rm12/bring-up.md`, `how-it-was-done.md`).
   - **Sony Ericsson P800** (UIQ 2.0 / Symbian 7.0, the first UIQ phone, `--model p800`, the P910i's board): the
     UIQ home screen after the set up wizard; the pen, settings kept across boots (`docs/devices/se-p800/bring-up.md`).
+  - **Sony Ericsson P900** (UIQ 2.1 / Symbian 7.0, `--model p900`, the P910i's board): the UIQ home screen after
+    the Language dialog and set up wizard; the pen, C: kept across boots (`docs/devices/se-p900/bring-up.md`).
   - **Sony Ericsson P910i** (UIQ 2.1 / Symbian 7.0, `--model p910i`, a Philips PNX4000 board modelled from the
     phone's own code: no datasheet exists): the UIQ home screen after the set up wizard and the Power menu; the
     mouse is the pen, the flip is a switch, a fake GSM side (Ericsson OSE protocol) with a SIM and a full battery,

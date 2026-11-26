@@ -30,7 +30,7 @@ import ngage_phone as np_  # noqa: E402  (the key maps and titles; nothing runs 
 from PyQt6 import QtCore, QtGui, QtWidgets
 Qt = QtCore.Qt
 
-TOUCH = ('p910i', 'p800', 'nokia7710')
+TOUCH = ('p910i', 'p900', 'p800', 'nokia7710')
 # model -> (QMP property, label when it is True, label when False) of its switch
 SWITCHES = {'nokia7650': ('slide-closed', 'Open slide', 'Close slide'),
             'p910i': ('flip-closed', 'Open flip', 'Close flip')}
@@ -41,7 +41,7 @@ for _m in np_.COMMUNICATORS:
 def model_config(model, scale):
     """The displays ((label, screendump args, size, scale) list) and host key map of a model, as ngage_phone.py."""
     half = max(1, scale // 2 + scale % 2)
-    if model in ('p910i', 'p800'):
+    if model in ('p910i', 'p900', 'p800'):
         return [('screen', {}, (208, 320), scale)], np_.P910_KEYS
     if model == 'nokia7710':
         return [('screen', {}, (640, 320), half)], np_.RM12_KEYS

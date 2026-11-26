@@ -30,7 +30,9 @@ class Display(unittest.TestCase):
         finished inside the Config write was dropped and popcorn waited for ever. The P800 finishes
         later from a timer; the P910i keeps finishing at once."""
         run = body(HW / 'p910i_lcd.c', 'static void dma_run(P910Lcd *l, int n)')
-        self.assertIn('if (!p910_phone->doc)', run)
+        self.assertIn('if (p910_phone->dma_late)', run)
+        board = (HW / 'p910i.c').read_text()
+        self.assertRegex(board, r'p910_phone_p800 = \{[^}]*\.rgb444 = true, \.dma_late = true')
         self.assertIn('timer_mod(l->dma_timer', run)
         # the immediate path (P910i) still disables the channel and raises terminal count
         tail = run.split('return;', 1)[1]

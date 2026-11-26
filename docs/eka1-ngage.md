@@ -19,7 +19,8 @@ values are an `NgageModel` in `ngage.c`; the tools take `--model nokia6600`. Its
 The EKA1 tree also holds boards of their own: the **Nokia 9500 Communicator** (`-M nokia9500`, QEMU's
 OMAP1510: [devices/nokia-9500-ra2/bring-up.md](devices/nokia-9500-ra2/bring-up.md)), the **Nokia 7710** (`-M nokia7710`,
 the same board, S90 Desk: [devices/nokia-7710-rm12/bring-up.md](devices/nokia-7710-rm12/bring-up.md)), the **Sony Ericsson P800**
-(`-M p800`, the P910i's board, UIQ 2.0 home screen: [devices/se-p800/bring-up.md](devices/se-p800/bring-up.md)) and the **Sony Ericsson
+(`-M p800`, the P910i's board, UIQ 2.0 home screen: [devices/se-p800/bring-up.md](devices/se-p800/bring-up.md)), the **Sony Ericsson P900**
+(`-M p900`, the P910i's board, UIQ 2.1 home screen: [devices/se-p900/bring-up.md](devices/se-p900/bring-up.md)) and the **Sony Ericsson
 P910i** (`-M p910i`, a PNX4000 board modelled from the phone's code, UIQ 2.1 home screen:
 [devices/se-p910i/bring-up.md](devices/se-p910i/bring-up.md)). All eight phones (+ the 3230, `-M nokia3230`: [devices/nokia-3230-rm51/bring-up.md](devices/nokia-3230-rm51/bring-up.md), the 7610 and 6670, `-M nokia7610` / `nokia6670`: [devices/nokia-7610-rh51/bring-up.md](devices/nokia-7610-rh51/bring-up.md), the 6260, `-M nokia6260`: [devices/nokia-6260-rm25/bring-up.md](devices/nokia-6260-rm25/bring-up.md), and the 6630, `-M nokia6630`, S60 FP2 on an OMAP1610: [devices/nokia-6630-rm1/bring-up.md](devices/nokia-6630-rm1/bring-up.md), and the N70, `-M nokian70`, S60 FP3 on the 6630's board: [devices/nokia-n70-rm84/bring-up.md](devices/nokia-n70-rm84/bring-up.md) (its relinked sibling the N72, `-M nokian72`: [devices/nokia-n72-rm180/bring-up.md](devices/nokia-n72-rm180/bring-up.md)), and the 9210 Communicator, `-M nokia9210`, Symbian 6.0 on its own board: [devices/nokia-9210-rae3/bring-up.md](devices/nokia-9210-rae3/bring-up.md)): `docs/device-matrix.md` 2.2b.
 

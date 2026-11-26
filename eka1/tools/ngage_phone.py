@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""ngage_phone: an emulator window for the virtual EKA1 phones (N-Gage, N-Gage QD, 6600, 7650, 3230, 6630, 7710, 9500, P800, P910i; like `sydb phone`).
+"""ngage_phone: an emulator window for the virtual EKA1 phones (N-Gage, N-Gage QD, 6600, 7650, 3230, 6630, 7710, 9500, P800, P900, P910i; like `sydb phone`).
 
-  python3 eka1/tools/ngage_phone.py [--model ngage|ngageqd|nokia6600|nokia7650|nokia7710|nokia9500|p910i] [--phone NAME] [--fresh]
+  python3 eka1/tools/ngage_phone.py [--model ngage|ngageqd|nokia6600|nokia7650|nokia7710|nokia9500|p800|p900|p910i] [--phone NAME] [--fresh]
                                     [--scale 2] [--keep] [--irda a|b|CHARDEV]
 
 --model picks the phone (default ngage = N-Gage, NEM-4; ngageqd = N-Gage QD; nokia6600 = Nokia 6600, -M nokia6600); --phone
@@ -39,6 +39,7 @@ The phone keeps its flash (C:, settings) in build/ngage/phones/NAME.flash betwee
   pads: with the flip closed 0-9, * and # (or \\), F1-F4 the keys above the digits; with it open the
   QWERTY letters, Backspace, Enter, Space, Shift, comma, period; F5-F7 the corner pads, Enter =
   Confirm, Up/Down = the jog dial, F8 = the side key (p910i_input.c; key names partly [I]).
+  The P800 and P900: the same screen and pen, the same buttons, no Flip button yet.
 - Nokia 7710: one 640x320 touch screen; the mouse is the pen (pressed = touching). Keys
   (nokia7710_input.c, names partly [I]): arrows + Enter = the 5-way key, F1 = Menu, F2 or Home = Desk,
   F3 = call, F4 = end, Esc or Backspace = back, F5-F7 = the other hardware keys. C: is kept in
@@ -82,7 +83,7 @@ TITLES = {'nokia7650': 'Nokia 7650', 'nokia3650': 'Nokia 3650', 'nokia3660': 'No
           'nokian70': 'Nokia N70', 'nokian72': 'Nokia N72', 'nokian90': 'Nokia N90',
           'nokia9210': 'Nokia 9210 Communicator', 'nokia9210i': 'Nokia 9210i Communicator',
           'nokia9300': 'Nokia 9300', 'nokia9300i': 'Nokia 9300i', 'nokia9500': 'Nokia 9500 Communicator',
-          'nokia7710': 'Nokia 7710', 'p800': 'Sony Ericsson P800', 'p910i': 'Sony Ericsson P910i'}
+          'nokia7710': 'Nokia 7710', 'p800': 'Sony Ericsson P800', 'p900': 'Sony Ericsson P900', 'p910i': 'Sony Ericsson P910i'}
 
 # the clamshell Communicators (cover panel, lid, QWERTY): the 9300 and the 9500
 COMMUNICATORS = ('nokia9300', 'nokia9300i', 'nokia9500')
@@ -166,7 +167,7 @@ class Phone(QtWidgets.QWidget):
         self.setWindowTitle('%s (%s, session %s)' % (TITLES.get(model, model), model, session))
         lay = QtWidgets.QVBoxLayout(self)
         # (label, QMP screendump arguments, size in phone pixels, scale)
-        if model in ('p910i', 'p800'):
+        if model in ('p910i', 'p900', 'p800'):
             self.views = [('screen', {}, (208, 320), scale)]
             self.host_keys = P910_KEYS
         elif model == 'nokia7710':
@@ -209,7 +210,7 @@ class Phone(QtWidgets.QWidget):
             self.lid.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             self.lid.clicked.connect(self.toggle_lid)
             lay.addWidget(self.lid)
-        if model in ('nokia7710', 'p800'):
+        if model in ('nokia7710', 'p800', 'p900'):
             self.labels[0].installEventFilter(self)       # the pen
         if model == 'p910i':
             self.flip = QtWidgets.QPushButton('Close flip')
@@ -219,7 +220,7 @@ class Phone(QtWidgets.QWidget):
             self.labels[0].installEventFilter(self)       # the pen
         rows = {'nokia9210': RAE3_BUTTONS, 'nokia9210i': RAE3_BUTTONS,
                 'nokia9300': RA2_BUTTONS, 'nokia9300i': RA2_BUTTONS, 'nokia9500': RA2_BUTTONS,
-                'p800': P910_BUTTONS, 'p910i': P910_BUTTONS, 'nokia7710': RM12_BUTTONS,
+                'p800': P910_BUTTONS, 'p900': P910_BUTTONS, 'p910i': P910_BUTTONS, 'nokia7710': RM12_BUTTONS,
                 'nokia6630': RM1_BUTTONS, 'nokia6680': RM1_BUTTONS,
                 'nokian70': RM84_BUTTONS, 'nokian72': RM84_BUTTONS, 'nokian90': RM84_BUTTONS,
                 }.get(model, KEY_ROWS)
@@ -344,7 +345,7 @@ def main():
     ap.add_argument('--scale', type=int, default=2)
     ap.add_argument('--model', default='ngage', choices=sorted(TITLES),
                     help='which phone model (ngage = N-Gage, ngageqd = N-Gage QD, nokia6600 = Nokia 6600, nokia7650 = Nokia 7650, '
-                         'nokia9500 = Nokia 9500 Communicator, p910i = Sony Ericsson P910i, nokia7710 = Nokia 7710, p800 = Sony Ericsson P800, nokia3230 = Nokia 3230, nokia7610 = Nokia 7610, nokia6670 = Nokia 6670, nokia6260 = Nokia 6260)')
+                         'nokia9500 = Nokia 9500 Communicator, p910i = Sony Ericsson P910i, nokia7710 = Nokia 7710, p800 = Sony Ericsson P800, p900 = Sony Ericsson P900, nokia3230 = Nokia 3230, nokia7610 = Nokia 7610, nokia6670 = Nokia 6670, nokia6260 = Nokia 6260)')
     ap.add_argument('--phone', help="which phone (its flash file); default: the model's name")
     ap.add_argument('--mmc', default='', help='memory card image (E:), made with eka1/tools/ngage_card.py')
     ap.add_argument('--irda', default='', help='Nokia 6600 infrared: "a" or "b" joins two phones (one each), or a QEMU '

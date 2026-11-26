@@ -69,7 +69,8 @@ class DocStandin(unittest.TestCase):
     def test_board_checks_old_code(self):
         board = (ARM / 'p910i.c').read_text()
         self.assertIn('memcmp(p, old, oldlen)', board)
-        self.assertIn('p910_doc_standin(memory_region_get_ram_ptr(flash))', board)
+        self.assertIn('p910_doc_standin(memory_region_get_ram_ptr(flash), ph)', board)
+        self.assertIn('.doc_dispatch = 0x500a27c4, .doc_filter = 0x500a4868, .doc_exit = 0x500a31d8', board)
 
 
 class Soc(unittest.TestCase):
@@ -179,6 +180,23 @@ class Display(unittest.TestCase):
         l = (ARM / 'p910i_lcd.c').read_text()
         self.assertIn('c[4] &= ~1u;', l)
         self.assertIn('l->tc_raw |= 1u << n;', l)
+
+
+C_IMG = REPO / 'eka1/p910i/c.img'
+
+
+class FactoryC(unittest.TestCase):
+    @unittest.skipUnless(C_IMG.exists(), 'eka1/p910i/c.img not extracted')
+    def test_c_img_shifted_by_three_bytes(self):
+        """The P910i stopped booting: c.img had lost its first 3 bytes (the FAT jump E9 00 90), so its size
+        was no longer whole sectors and doc_init() exited with "cannot load C:" before the first instruction."""
+        size = C_IMG.stat().st_size
+        self.assertEqual(size % 512, 0, 'c.img is not a whole number of sectors')
+        with open(C_IMG, 'rb') as f:
+            boot = f.read(512)
+        self.assertEqual(boot[3:11], b'EPOC\0\0\0\0', 'the OEM name is not at offset 3: bytes lost at the start')
+        self.assertEqual(boot[0], 0xE9, 'no boot jump at offset 0')
+        self.assertEqual(boot[0x36:0x3B], b'FAT16')
 
 
 if __name__ == '__main__':

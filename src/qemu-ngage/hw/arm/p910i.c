@@ -1,5 +1,6 @@
 /*
- * Sony Ericsson P910i (UIQ 2.1, Symbian 7.0 / EKA1, Philips Nexperia PNX4000) bring-up board: -M p910i.
+ * Sony Ericsson P910i (UIQ 2.1, Symbian 7.0 / EKA1, Philips Nexperia PNX4000) bring-up board: -M p910i; the P900
+ * (-M p900) and P800 (-M p800) run on it with their own P910Phone description.
  * docs/devices/se-p910i/bring-up.md has the evidence for every value here; the SoC map is
  * docs/research/p910i-soc-map.md.
  *
@@ -41,9 +42,20 @@
 
 static char *p910_dir;              /* -M p910i,ppm=DIR */
 
-static const P910Phone p910_phone_p910i = { .machine = "p910i", .doc = true };
+static const P910Phone p910_phone_p910i = {
+    .machine = "p910i", .doc = true,
+    .doc_dispatch = 0x500a27c4, .doc_filter = 0x500a4868, .doc_exit = 0x500a31d8,
+};
+/* Sony Ericsson P900 (UIQ 2.1): docs/devices/se-p900/bring-up.md */
+static const P910Phone p910_phone_p900 = {
+    .machine = "p900", .doc = true,
+    /* the P910i's udiskonchip code found in the P900 ROM: dispatcher 32/32 bytes, filter 24/24 [V],
+     * exit the same prologue and body shape [I] */
+    .doc_dispatch = 0x500a1678, .doc_filter = 0x500a376c, .doc_exit = 0x500a2084,
+    .dma_late = true,
+};
 /* Sony Ericsson P800 (UIQ 2.0): docs/devices/se-p800/bring-up.md */
-static const P910Phone p910_phone_p800 = { .machine = "p800", .doc = false };
+static const P910Phone p910_phone_p800 = { .machine = "p800", .doc = false, .rgb444 = true, .dma_late = true };
 const P910Phone *p910_phone = &p910_phone_p910i;
 static char *p910_isi;              /* -M p910i,isi=FILE (the modem's reply table) */
 static char *p910_flash;            /* flash=FILE: the P910i's C: / the P800's NOR image, kept across boots */
@@ -175,12 +187,12 @@ bool p910_patch(uint8_t *nor, uint32_t va, const void *old, size_t oldlen, const
 }
 
 /*
- * H-p910-doc: udiskonchip.dll's TrueFFS dispatcher (0x500A27C4) -> doc_standin_p910.S, which takes
+ * H-p910-doc: udiskonchip.dll's TrueFFS dispatcher (P910i 0x500A27C4, P900 0x500A1678: P910Phone) -> doc_standin_p910.S, which takes
  * sectors from the board's block device (p910i_soc.c); the TrueFFS FAT filter (0x500A4868, called
  * directly by Write, result ignored) and the flExit-like 0x500A31D8 (destructor only) return 0.
  * docs/research/p910i-diskonchip.md [V].
  */
-static void p910_doc_standin(uint8_t *nor)
+static void p910_doc_standin(uint8_t *nor, const P910Phone *ph)
 {
     static const uint8_t prologue[] = { 0xf0, 0xb5, 0x57, 0x46, 0x4e, 0x46, 0x45, 0x46 };
     static const uint8_t disp_old[] = { 0xf0, 0xb5, 0x57, 0x46, 0x4e, 0x46, 0x45, 0x46,
@@ -191,11 +203,12 @@ static void p910_doc_standin(uint8_t *nor)
     if (getenv("P910_NO_DOC_STANDIN")) {            /* experiments: the phone's own TrueFFS */
         return;
     }
-    if (p910_patch(nor, NGAGE_P910_DOC_NOS_STUB_VA, disp_old, sizeof(disp_old),
+    /* the stub is position-independent (pc-relative literals): it runs at any dispatcher address */
+    if (p910_patch(nor, ph->doc_dispatch, disp_old, sizeof(disp_old),
                    ngage_p910_doc_nos_stub, sizeof(ngage_p910_doc_nos_stub))) {
-        p910_patch(nor, 0x500a4868, prologue, sizeof(prologue), ret0, sizeof(ret0));
-        p910_patch(nor, 0x500a31d8, prologue, sizeof(prologue), ret0, sizeof(ret0));
-        info_report("p910i: H-p910-doc: udiskonchip's TrueFFS -> block device stand-in");
+        p910_patch(nor, ph->doc_filter, prologue, sizeof(prologue), ret0, sizeof(ret0));
+        p910_patch(nor, ph->doc_exit, prologue, sizeof(prologue), ret0, sizeof(ret0));
+        info_report("%s: H-p910-doc: udiskonchip's TrueFFS -> block device stand-in", ph->machine);
     }
 }
 
@@ -228,7 +241,7 @@ static void p910_board(MachineState *machine, const P910Phone *ph)
     p910_load(flash, "core/ROM.bin", 0);
     if (ph->doc) {
         p910_load(flash, "rolf.bin", P910_ROLF_OFF);
-        p910_doc_standin(memory_region_get_ram_ptr(flash));
+        p910_doc_standin(memory_region_get_ram_ptr(flash), ph);
     }
     memory_region_add_subregion(sys, P910_FLASH_BASE, flash);
 
@@ -252,6 +265,11 @@ static void p910_board(MachineState *machine, const P910Phone *ph)
 static void p910i_init(MachineState *machine)
 {
     p910_board(machine, &p910_phone_p910i);
+}
+
+static void p900_init(MachineState *machine)
+{
+    p910_board(machine, &p910_phone_p900);
 }
 
 static void p800_init(MachineState *machine)
@@ -322,6 +340,30 @@ static const TypeInfo p910i_type = {
     .interfaces = arm_machine_interfaces,
 };
 
+static void p900_class_init(ObjectClass *oc, const void *data)
+{
+    MachineClass *mc = MACHINE_CLASS(oc);
+
+    object_class_property_add_str(oc, "ppm", p910_get_ppm, p910_set_ppm);
+    object_class_property_set_description(oc, "ppm", "eka1/p900 (core/ROM.bin, rolf.bin, c.img)");
+    object_class_property_add_str(oc, "isi", p910_get_isi, p910_set_isi);
+    object_class_property_add_str(oc, "flash", p910_get_flash, p910_set_flash);
+    object_class_property_set_description(oc, "flash", "the phone's C: image, kept across boots (created from c.img)");
+    mc->desc = "Sony Ericsson P900 (PNX4000-class, UIQ 2.1, Symbian 7.0 EKA1) bring-up board";
+    mc->init = p900_init;
+    mc->ignore_memory_transaction_failures = true;
+    mc->default_cpu_type = ARM_CPU_TYPE_NAME("arm926");
+    mc->default_ram_size = 16 * MiB;        /* bootstrap table: 16 MB at 0xD0000000 [V] */
+    mc->default_ram_id = "p900.sdram";
+}
+
+static const TypeInfo p900_type = {
+    .name = MACHINE_TYPE_NAME("p900"),
+    .parent = TYPE_MACHINE,
+    .class_init = p900_class_init,
+    .interfaces = arm_machine_interfaces,
+};
+
 static void p800_class_init(ObjectClass *oc, const void *data)
 {
     MachineClass *mc = MACHINE_CLASS(oc);
@@ -348,6 +390,7 @@ static const TypeInfo p800_type = {
 static void p910i_register(void)
 {
     type_register_static(&p910i_type);
+    type_register_static(&p900_type);
     type_register_static(&p800_type);
 }
 

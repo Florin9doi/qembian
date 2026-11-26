@@ -55,7 +55,7 @@ typedef struct {
     uint32_t tc_raw, err_raw, dma_cfg;
     qemu_irq dma_irq;
     unsigned dma_logged;
-    QEMUTimer *dma_timer;           /* P800: channels finish later (H-p800-dma) */
+    QEMUTimer *dma_timer;           /* P800/P900: channels finish later (H-p800-dma) */
     uint32_t dma_pending;
     /* DispSync */
     QEMUTimer *sync;
@@ -176,7 +176,7 @@ static bool lcd_gfx_update(void *opaque)
         for (int x = 0; x < LCD_W; x++) {
             uint16_t p = le16_to_cpu(l->shown[y][x]);
 
-            if (!p910_phone->doc) {
+            if (p910_phone->rgb444) {
                 /* P800: 12-bit RGB444 in 16 (EColor4K): white 0x0FFF read as RGB565 was cyan [V by eye] */
                 uint32_t r = (p >> 8) & 15, g = (p >> 4) & 15, b = p & 15;
 
@@ -266,9 +266,9 @@ static void dma_run(P910Lcd *l, int n)
         c[3] = le32_to_cpu(lli[3]);
     }
     c[3] &= ~0xfffu;                 /* transfer size counts down to 0 */
-    if (!p910_phone->doc) {
+    if (p910_phone->dma_late) {
         /*
-         * P800: the panel driver starts its full-frame transfer in power-up state 3 and takes the
+         * P800 (and P900, the same videodriver.dll generation): the panel driver starts its full-frame transfer in power-up state 3 and takes the
          * completion only in state 4 (0x500AE980); a transfer finished inside the Config write came
          * before the state change and was dropped (stall 2, docs/research/p800-display.md) [V code].
          * Finish 2 ms later, as a 133 KB transfer would on the phone.

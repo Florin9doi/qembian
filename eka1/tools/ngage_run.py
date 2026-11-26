@@ -247,6 +247,18 @@ MODELS = {
         panic=0x5005788c,                   # EUser RThread::Panic, ported from the P910i (12/12 words)
         sdram=(0xd0000000, 0x01000000),     # 16 MB (bootstrap table) [V]
         ttb=0xd0024000),                    # PORT
+    'p900': dict(
+        machine='p900', root=ROOT / 'eka1/p900/core',
+        rom=ROOT / 'eka1/p900/core/ROM.bin', ppm=ROOT / 'eka1/p900',
+        isi=ROOT / 'src/qemu-ngage/p900-ose-replies.txt',
+        fatal=0x50025364,                   # Kern::Fault, export 119 as the P910i's (16/16 words) [V]
+        cur_thread=0x80001e88,              # literal voting from the P910i (15 agree, as the P800's)
+        containers=0x800000c4,              # literal voting from the P910i (as the P800's)
+        code=(0x50011f9c, 0x51800000),
+        vectors=0xffff0000,                 # [I] as the P910i
+        panic=0x5005ad90,                   # EUser RThread::Panic: the P910i's 32 bytes, unique [V]
+        sdram=(0xd0000000, 0x01000000),     # 16 MB (bootstrap table) [V]
+        ttb=0xd0028000),                    # page directory: maps 0x80000000 and the vector page [V: RAM search]
     'p910i': dict(
         machine='p910i', root=ROOT / 'eka1/p910i/core',
         rom=ROOT / 'eka1/p910i/core/ROM.bin', ppm=ROOT / 'eka1/p910i',

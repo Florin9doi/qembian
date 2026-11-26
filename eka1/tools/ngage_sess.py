@@ -38,6 +38,13 @@ def sdir(name):
     return ROOT / 'build/ngage' / ('sess-' + name)
 
 
+def qemu_failure(d):
+    """The message for a QEMU that exited before its gdb stub answered: QEMU's own words (qemu.out)."""
+    out = (d / 'qemu.out').read_text(errors='replace').strip() if (d / 'qemu.out').exists() else ''
+    errs = [l for l in out.splitlines() if 'info:' not in l] or out.splitlines()
+    return 'QEMU did not start: ' + ('\n'.join(errs[-5:]) or '(no output)')
+
+
 # ---- gdb remote protocol (just what we need) ----
 class Rsp:
     def __init__(self, port):
@@ -137,10 +144,14 @@ class Daemon:
         self.q = subprocess.Popen(cmd, stdout=open(d / 'qemu.out', 'w'), stderr=subprocess.STDOUT)
         (d / 'qemu.pid').write_text(str(self.q.pid))
         for _ in range(100):
+            if self.q.poll() is not None:       # QEMU refused the machine (bad option, missing image)
+                break
             try:
                 self.rsp = Rsp(port); break
             except OSError:
                 time.sleep(0.1)
+        if not hasattr(self, 'rsp'):
+            sys.exit(qemu_failure(d))
         self.rsp.cmd('?')
         for c in filter(None, a.catch.split(',')):
             c, _, cond = c.partition('?')           # VA[=LABEL][?EXPR]: stop only if EXPR holds
@@ -484,13 +495,13 @@ def main():
                 '--debug', a.debug, '--dfilter', a.dfilter, '--rom', a.rom, '--ppm', a.ppm, '--isi', a.isi,
                 '--flash', os.path.abspath(a.flash) if a.flash else '',
                 '--mmc', os.path.abspath(a.mmc) if a.mmc else '', '--irda', a.irda]
-        subprocess.Popen(args, start_new_session=True, stdin=subprocess.DEVNULL,
-                         stdout=open(d / 'daemon.out', 'w'), stderr=subprocess.STDOUT)
+        dproc = subprocess.Popen(args, start_new_session=True, stdin=subprocess.DEVNULL,
+                                 stdout=open(d / 'daemon.out', 'w'), stderr=subprocess.STDOUT)
         for _ in range(100):
-            if (d / 'ctl').exists():
+            if (d / 'ctl').exists() or dproc.poll() is not None:
                 break
             time.sleep(0.1)
-        else:
+        if not (d / 'ctl').exists():
             sys.exit('session did not start:\n' + (d / 'daemon.out').read_text()[-1500:])
         show(call(a.session, {'op': 'status'}))
         return

@@ -436,12 +436,26 @@ sound) except the DiskOnChip stand-in, which the P800 does not need.
 | Hack | Where | Real implementation |
 |---|---|---|
 | **H-p800-nor:** the second NOR (phys 0xB0000000, 32 MB window, 16 MB used [I]) is our own small Intel StrataFlash model, not QEMU's pflash_cfi01: medint.pdd stores two command cycles in one 32-bit word and waits for IRQ 45 instead of polling (docs/research/p800-storage.md). Commands FF/70/50/90/98/B8/20-D0/E8-D0/40/10/60/B0/D0; no lock bits, no timing beyond 200 us per operation; CFI answers only the indices medint reads. Contents: the LNG image (an LFFS volume) + the ROLF at +0xC00000; `flash=FILE` keeps the whole window | `p800_nor.c` | pflash_cfi01 with 32-bit two-cycle writes and an IRQ output |
-| **H-p800-dma:** DMA channels finish 2 ms after they are enabled (the P910i: at once); the panel driver takes the completion only after its own state change | `p910i_lcd.c` `dma_finish` | a PL080 model with transfer timing |
+| **H-p800-dma:** DMA channels finish 2 ms after they are enabled (the P910i: at once; the P900 as the P800, `P910Phone.dma_late`); the panel driver takes the completion only after its own state change | `p910i_lcd.c` `dma_finish` | a PL080 model with transfer timing |
 | **H-p800-ose:** `src/qemu-ngage/p800-ose-replies.txt` = the P910i's table with the P800's own reply numbers where its swbp stubs were read (4398 -> 4E86, 4397 -> 4E85, 4EE8 -> 4F4C, 4EEB -> 4F4F, 0533/A6 -> 16D3 with the emergency numbers 112/911 [I]); other payloads as the P910i's [I]; `eka1/tools/swbp_waits.py` checks every line against the ROM | `p800-ose-replies.txt` | a GSM-side model |
 
 Not modelled / not working (P800): no network, calls, SMS; no sound; the keys (jog dial, flip keypad) not checked:
 the board uses the P910i's input model, of which only the pen was tested; Memory Stick (D:), camera, Bluetooth,
 IrDA; unanswered OSE requests 0x0370, 0x0533/B1 (-> 0x16DE), 0x13E0, 0x4C2C (bring-up page).
+
+## Sony Ericsson P900 (UIQ 2.1, EKA1) on the P910i's board (-M p900, src/qemu-ngage/hw/arm/p910i*.c)
+
+Evidence: [devices/se-p900/bring-up.md](devices/se-p900/bring-up.md). The P910i's board with a third per-phone
+description (`P910Phone p910_phone_p900`): no hack of its own. The P910i's apply (H-p910-doc with the P900's
+addresses, H-p910-lcd, the OSE peer, the touch panel, H-p910-i2c, no sound), plus the P800's H-p800-dma (its
+videodriver.dll generation).
+
+| Hack | Where | Real implementation |
+|---|---|---|
+| **H-p900-ose:** `src/qemu-ngage/p900-ose-replies.txt` = the P910i's table unchanged; `eka1/tools/swbp_waits.py` finds the same reply numbers in the P900's stubs for every line it can check, payloads [I] | `p900-ose-replies.txt` | a GSM-side model |
+
+Not modelled / not working (P900): no network, calls, SMS; no sound; jog dial, flip keypad (critakeypad.dll, the
+P800's driver) and flip not checked; Memory Stick, camera, Bluetooth, IrDA; unanswered OSE 0x0370, 0x0533/B1, 0x13E0.
 
 ## Hosted EKA2 (src/hosted, tools/hosted/htest.py; docs/hosted-eka2/)
 

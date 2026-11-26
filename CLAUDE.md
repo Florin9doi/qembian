@@ -83,14 +83,14 @@ Read `docs/devices.md` (schema, layering) before touching `models/`, `src/standi
   instance in `tools/instance.py list`, or `run-gui.sh`, which boots one): clone it
   (`tools/instance.py clone NAME NAME-test`) or use a `--session build/sydb-<name>` session.
 
-## EKA1 phones (N-Gage, N-Gage QD, 7650, 6600, 3230, 7610, 6670, 6260, 6630, N70, N72, 9210, 9500, 7710, P800, P910i): their own kernel, separate boards
+## EKA1 phones (N-Gage, N-Gage QD, 7650, 6600, 3230, 7610, 6670, 6260, 6630, N70, N72, 9210, 9500, 7710, P800, P900, P910i): their own kernel, separate boards
 
 Symbian 6.1-7.0s phones run their own EKA1 kernel on QEMU boards in `src/qemu-ngage/` (built by
 `scripts/build-qemu-ngage.sh` into `build/qemu-ngage/`), outside the device model and sydb: `-M ngage`
 (N-Gage, NEM-4), `ngageqd` (N-Gage QD), `nokia7650`, `nokia6600`, `nokia3230`, `nokia7610`, `nokia6670`, `nokia6260` (DCT4 variants of ngage.c), `nokia9500` and `nokia7710` (QEMU's OMAP1510, one board with a per-phone description), `nokia6630` (the same board file,
 QEMU's OMAP1510 made an OMAP1610 by patches 0021-0027; its devices in `nokia6630_soc.c`), `nokian70` (the 6630's board with the
 N70's phone description: OMAP1710 IDs, ISC modem replies; `nokian72` the same for the N72), `nokia9210` (Symbian 6.0; its own board modelled
-from the phone's code, `nokia9210.c`), `p910i` and `p800`
+from the phone's code, `nokia9210.c`), `p910i`, `p900` and `p800`
 (a PNX4000 board modelled from the phone's code). For a new board or chip load the project skill
 `new-board-bringup` (`.claude/skills/new-board-bringup/SKILL.md`). Start with `docs/eka1-ngage.md` (tools, running,
 debugging) and the phone's `docs/devices/<id>/bring-up.md`; overview in `docs/device-matrix.md` 2.2b; the
