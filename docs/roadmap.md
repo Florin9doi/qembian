@@ -252,8 +252,8 @@ verdict is "it does boot but that's mostly it". Parked for the 7650; to make it 
    2026-11-26).
 4. A first-boot hint in the phone window: the screen is white for ~60 s while C: is formatted.
 5. Memory card (mmc.pdd, new driver), power key (UEM), sound, Bluetooth. Camera done (7da861e). IrDA done
-   (2026-11-26): two phones beam to each other (docs/eka1-ngage.md "Infrared"); the same SIR driver is in the 7650,
-   3650/3660, 3230, 6260 and N-Gage QD, not switched on. Contacts: blank list, one "PLAT 3" kernel fault (bring-up page).
+   (2026-11-26): two phones beam to each other (docs/eka1-ngage.md "Infrared"); the 6260 beams too (2026-11-26,
+   H-ngage-timer-zero); the 7650, 3650/3660 and 3230 have it on, not tried; the N-Gage QD's is off. Contacts: blank list, one "PLAT 3" kernel fault (bring-up page).
 6. Fixed 2026-11-18: the restart hang (owner: hangs on the home screen when not --fresh). Phone.app was killed by
    the view server (ViewSrv 11) while blocked in GetALSLine (SIM 09 29, unanswered); not a regression (8be36d8
    does the same). Replies 09 29 / 09 23 and H-nhl10-rtc (no time query on restart). Details:

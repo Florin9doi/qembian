@@ -28,8 +28,9 @@
 #define SIR_CTRL2         0x0c150516    /* W 1 (create), 0 (after a baud change) */
 #define SIR_DIVISOR       0x0c150518    /* W baud code (table in ngage_sir_baud) */
 #define SIR_MODE          0x0c15052c    /* W 0x13 before a baud change */
-#define SIR_STOP          0x0c15053a    /* W 2 on stop */
-#define SIR_START         0x0c15053c    /* W 2 on power-up */
+#define SIR_STOP          0x0c15053a    /* W 2 on stop: clear mask of the units' on bits */
+#define SIR_START         0x0c15053c    /* W 2 on power-up: set mask; BC02_UART1.pdd (3230, 6260) uses bit 12 */
+#define SIR_POWER_IR      0x0002        /* the IrDA receiver's bit in SIR_START / SIR_STOP */
 #define SIR_TXDATA        0x0c150554    /* W byte << 8: next TX byte */
 #define SIR_RXDATA        0x0c150556    /* R: byte << 8, pops the RX FIFO */
 #define SIR_TXCOUNT       0x0c15055a    /* W n-1 before n TX bytes */
@@ -54,6 +55,7 @@ typedef struct NgageSir {
     unsigned tx_expect;                 /* bytes still announced by SIR_TXCOUNT */
     unsigned tx_burst;                  /* bytes in the burst being sent */
     unsigned baud;
+    uint16_t power;                     /* the units switched on through SIR_START / SIR_STOP */
     uint16_t regs[(SIR_END - SIR_BASE) / 2];
     unsigned tx_total, rx_total, rx_dropped;
     /* board callbacks (any may be NULL) */

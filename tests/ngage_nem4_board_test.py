@@ -278,5 +278,21 @@ class FlashFiqNotHostTimerBound(unittest.TestCase):
         self.assertLess(e.index('ngage_timer_fast(s)'), e.index('ngage_timer_arm('))   # no host timer re-armed
 
 
+class TimerZeroCountExpires(unittest.TestCase):
+    """one_shot_zero_count_never_fired (2026-11-26, 6260 infrared): a count of 0 written to a one-shot timer stopped it.
+    The kernel's one-shot queue loads timer 1 with the head's delta unclamped when the queue was empty (ekern
+    0x503414d4 -> 0x50341428 on the 6260); ecomm.ldd's IrDA turnaround timer has a delta of 0, so it never expired
+    and the write it gates never reached the SIR UART. H-ngage-timer-zero: mode 1 + count 0 expires at once."""
+
+    src = (HW / 'ngage.c').read_text()
+
+    def test_zero_count_in_one_shot_mode_arms(self):
+        w = self.src.split('static void ngage_timer_write', 1)[1].split('\n}\n', 1)[0]
+        start = w.split('case 0x10:', 1)[1].split('break;', 1)[0]
+        self.assertRegex(start, r'(?s)else if \(s->regs\[0x04 >> 2\] == 1\) \{.*?ngage_timer_arm\(s, 0\);')
+        # stopped (mode 0) or periodic timers loaded with 0 still stop
+        self.assertLess(start.index('ngage_timer_arm(s, 0)'), start.rindex('timer_del(s->t)'))
+
+
 if __name__ == '__main__':
     unittest.main()

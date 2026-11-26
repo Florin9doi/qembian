@@ -83,6 +83,7 @@ Infrared is off ignores what arrives, as a real one would.
 
 ## Limits
 
-Only the 6600 has the infrared port switched on. The 7650, 3650/3660, 3230, 6260 and N-Gage QD carry the same
-kind of driver; each needs its own check before it is enabled (`NgageModel.irda` in `ngage.c`). The model does not
+Beaming was tried on the 6600 and the 6260 (`--model nokia6260`, the same steps; its receiver listens about one
+minute). The 7650, 3650/3660 and 3230 have the port switched on with the same driver, not tried yet; the N-Gage QD
+is off (`NgageModel.irda` in `ngage.c`). The model does not
 simulate pulse timing, the transceiver's echo or receive errors (details in the research note).

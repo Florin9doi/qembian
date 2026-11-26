@@ -139,7 +139,7 @@ Gallery has no files on a fresh phone). The item arrives in the receiver's Messa
 Any other value is a QEMU chardev spec (`udp:...`, `tcp:...,server=on,wait=off` with a client on the other side, a
 host serial port such as `/dev/ttyUSB0`, whose baud rate follows the phone's), and `ngage_sess.py start --irda`
 takes the same values. Without `--irda`, a session writes what the phone transmits to `serial2`.
-The 7650, 3650/3660, 3230, 6260 and N-Gage QD have a driver of the same kind, not switched on yet (`NgageModel.irda`).
+The 6260 beams the same way (`--model nokia6260`); the 7650, 3650/3660 and 3230 have the port on, not tried yet (`NgageModel.irda`).
 
 ## How it fits together
 

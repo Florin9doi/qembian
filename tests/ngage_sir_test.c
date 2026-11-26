@@ -210,6 +210,33 @@ static void test_closed_port_drops(void)
     assert(s.rx_count == 0);
 }
 
+/*
+ * bluecore_stop_closed_irda: on the 3230/6260 BC02_UART1.pdd (the BlueCore UART) writes its own bit 12 to
+ * SIR_START / SIR_STOP (0x1000, seen at boot on the 6260). The model took any SIR_STOP write as "IrDA off" and any
+ * nonzero SIR_START as "on": Bluetooth stopping its UART dropped IrDA's receiver, and Bluetooth starting it opened
+ * IrDA's. The words are set/clear masks; IrDA's receiver is bit 1.
+ */
+static void test_bluecore_bits_leave_irda_alone(void)
+{
+    NgageSir s;
+    const uint8_t b[3] = { 1, 2, 3 };
+    setup(&s);
+    ngage_sir_write(&s, SIR_START, 0x1000);         /* BlueCore on: IrDA stays closed */
+    ngage_sir_rx(&s, b, 3);
+    assert(s.rx_count == 0 && s.rx_dropped == 3);
+    open_port(&s);
+    ngage_sir_rx(&s, b, 3);
+    assert(s.rx_count == 3);
+    ngage_sir_write(&s, SIR_STOP, 0x1000);          /* BlueCore off: IrDA keeps its receiver and FIFO */
+    assert(s.rx_count == 3);
+    ngage_sir_rx(&s, b, 3);
+    assert(s.rx_count == 6);
+    ngage_sir_write(&s, SIR_STOP, 2);               /* IrDA off */
+    assert(s.rx_count == 0);
+    ngage_sir_rx(&s, b, 3);
+    assert(s.rx_count == 0);
+}
+
 int main(void)
 {
     test_create_sends_nothing();
@@ -219,6 +246,7 @@ int main(void)
     test_rx_held_during_tx();
     test_rx_full_flow_control();
     test_closed_port_drops();
+    test_bluecore_bits_leave_irda_alone();
     printf("ngage_sir_test: all passed\n");
     return 0;
 }

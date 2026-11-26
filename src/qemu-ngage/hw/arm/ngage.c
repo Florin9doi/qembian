@@ -1124,6 +1124,14 @@ static void ngage_timer_write(void *opaque, hwaddr addr, uint64_t val, unsigned 
             qemu_set_irq(s->irq, 1);
         } else if (val) {
             ngage_timer_arm(s, val);
+        } else if (s->regs[0x04 >> 2] == 1) {
+            /*
+             * H-ngage-timer-zero: a one-shot loaded with 0 is due now [I: a down-counter at its terminal count].
+             * The kernel's one-shot queue (timer 1) loads the head's delta unclamped when the queue was empty
+             * (ekern 0x503414d4, 6260); ecomm.ldd's turnaround timer has a delta of 0, and stopping here left
+             * it pending for ever: the IrDA write it gates never started (6260 infrared, 2026-11-26).
+             */
+            ngage_timer_arm(s, 0);
         } else {
             timer_del(s->t);
         }

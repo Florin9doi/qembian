@@ -7,7 +7,8 @@
  *   char time is over (ngage_sir_tx_done), so the phone sees a real baud rate.
  * - RX: bytes from the line go to a 15-entry FIFO; SIR_IRQ_RX is a level bit while it holds data.
  *   The ISR pops SIR_RXDATA until SIR_RXPTR reads empty. A full FIFO stops the line (the chardev
- *   keeps the rest). While the port is closed (before SIR_START, after SIR_STOP) bytes are
+ *   keeps the rest). While the port is closed (SIR_POWER_IR not set through SIR_START, or cleared
+ *   through SIR_STOP; both are bit masks shared with the BlueCore UART on the DCT4 phones) bytes are
  *   dropped, as light that nobody receives: a peer's discovery frames must not pile up.
  * - Interrupt: (status & enable) != 0, on CTSI FIQ (kernel source 26).
  * Not modelled: the RX idle/end bits (0x20, 0x100: the driver's 20 ms poll timer covers them),
@@ -38,7 +39,7 @@ unsigned ngage_sir_baud(uint16_t code)
 
 static bool sir_open(const NgageSir *s)
 {
-    return s->regs[(SIR_START - SIR_BASE) / 2] != 0;
+    return (s->power & SIR_POWER_IR) != 0;
 }
 
 static uint16_t sir_status(const NgageSir *s)
@@ -65,6 +66,7 @@ void ngage_sir_init(NgageSir *s)
     s->rx_head = s->rx_count = 0;
     s->tx_expect = s->tx_burst = 0;
     s->baud = 9600;
+    s->power = 0;
     memset(s->regs, 0, sizeof(s->regs));
 }
 
@@ -157,15 +159,17 @@ void ngage_sir_write(NgageSir *s, uint32_t addr, uint16_t val)
         break;
     }
     case SIR_START:
-        s->regs[(SIR_STOP - SIR_BASE) / 2] = 0;
+        /* set mask: the BlueCore UART (BC02_UART1.pdd, 3230/6260) writes its own bit 12 here */
+        s->power |= val;
         break;
     case SIR_STOP:
-        s->regs[(SIR_START - SIR_BASE) / 2] = 0;
-        s->rx_head = s->rx_count = 0;           /* the receiver is off: what it held is gone */
-        s->tx_expect = 0;
-        REG(addr) = val;
-        sir_update(s);
-        return;
+        s->power &= ~val;                       /* clear mask: another unit's bit leaves IrDA as it is */
+        if (val & SIR_POWER_IR) {
+            s->rx_head = s->rx_count = 0;       /* the receiver is off: what it held is gone */
+            s->tx_expect = 0;
+            sir_update(s);
+        }
+        break;
     default:
         break;
     }

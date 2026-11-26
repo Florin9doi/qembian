@@ -58,6 +58,11 @@ python3 eka1/tools/ngage_phone.py --model nokia6260
 
 Boots to the S60 home screen after the time and date queries; Menu grid; keys (0, Clear, End verified after stall 2)
 and joystick; Camera (test pattern). No sound or network (as the 7610), time and date asked at every boot.
+**Infrared** (2026-11-26): two 6260s beam a Calendar entry to each other (receiver: Connect., Infrared, about one
+minute of listening; sender: Send, Via infrared), same use as the 6600 (docs/devices/nokia-6600-nhl10/infrared.md,
+`--model nokia6260`). The driver is the 6600's SIR.PDD; two board fixes were needed: the BlueCore UART's bits in the
+shared on/off words (H-nhl10-sir) and a 0-count one-shot timer (H-ngage-timer-zero, ecomm.ldd's turnaround timer,
+because the 6260's irda.esk sets no irMinLinkTurnaroundTime). Notes: docs/research/6600-irda.md "Nokia 6260".
 
 ## Open
 

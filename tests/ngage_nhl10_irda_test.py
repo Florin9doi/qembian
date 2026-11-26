@@ -97,10 +97,60 @@ class SirDriver(unittest.TestCase):
 
 
 class Model(unittest.TestCase):
-    def test_only_the_6600_has_it(self):
+    """Every model with .irda on carries the 6600's SIR driver: euart1.pdd named "SIR.PDD", binding FiqCTSI_FIQ, with
+    the register addresses the model implements (static check; beamed: 6600, 6260)."""
+    DIRS = {'ngage_nhl2': 'nhl2', 'ngage_nhl8': 'nhl8', 'ngage_nhl8x': 'nhl8x', 'ngage_nhl10': 'nhl10',
+            'ngage_rm51': 'rm51', 'ngage_rm25': 'rm25'}
+
+    def test_irda_models_carry_the_sir_pdd(self):
         t = src('ngage.c')
         with_irda = re.findall(r'static const NgageModel (\w+) = \{(?:(?!\n\};).)*?\.irda = true', t, re.S)
-        self.assertEqual(with_irda, ['ngage_nhl10'])
+        self.assertIn('ngage_nhl10', with_irda)
+        self.assertIn('ngage_rm25', with_irda)
+        h = src('ngage_sir.h')
+        regs = [int(a, 16) for a in re.findall(r'#define SIR_\w+\s+(0x0c[0-9a-f]+)', h)
+                if int(a, 16) not in (0x0c150512, 0x0c150516, 0x0c15052c, 0x0c150560, 0x0c150564)]
+        for m in with_irda:
+            pdd = REPO / 'eka1' / self.DIRS[m] / 'output/rom/files/System/Libs/euart1.pdd'
+            if not pdd.exists():
+                continue
+            d = pdd.read_bytes()
+            words = set(struct.unpack_from('<%dI' % (len(d) // 4), d))
+            self.assertIn('SIR.PDD'.encode('utf-16-le'), d, m)
+            self.assertIn(b'FiqCTSI_FIQ', d, m)
+            for a in regs:
+                self.assertIn(a - 0x0c000000, words, '%s %08x' % (m, a))
+
+
+RM25 = REPO / 'eka1/rm25/output/rom'
+
+
+@unittest.skipUnless(RM25.exists(), 'no 6260 extraction')
+class Rm25TurnaroundTimer(unittest.TestCase):
+    """rm25_write_never_started (2026-11-26): the 6260's irda.esk has no irMinLinkTurnaroundTime, so IrDA.prt sets a
+    10 ms turnaround (ecomm control 10) and ecomm.ldd holds every Write until a turnaround timer of 0 ms expires; the
+    kernel loads hardware timer 1 with 0 for it, which the board took as "stop" (fixed: H-ngage-timer-zero)."""
+
+    def rom_word(self, va):
+        return struct.unpack_from('<I', (RM25 / 'ROM.bin').read_bytes(), va - 0x50000000)[0]
+
+    def test_esk_sets_no_turnaround(self):
+        esk = (RM25 / 'files/System/data/irda.esk').read_text(errors='replace')
+        self.assertRegex(esk, r'irPhysicalComPort=\s*1')
+        self.assertNotIn('irMinLinkTurnaroundTime', esk)
+
+    def test_ecomm_write_waits_for_the_timer(self):
+        # DoRequest write: ldr r3,[r5,#0x12c] (turnaround running) ; then str 1 -> [r5,#0x130] (write pending)
+        self.assertEqual(self.rom_word(0x5036d3bc), 0xe595312c)
+        self.assertEqual(self.rom_word(0x5036d3d0), 0xe5853130)
+        # DoCreate builds the turnaround timer (ch+0x134) with 0 ms: mov r1,r5 (r5 = 0) before the constructor
+        self.assertEqual(self.rom_word(0x5036bd04), 0xe3a05000)
+        self.assertEqual(self.rom_word(0x5036bd24), 0xe1a01005)
+
+    def test_kernel_loads_the_head_delta_unclamped(self):
+        # empty queue: 0x503414d4 starts timer 1 then sets the count via 0x50341428 (no >= 256 clamp on this path)
+        self.assertEqual(self.rom_word(0x503414f0), 0xeaffffcc)        # b 0x50341428
+        self.assertEqual(self.rom_word(0x50341464), 0xe35100ff)        # the other path's clamp (cmp r1,#255)
 
 
 if __name__ == '__main__':
