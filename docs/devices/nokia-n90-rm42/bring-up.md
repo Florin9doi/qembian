@@ -78,8 +78,10 @@ all found at RM-42's addresses by a unique 16/16 masked code match, old words id
 
 1. The N90's own keypad (ekeyp.dll 10.8 KB vs the N70's 5.9 KB): read its matrix and scan-code table; the N90's
    extra keys (camera, the hinge/fold switches).
-2. The cover display (device 1 on SPI: 128x128 [I], CASET 1..0x82): show it as a second view, as the Communicators'
-   cover panel; the fold/twist state (which screen is active).
+2. The cover display, the fold/twist/camera-angle switches and the main display's rotation: analysed in
+   [displays.md](displays.md) (GPIO 61/42/54/43, cover = 130x130 RGB565 DCS on SPI device 1, landscape = controller
+   register 34 = 3). Note: all GPIO inputs at 0 mean "display twisted", so the phone may boot into landscape + the
+   camera app; the board should hold GPIO 42 high.
 3. Panic reports `38 0E` (three, `61 01 01 5A..5C`) and unanswered requests (`02 06`, `02 16`, `31 11`, `43 07`,
    `77 01/07`, ...): each only when something waits on it.
 4. A second boot from a kept NAND; sound (DSP), network/SIM, DRM.

@@ -24,6 +24,7 @@ void rm1_nand_init(MemoryRegion *sys, struct omap_mpu_state_s *mpu, const char *
 
 /* OMAP1710 SPI (0xFFFB0C00, level-2 line 49): transfers complete at once; the panels answer RDDID */
 void rm1_spi_init(MemoryRegion *sys, struct omap_mpu_state_s *mpu);
+void rm1_spi_attach(unsigned dev, void (*tx)(void *opaque, uint16_t w, int nbits), void *opaque);
 
 /* 32 kHz watchdog (0xFFFEB000): a register file that never expires */
 void rm1_wdt_init(MemoryRegion *sys);

@@ -72,6 +72,21 @@ static inline unsigned rm1_lcd_h(const Rm1Lcd *l)
     return l->h ? l->h : RM1_LCD_H;
 }
 
+static inline unsigned rm1_lcd_src_w(const Rm1Lcd *l)
+{
+    return (l->ctrl && (l->creg[0x34] & 1)) ? rm1_lcd_h(l) : rm1_lcd_w(l);
+}
+
+static inline unsigned rm1_lcd_src_h(const Rm1Lcd *l)
+{
+    return (l->ctrl && (l->creg[0x34] & 1)) ? rm1_lcd_w(l) : rm1_lcd_h(l);
+}
+
+static inline bool rm1_lcd_transformed(const Rm1Lcd *l)
+{
+    return l->ctrl && ((l->creg[0x34] & 3) || (l->creg[0x36] & 1));
+}
+
 static inline void rm1_lcd_reset(Rm1Lcd *l)
 {
     memset(l->reg, 0, sizeof(l->reg));
@@ -84,17 +99,19 @@ static inline void rm1_lcd_reset(Rm1Lcd *l)
     l->rq_n = l->rq_i = 0;
     l->reo0 = 0;
     memset(l->d, 0, sizeof(l->d));
-    l->dirty_y0 = rm1_lcd_h(l);
+    l->dirty_y0 = RM1_LCD_MAX_H;
     l->dirty_y1 = 0;
 }
 
 static inline void rm1_lcd_px(Rm1Lcd *l, uint32_t rgb)
 {
+    unsigned sw = rm1_lcd_src_w(l), sh = rm1_lcd_src_h(l);
+
     if (!l->writing) {
         return;
     }
-    if (l->cx < rm1_lcd_w(l) && l->cy < rm1_lcd_h(l)) {
-        l->fb[l->cy * rm1_lcd_w(l) + l->cx] = rgb;
+    if (l->cx < sw && l->cy < sh) {
+        l->fb[l->cy * sw + l->cx] = rgb;
         if (l->cy < l->dirty_y0) {
             l->dirty_y0 = l->cy;
         }
@@ -157,11 +174,15 @@ static inline void rm1_lcd_cmd_done(Rm1Lcd *l)
         if (l->cmd < sizeof(l->creg) && l->nprm) {
             l->creg[l->cmd] = l->prm[0];
         }
+        if (l->cmd == 0x34 || l->cmd == 0x36) {
+            l->dirty_y0 = 0;
+            l->dirty_y1 = rm1_lcd_src_h(l);
+        }
         if (l->cmd == 0x38 && l->nprm >= 8) {
-            l->xs = rm1_lcd_clamp(l->prm[0] | l->prm[1] << 8, rm1_lcd_w(l));
-            l->ys = rm1_lcd_clamp(l->prm[2] | l->prm[3] << 8, rm1_lcd_h(l));
-            l->xe = rm1_lcd_clamp(l->prm[4] | l->prm[5] << 8, rm1_lcd_w(l));
-            l->ye = rm1_lcd_clamp(l->prm[6] | l->prm[7] << 8, rm1_lcd_h(l));
+            l->xs = rm1_lcd_clamp(l->prm[0] | l->prm[1] << 8, rm1_lcd_src_w(l));
+            l->ys = rm1_lcd_clamp(l->prm[2] | l->prm[3] << 8, rm1_lcd_src_h(l));
+            l->xe = rm1_lcd_clamp(l->prm[4] | l->prm[5] << 8, rm1_lcd_src_w(l));
+            l->ye = rm1_lcd_clamp(l->prm[6] | l->prm[7] << 8, rm1_lcd_src_h(l));
         }
         return;
     }
@@ -315,9 +336,43 @@ static inline bool rm1_lcd_take_dirty(Rm1Lcd *l, unsigned *y0, unsigned *y1)
     }
     *y0 = l->dirty_y0;
     *y1 = l->dirty_y1;
-    l->dirty_y0 = rm1_lcd_h(l);
+    l->dirty_y0 = RM1_LCD_MAX_H;
     l->dirty_y1 = 0;
     return true;
+}
+
+/* render the panel's frame memory to the physical w x h surface, applying controller rotation (34) and 2x scale (36) */
+static inline void rm1_lcd_render(const Rm1Lcd *l, uint32_t *dst)
+{
+    unsigned w = rm1_lcd_w(l), h = rm1_lcd_h(l), sw = rm1_lcd_src_w(l);
+    unsigned rot = l->ctrl ? (l->creg[0x34] & 3) : 0;
+    unsigned scale = (l->ctrl && (l->creg[0x36] & 1)) ? 2 : 1;
+
+    for (unsigned py = 0; py < h; py++) {
+        for (unsigned px = 0; px < w; px++) {
+            unsigned sx, sy;
+
+            switch (rot) {
+            case 1:
+                sx = h - 1 - py;
+                sy = px;
+                break;
+            case 2:
+                sx = w - 1 - px;
+                sy = h - 1 - py;
+                break;
+            case 3:
+                sx = py;
+                sy = w - 1 - px;
+                break;
+            default:
+                sx = px;
+                sy = py;
+                break;
+            }
+            dst[py * w + px] = l->fb[(sy / scale) * sw + (sx / scale)];
+        }
+    }
 }
 
 #endif

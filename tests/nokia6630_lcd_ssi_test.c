@@ -198,6 +198,37 @@ static void lcd_ctrl_tests(void)
     /* rm42_lcd_reads_zero: reading a register (04 is RDDID on a DCS panel) gives 0 */
     ctrl_reg(&l, 0x04, NULL, 0);
     assert(rm1_sossi_read(&l, 0x10) == 0 && rm1_sossi_read(&l, 0x10) == 0);
+
+    /* rm42_lcd_rotate_90: register 34 = 3 swaps window to 416x352 and rotates on render */
+    {
+        static uint32_t out[352 * 416];
+        uint8_t rot3 = 3, rot0 = 0, sc1 = 1, sc0 = 0;
+
+        ctrl_reg(&l, 0x34, &rot3, 1);
+        assert(rm1_lcd_src_w(&l) == 416 && rm1_lcd_src_h(&l) == 352);
+        ctrl_window(&l, 415, 0, 415, 0);
+        ctrl_reg(&l, 0x48, NULL, 0);
+        rm1_sossi_write(&l, 0x10, 0x00ab1234);
+        assert(l.fb[0 * 416 + 415] == 0xab1234);
+        ctrl_window(&l, 0, 351, 0, 351);
+        ctrl_reg(&l, 0x48, NULL, 0);
+        rm1_sossi_write(&l, 0x10, 0x00cd5678);
+        assert(l.fb[351 * 416 + 0] == 0xcd5678);
+        rm1_lcd_render(&l, out);
+        assert(out[415 * 352 + 351] == 0xab1234);
+        assert(out[0 * 352 + 0] == 0xcd5678);
+
+        /* rm42_lcd_scale_2x: register 36 = 1 replicates each pixel 2x2 */
+        ctrl_reg(&l, 0x34, &rot0, 1);
+        ctrl_reg(&l, 0x36, &sc1, 1);
+        ctrl_window(&l, 10, 20, 10, 20);
+        ctrl_reg(&l, 0x48, NULL, 0);
+        rm1_sossi_write(&l, 0x10, 0x0042beef);
+        rm1_lcd_render(&l, out);
+        assert(out[40 * 352 + 20] == 0x42beef && out[40 * 352 + 21] == 0x42beef);
+        assert(out[41 * 352 + 20] == 0x42beef && out[41 * 352 + 21] == 0x42beef);
+        ctrl_reg(&l, 0x36, &sc0, 1);
+    }
 }
 
 static void ssi_tests(void)

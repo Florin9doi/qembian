@@ -22,20 +22,21 @@
 #include "monitor/qdev.h"
 #include "qapi/error.h"
 #include "nokia9500_cover.h"
+#include "nokia6630_soc.h"
 
 #define RAM_W 132
 #define RAM_H 132
-#define VIS   128
 
 typedef struct {
     QemuConsole *con;
+    unsigned vis;
     uint8_t cmd;
     unsigned nparam;
     int xs, xe, ys, ye, x, y;
-    uint8_t colmod;
+    uint8_t colmod, madctl;
     uint8_t acc[3];
     unsigned nacc;
-    bool on, sleep, dirty;
+    bool on, sleep, idle, dirty;
     uint32_t ram[RAM_W * RAM_H];    /* xRGB8888 */
     unsigned words;
 } Ra2Cover;
@@ -102,9 +103,13 @@ static void cover_send(void *opaque, uint16_t w, int nbits)
         s->nparam = 0;
         s->nacc = 0;
         switch (b) {
+        case 0x00:                                  /* NOP */
+            break;
         case 0x01:                                  /* SWRESET */
             s->on = false;
             s->sleep = true;
+            s->idle = false;
+            s->madctl = 0;
             s->colmod = 3;
             s->xs = s->ys = 0;
             s->xe = RAM_W - 1;
@@ -131,6 +136,14 @@ static void cover_send(void *opaque, uint16_t w, int nbits)
             s->x = s->xs;
             s->y = s->ys;
             break;
+        case 0x38:                                  /* IDMOFF */
+            s->idle = false;
+            s->dirty = true;
+            break;
+        case 0x39:                                  /* IDMON */
+            s->idle = true;
+            s->dirty = true;
+            break;
         }
         return;
     }
@@ -149,13 +162,17 @@ static void cover_send(void *opaque, uint16_t w, int nbits)
             s->ye = b;
         }
         break;
+    case 0x36:                                      /* MADCTL */
+        s->madctl = b;
+        s->dirty = true;
+        break;
     case 0x3a:
         s->colmod = b & 7;
         break;
     case 0x2c:
         cover_pixels(s, b);
         break;
-    default:                                        /* RGBSET, GAMSET, MADCTL, SETCON, 0xC3 */
+    default:                                        /* RGBSET, GAMSET, SETCON, 0xC3 */
         break;
     }
 }
@@ -169,6 +186,8 @@ static bool cover_update(void *opaque)
 {
     Ra2Cover *s = opaque;
     DisplaySurface *surf = qemu_console_surface(s->con);
+    unsigned vis = s->vis;
+    bool rot90 = (vis == 130) && (s->madctl & 0x20);
     uint32_t *d;
 
     if (!s->dirty || !surf) {
@@ -176,12 +195,25 @@ static bool cover_update(void *opaque)
     }
     s->dirty = false;
     d = surface_data(surf);
-    for (int y = 0; y < VIS; y++) {
-        for (int x = 0; x < VIS; x++) {
-            d[y * VIS + x] = (s->on && !s->sleep) ? s->ram[(y + 1) * RAM_W + x + 1] : 0;
+    for (unsigned y = 0; y < vis; y++) {
+        for (unsigned x = 0; x < vis; x++) {
+            uint32_t rgb = 0;
+
+            if (s->on && !s->sleep) {
+                unsigned sx = rot90 ? y : x;
+                unsigned sy = rot90 ? (vis - 1 - x) : y;
+
+                rgb = s->ram[(sy + 1) * RAM_W + sx + 1];
+                if (s->idle) {                      /* IDMON: 8 colours (1 bit per channel) */
+                    rgb = ((rgb & 0x800000) ? 0xff0000 : 0) |
+                          ((rgb & 0x008000) ? 0x00ff00 : 0) |
+                          ((rgb & 0x000080) ? 0x0000ff : 0);
+                }
+            }
+            d[y * vis + x] = rgb;
         }
     }
-    qemu_console_update(s->con, 0, 0, VIS, VIS);
+    qemu_console_update(s->con, 0, 0, vis, vis);
     return true;
 }
 
@@ -210,11 +242,12 @@ static void cover_register(void)
 }
 type_init(cover_register)
 
-void ra2_cover_init(struct omap_mpu_state_s *mpu)
+static Ra2Cover *cover_create(unsigned vis)
 {
     Ra2Cover *s = g_new0(Ra2Cover, 1);
     DeviceState *dev = qdev_new(TYPE_RA2_COVER);
 
+    s->vis = vis;
     s->colmod = 3;
     s->xe = RAM_W - 1;
     s->ye = RAM_H - 1;
@@ -222,7 +255,21 @@ void ra2_cover_init(struct omap_mpu_state_s *mpu)
     qdev_set_id(dev, g_strdup("cover"), &error_fatal);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
     s->con = qemu_graphic_console_create(dev, 0, &cover_ops, s);
-    qemu_console_resize(s->con, VIS, VIS);
-    omap_uwire_attach(mpu->microwire, 0, cover_send, cover_receive, s);
+    qemu_console_resize(s->con, vis, vis);
     ra2_cover = s;
+    return s;
+}
+
+void ra2_cover_init(struct omap_mpu_state_s *mpu)
+{
+    Ra2Cover *s = cover_create(128);
+
+    omap_uwire_attach(mpu->microwire, 0, cover_send, cover_receive, s);
+}
+
+void n90_cover_init(void)
+{
+    Ra2Cover *s = cover_create(130);
+
+    rm1_spi_attach(1, cover_send, s);
 }

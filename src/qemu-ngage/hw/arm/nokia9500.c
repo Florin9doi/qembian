@@ -25,6 +25,7 @@
 #include "qemu/log.h"
 #include "qemu/error-report.h"
 #include "qapi/error.h"
+#include "qapi/visitor.h"
 #include "hw/arm/omap.h"
 #include "hw/core/boards.h"
 #include "hw/arm/boot.h"
@@ -1497,9 +1498,27 @@ static void nokian72_init(MachineState *machine)
     rm1_board_init(machine, &rm1_phone_n72);
 }
 
+static bool n90_fold_closed;
+static bool n90_twisted;
+static uint8_t n90_cam_angle = 180;
+static bool n90_switches_live;
+
+/* Nokia N90 (RM-42): four switch lines ekeyp.dll reads (docs/devices/nokia-n90-rm42/displays.md).
+ * Resting open phone: GPIO 42 high, GPIO 61 / 54 / 43 low (camera-angle 180). */
+static void n90_apply_switches(void)
+{
+    rm1_gpio_set_input(3, 13, n90_fold_closed);        /* GPIO 61 = Gpio4 bit 13, high = closed */
+    rm1_gpio_set_input(2, 10, !n90_twisted);           /* GPIO 42 = Gpio3 bit 10, high = normal */
+    rm1_gpio_set_input(3, 6, n90_cam_angle == 0);      /* GPIO 54 = Gpio4 bit 6, active high */
+    rm1_gpio_set_input(2, 11, n90_cam_angle != 180);   /* GPIO 43 = Gpio3 bit 11, active low */
+}
+
 static void nokian90_init(MachineState *machine)
 {
     rm1_board_init(machine, &rm1_phone_n90);
+    n90_cover_init();
+    n90_apply_switches();
+    n90_switches_live = true;
 }
 
 static void nokia9300_init(MachineState *machine)
@@ -1728,11 +1747,67 @@ static const TypeInfo nokian72_type = {
     .interfaces = arm_machine_interfaces,
 };
 
+static bool n90_get_fold(Object *obj, Error **errp)
+{
+    return n90_fold_closed;
+}
+
+/* object_class_property_add_bool's plain setter: a visitor-style one here took `value` for a Visitor * and crashed */
+static void n90_set_fold(Object *obj, bool value, Error **errp)
+{
+    n90_fold_closed = value;
+    if (n90_switches_live) {
+        n90_apply_switches();
+    }
+}
+
+static bool n90_get_twisted(Object *obj, Error **errp)
+{
+    return n90_twisted;
+}
+
+/* object_class_property_add_bool's plain setter: a visitor-style one here took `value` for a Visitor * and crashed */
+static void n90_set_twisted(Object *obj, bool value, Error **errp)
+{
+    n90_twisted = value;
+    if (n90_switches_live) {
+        n90_apply_switches();
+    }
+}
+
+static void n90_get_cam_angle(Object *obj, Visitor *v, const char *name, void *opaque, Error **errp)
+{
+    visit_type_uint8(v, name, &n90_cam_angle, errp);
+}
+
+static void n90_set_cam_angle(Object *obj, Visitor *v, const char *name, void *opaque, Error **errp)
+{
+    uint8_t val;
+
+    if (!visit_type_uint8(v, name, &val, errp)) {
+        return;
+    }
+    if (val != 0 && val != 90 && val != 180) {
+        error_setg(errp, "camera-angle: 0, 90 or 180");
+        return;
+    }
+    n90_cam_angle = val;
+    if (n90_switches_live) {
+        n90_apply_switches();
+    }
+}
+
 static void nokian90_class_init(ObjectClass *oc, const void *data)
 {
     MachineClass *mc = MACHINE_CLASS(oc);
 
     ra2_class_props(oc);
+    object_class_property_add_bool(oc, "fold-closed", n90_get_fold, n90_set_fold);
+    object_class_property_set_description(oc, "fold-closed", "clamshell fold closed (GPIO 61 high)");
+    object_class_property_add_bool(oc, "twisted", n90_get_twisted, n90_set_twisted);
+    object_class_property_set_description(oc, "twisted", "display twisted to landscape (GPIO 42 low)");
+    object_class_property_add(oc, "camera-angle", "uint8", n90_get_cam_angle, n90_set_cam_angle, NULL, NULL);
+    object_class_property_set_description(oc, "camera-angle", "camera hinge angle: 0, 90 or 180 (default 180)");
     mc->desc = "Nokia N90 (RM-42, BB5 OMAP1710, S60 2nd FP3, Symbian 8.1a EKA1) bring-up board";
     mc->init = nokian90_init;
     mc->ignore_memory_transaction_failures = true;

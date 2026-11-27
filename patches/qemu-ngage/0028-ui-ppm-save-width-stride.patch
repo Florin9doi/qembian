@@ -1,0 +1,14 @@
+Fix ppm_save writing padded pixman stride instead of width * 3 bytes per row (breaks 130px cover display).
+
+--- a/ui/ui-qmp-cmds.c
++++ b/ui/ui-qmp-cmds.c
+@@ -311,7 +311,7 @@ static bool ppm_save(int fd, pixman_image_t *image, Error **errp)
+         qemu_pixman_linebuf_fill(linebuf, image, width, 0, y);
+         if (qio_channel_write_all(QIO_CHANNEL(ioc),
+                                   (char *)pixman_image_get_data(linebuf),
+-                                  pixman_image_get_stride(linebuf), errp) < 0) {
++                                  width * 3, errp) < 0) {
+             return false;
+         }
+     }
+

@@ -8,5 +8,6 @@
 
 struct omap_mpu_state_s;
 void ra2_cover_init(struct omap_mpu_state_s *mpu);
+void n90_cover_init(void);
 
 #endif

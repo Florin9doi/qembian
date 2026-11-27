@@ -304,10 +304,15 @@ static bool panel_update(void *opaque)
     if (!surf || !rm1_lcd_take_dirty(&s->l, &y0, &y1)) {
         return true;
     }
-    unsigned w = rm1_lcd_w(&s->l);
+    unsigned w = rm1_lcd_w(&s->l), h = rm1_lcd_h(&s->l);
 
-    memcpy((uint32_t *)surface_data(surf) + y0 * w, s->l.fb + y0 * w, (y1 - y0) * w * 4);
-    qemu_console_update(s->con, 0, y0, w, y1 - y0);
+    if (rm1_lcd_transformed(&s->l)) {
+        rm1_lcd_render(&s->l, surface_data(surf));
+        qemu_console_update(s->con, 0, 0, w, h);
+    } else {
+        memcpy((uint32_t *)surface_data(surf) + y0 * w, s->l.fb + y0 * w, (y1 - y0) * w * 4);
+        qemu_console_update(s->con, 0, y0, w, y1 - y0);
+    }
     return true;
 }
 
@@ -316,7 +321,7 @@ static void panel_invalidate(void *opaque)
     Rm1Display *s = opaque;
 
     s->l.dirty_y0 = 0;
-    s->l.dirty_y1 = rm1_lcd_h(&s->l);
+    s->l.dirty_y1 = rm1_lcd_src_h(&s->l);
 }
 
 static const GraphicHwOps panel_ops = {
@@ -654,7 +659,19 @@ typedef struct {
     qemu_irq irq, drq_tx;
     uint32_t r[0x40 / 4];
     uint8_t last_cmd[8];                /* per device: the last DCS command byte */
+    void (*tx_hook[8])(void *opaque, uint16_t w, int nbits);
+    void *tx_opaque[8];
 } Rm1Spi;
+
+static Rm1Spi *rm1_spi;
+
+void rm1_spi_attach(unsigned dev, void (*tx)(void *opaque, uint16_t w, int nbits), void *opaque)
+{
+    if (rm1_spi && dev < 8) {
+        rm1_spi->tx_hook[dev] = tx;
+        rm1_spi->tx_opaque[dev] = opaque;
+    }
+}
 
 #define RM1_SPI_ID 0x290015u            /* RDDID as genericlcd_lcd.ldd reads it (low byte 0x15, bits 16-23 0x29) */
 
@@ -676,6 +693,11 @@ static void spi_send(Rm1Spi *s, unsigned dev, unsigned bits, uint32_t tx)
     qemu_log_mask(LOG_UNIMP, "nokia6630: SPI dev%u tx %u bits %x\n", dev, bits, tx);
     if (bits == 9 && !(tx & 0x100)) {
         s->last_cmd[dev & 7] = tx;
+    }
+    if (s->tx_hook[dev & 7] && bits >= 9 && (bits % 9) == 0) {
+        for (int i = (int)bits / 9 - 1; i >= 0; i--) {
+            s->tx_hook[dev & 7](s->tx_opaque[dev & 7], (tx >> (9 * i)) & 0x1ff, 9);
+        }
     }
     s->r[0x30 / 4] |= 2;
     s->r[0x18 / 4] |= 2;
@@ -762,6 +784,7 @@ void rm1_spi_init(MemoryRegion *sys, struct omap_mpu_state_s *mpu)
     s->drq_tx = mpu->drq[1];
     memory_region_init_io(&s->mr, NULL, &spi_ops, s, "omap1710.spi", 0x40);
     memory_region_add_subregion_overlap(sys, 0xfffb0c00, &s->mr, 10);
+    rm1_spi = s;
     spi_reset(s);
     qemu_register_reset(spi_reset, s);
 }

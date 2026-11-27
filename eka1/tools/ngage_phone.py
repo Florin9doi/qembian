@@ -200,8 +200,9 @@ class Phone(QtWidgets.QWidget):
         elif model in ('nokian70', 'nokian72'):        # the N72: the N70's ekeyp.dll (same code) [V]
             self.views = [('screen', {}, (176, 208), scale)]
             self.host_keys = RM84_KEYS
-        elif model == 'nokian90':                       # 352x416 main display; the N70's keys for now [I]
-            self.views = [('screen', {}, (352, 416), max(1, scale // 2 + scale % 2))]
+        elif model == 'nokian90':                       # 130x130 cover + 352x416 main display; the N70's keys for now [I]
+            self.views = [('cover', {'device': 'cover'}, (130, 130), scale),
+                          ('screen', {}, (352, 416), max(1, scale // 2 + scale % 2))]
             self.host_keys = RM84_KEYS
         else:
             self.views = [('screen', {}, (176, 208), scale)]
@@ -260,6 +261,25 @@ class Phone(QtWidgets.QWidget):
                 self.swivel.addItem(label, pos)
             self.swivel.activated.connect(self.set_swivel)
             row.addWidget(self.swivel, 1)
+            lay.addLayout(row)
+        if model == 'nokian90':
+            row = QtWidgets.QHBoxLayout()
+            self.n90_fold = QtWidgets.QPushButton('Close fold')
+            self.n90_fold.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.n90_fold.clicked.connect(self.toggle_n90_fold)
+            row.addWidget(self.n90_fold)
+            self.n90_twist = QtWidgets.QPushButton('Twist display')
+            self.n90_twist.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.n90_twist.clicked.connect(self.toggle_n90_twist)
+            row.addWidget(self.n90_twist)
+            row.addWidget(QtWidgets.QLabel('Cam:'))
+            self.n90_cam = QtWidgets.QComboBox()
+            self.n90_cam.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            for deg in (0, 90, 180):
+                self.n90_cam.addItem('%d°' % deg, deg)
+            self.n90_cam.setCurrentIndex(2)
+            self.n90_cam.activated.connect(self.set_n90_cam_angle)
+            row.addWidget(self.n90_cam)
             lay.addLayout(row)
         self.t0 = time.time()
         self.timer = QtCore.QTimer(self)
@@ -328,6 +348,31 @@ class Phone(QtWidgets.QWidget):
             self.qmp.cmd('qom-set', path='/machine', property='swivel', value=self.swivel.itemData(index))
         except OSError as err:
             self.status.setText('swivel: %s' % err)
+
+    def toggle_n90_fold(self):
+        """The N90's clamshell fold: GPIO 61 (nokia9500.c fold-closed)."""
+        try:
+            closed = bool(self.qmp.cmd('qom-get', path='/machine', property='fold-closed').get('return'))
+            self.qmp.cmd('qom-set', path='/machine', property='fold-closed', value=not closed)
+            self.n90_fold.setText('Open fold' if not closed else 'Close fold')
+        except OSError as err:
+            self.status.setText('fold: %s' % err)
+
+    def toggle_n90_twist(self):
+        """The N90's display twist: GPIO 42 (nokia9500.c twisted)."""
+        try:
+            twisted = bool(self.qmp.cmd('qom-get', path='/machine', property='twisted').get('return'))
+            self.qmp.cmd('qom-set', path='/machine', property='twisted', value=not twisted)
+            self.n90_twist.setText('Untwist display' if not twisted else 'Twist display')
+        except OSError as err:
+            self.status.setText('twist: %s' % err)
+
+    def set_n90_cam_angle(self, index):
+        """The N90's camera-angle switches: GPIO 54 / 43 (nokia9500.c camera-angle)."""
+        try:
+            self.qmp.cmd('qom-set', path='/machine', property='camera-angle', value=self.n90_cam.itemData(index))
+        except OSError as err:
+            self.status.setText('camera-angle: %s' % err)
 
     def toggle_slide(self):
         """The 7650's keypad slide: the switch line ekeyb reads (ngage_keys.c, H-nhl2-slide)."""

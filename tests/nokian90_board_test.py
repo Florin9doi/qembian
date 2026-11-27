@@ -168,6 +168,37 @@ class Display(unittest.TestCase):
         self.assertIn(0xe3a00e16, words)                           # mov r0, #0x160
         self.assertIn(0xe3a00e1a, words)                           # mov r0, #0x1a0
 
+    def test_rm42_switches(self):
+        """Fold (GPIO 61), twist (GPIO 42, high = normal), camera-angle (GPIO 54 high, 43 low)."""
+        s = BOARD.read_text()
+        self.assertIn('rm1_gpio_set_input(3, 13, n90_fold_closed);', s)
+        self.assertIn('rm1_gpio_set_input(2, 10, !n90_twisted);', s)
+        self.assertIn('rm1_gpio_set_input(3, 6, n90_cam_angle == 0);', s)
+        self.assertIn('rm1_gpio_set_input(2, 11, n90_cam_angle != 180);', s)
+        cls = func(BOARD, 'static void nokian90_class_init(ObjectClass *oc, const void *data)')
+        self.assertIn('"fold-closed"', cls)
+        self.assertIn('"twisted"', cls)
+        self.assertIn('"camera-angle"', cls)
+
+    def test_rm42_twist_qom_set_segfault(self):
+        """Regression: pressing Twist display / Close fold segfaulted QEMU. object_class_property_add_bool
+        got visitor-style accessors, so qom-set called set(obj, true, errp) and used `true` as a Visitor *.
+        Every add_bool accessor on this board must have the plain bool signatures."""
+        s = BOARD.read_text()
+        for get, set_ in re.findall(r'object_class_property_add_bool\(oc, "[^"]+", (\w+), (\w+)\)', s):
+            self.assertRegex(s, r'static bool %s\(Object \*obj, Error \*\*errp\)' % get)
+            self.assertRegex(s, r'static void %s\(Object \*obj, bool value, Error \*\*errp\)' % set_)
+        self.assertIn('n90_get_twisted', s)
+
+    def test_rm42_cover_display(self):
+        """130x130 cover display on SPI dev 1 and 'cover' view in ngage_phone.py."""
+        self.assertIn('n90_cover_init();', func(BOARD, 'static void nokian90_init(MachineState *machine)'))
+        cover = (REPO / 'src/qemu-ngage/hw/arm/nokia9500_cover.c').read_text()
+        self.assertIn('rm1_spi_attach(1, cover_send, s);', cover)
+        self.assertIn('cover_create(130);', cover)
+        phone = (REPO / 'eka1/tools/ngage_phone.py').read_text()
+        self.assertIn("('cover', {'device': 'cover'}, (130, 130)", phone)
+
 
 if __name__ == '__main__':
     unittest.main()
