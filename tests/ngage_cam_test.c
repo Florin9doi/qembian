@@ -652,10 +652,12 @@ static void test_camx_still(void)
 /* the frame sizes from the DMA transfers seen in runs: whole 16-byte DMA frames, the ISR reads the rest */
 static void test_rm1_frame_len(void)
 {
-    assert(ngage_cam_rm1_frame_len(0x962 * 16) == CAM_HDR_CAMX + 160 * 120 * 2);    /* viewfinder, 0x962C */
-    assert(ngage_cam_rm1_frame_len(0xc802 * 16) == CAM_RM1_STILL);                  /* the JPEG still */
-    assert(ngage_cam_rm1_frame_len(CAM_HDR_CAMX + 640 * 480 * 2) == CAM_HDR_CAMX + 640 * 480 * 2);
-    assert(ngage_cam_rm1_frame_len(0x1000) == 0x1000);                              /* unknown: as it is */
+    reset();
+    ngage_cam_rm1_setup(&cam);
+    assert(ngage_cam_rm1_frame_len(&cam, 0x962 * 16) == CAM_HDR_CAMX + 160 * 120 * 2);    /* viewfinder, 0x962C */
+    assert(ngage_cam_rm1_frame_len(&cam, 0xc802 * 16) == CAM_RM1_STILL);                  /* the JPEG still */
+    assert(ngage_cam_rm1_frame_len(&cam, CAM_HDR_CAMX + 640 * 480 * 2) == CAM_HDR_CAMX + 640 * 480 * 2);
+    assert(ngage_cam_rm1_frame_len(&cam, 0x1000) == 0x1000);                              /* unknown: as it is */
 }
 
 /*

@@ -16,6 +16,7 @@
 #include "qemu/osdep.h"
 #include "qemu/log.h"
 #include "qemu/timer.h"
+#include "qemu/range.h"
 #include "hw/core/irq.h"
 #include "system/memory.h"
 #include "system/reset.h"
@@ -29,6 +30,7 @@
 #define RM1_CAM_FIFO     (RM1_CAM_CCP_BASE + 0x70)
 #define RM1_CAM_IRQ      50         /* level 2 */
 #define RM1_CAM_DRQ      3          /* the channel's CCR sync [V run] */
+#define N90_CAM_DRQ      5          /* the N90's: channel 4, CCR 0x40E5, 16 x 32-bit frame-synchronised [V run] */
 #define RM1_CAM_SCL      11         /* GPIO1 line */
 #define RM1_CAM_SDA      14         /* GPIO4 line */
 #define RM1_CAM_ST_FIFO  0x400      /* status: words wait in the FIFO */
@@ -43,6 +45,7 @@ typedef struct Rm1Cam {
     MemoryRegion mr;
     qemu_irq irq, drq;
     NgageCam cam;
+    int variant;                    /* RM1_CAM_6630 / RM1_CAM_N90 */
     bool scl_low, sda_low;          /* what the PDD drives */
     QEMUTimer *timer;
     bool in_frame;                  /* between the frame-start and frame-end events */
@@ -126,7 +129,7 @@ static void rm1_cam_build(Rm1Cam *s)
     s->built = true;
     s->pos = s->len = 0;
     if (dma) {
-        s->buf = g_realloc(s->buf, ngage_cam_rm1_frame_len(dma));
+        s->buf = g_realloc(s->buf, ngage_cam_rm1_frame_len(&s->cam, dma));
         s->len = ngage_cam_rm1_fill(&s->cam, s->buf, dma);
     }
 }
@@ -147,8 +150,13 @@ static void rm1_cam_update(Rm1Cam *s)
         timer_mod(s->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
                   (s->in_frame ? RM1_CAM_START_NS : RM1_CAM_FRAME_NS - RM1_CAM_START_NS));
     }
-    /* before the frame's first read the channel may still be arming (the frame-start DFC): high */
-    qemu_set_irq(s->drq, s->in_frame && (!s->built || ngage_cam_rm1_drq(rm1_cam_fifo_left(s))));
+    /*
+     * before the frame's first read the channel may still be arming (the frame-start DFC): high. The 6630 reads the
+     * tail (< 16 bytes) itself; the N90's ISR reads at most 4 words but its frames end mid-way through a 64-byte DMA
+     * frame (0x9728 = 604 x 64 + 40), so its DMA drains the FIFO and the count hook drops the padding.
+     */
+    qemu_set_irq(s->drq, s->in_frame && (!s->built || (s->variant == RM1_CAM_N90 ? rm1_cam_fifo_left(s) > 0
+                                                       : ngage_cam_rm1_drq(rm1_cam_fifo_left(s)))));
 }
 
 static void rm1_cam_frame(void *opaque)
@@ -160,7 +168,8 @@ static void rm1_cam_frame(void *opaque)
         s->built = false;
         s->waits = 0;
         ngage_cam_frame_start(&s->cam);
-    } else if ((rm1_cam_fifo_left(s) >= CAM_RM1_DMA_FRAME || (!s->built && rm1_cam_dma_len())) &&
+    } else if ((rm1_cam_fifo_left(s) >= (s->variant == RM1_CAM_N90 ? 4 : CAM_RM1_DMA_FRAME) ||
+                (!s->built && rm1_cam_dma_len())) &&
                ++s->waits < RM1_CAM_WAITS) {
         /* the DMA still moves the frame: end it when the DMA has */
         timer_mod(s->timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + RM1_CAM_WAIT_NS);
@@ -170,6 +179,31 @@ static void rm1_cam_frame(void *opaque)
         ngage_cam_frame_end(&s->cam);
     }
     rm1_cam_update(s);
+}
+
+/* QEMU's omap_dma (patch 0029): the elements a channel reading the FIFO really got, the bytes served this frame */
+extern uint32_t (*omap_dma_count_hook)(hwaddr src, uint32_t elements);
+static Rm1Cam *rm1_cam_counted;
+
+static uint32_t rm1_cam_count(hwaddr src, uint32_t elements)
+{
+    Rm1Cam *s = rm1_cam_counted;
+
+    if (!s || src != RM1_CAM_FIFO || !s->built) {
+        return elements;
+    }
+    return MIN(elements, s->pos / 4);
+}
+
+/*
+ * DMA port 2 is the OMAP16xx's OCP-T1 (QEMU: "imif", IMIF RAM only); the N90's camera channel reads the FIFO through it
+ * (CSDP 0x800A) [V run: "Bus time-out in DMA4"]. The port also reaches the receiver's window.
+ */
+static int (*rm1_ocp_t1_valid)(struct omap_mpu_state_s *s, hwaddr addr);
+
+static int rm1_cam_ocp_t1_valid(struct omap_mpu_state_s *s, hwaddr addr)
+{
+    return range_covers_byte(RM1_CAM_CCP_BASE, RM1_CAM_CCP_SIZE, addr) || rm1_ocp_t1_valid(s, addr);
 }
 
 static uint64_t rm1_ccp_read(void *opaque, hwaddr addr, unsigned size)
@@ -227,7 +261,11 @@ static void rm1_cam_reset(void *opaque)
     Rm1Cam *s = opaque;
 
     ngage_cam_init(&s->cam);
-    ngage_cam_rm1_setup(&s->cam);
+    if (s->variant == RM1_CAM_N90) {
+        ngage_cam_n90_setup(&s->cam);
+    } else {
+        ngage_cam_rm1_setup(&s->cam);
+    }
     timer_del(s->timer);
     s->in_frame = s->built = false;
     qemu_set_irq(s->irq, 0);
@@ -236,13 +274,22 @@ static void rm1_cam_reset(void *opaque)
     rm1_cam_bus(s);
 }
 
-void rm1_cam_init(MemoryRegion *sys, struct omap_mpu_state_s *mpu)
+void rm1_cam_init(MemoryRegion *sys, struct omap_mpu_state_s *mpu, int variant)
 {
     Rm1Cam *s = g_new0(Rm1Cam, 1);
 
+    s->variant = variant;
     s->cam.log = rm1_cam_log;
     s->irq = qdev_get_gpio_in(mpu->ih[1], RM1_CAM_IRQ);
-    s->drq = mpu->drq[RM1_CAM_DRQ];
+    s->drq = mpu->drq[variant == RM1_CAM_N90 ? N90_CAM_DRQ : RM1_CAM_DRQ];
+    if (!rm1_ocp_t1_valid) {
+        rm1_ocp_t1_valid = mpu->port[imif].addr_valid;
+        mpu->port[imif].addr_valid = rm1_cam_ocp_t1_valid;
+    }
+    if (variant == RM1_CAM_N90) {
+        rm1_cam_counted = s;
+        omap_dma_count_hook = rm1_cam_count;
+    }
     s->timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, rm1_cam_frame, s);
     memory_region_init_io(&s->mr, NULL, &rm1_ccp_ops, s, "omap1610.ccp", RM1_CAM_CCP_SIZE);
     memory_region_add_subregion_overlap(sys, RM1_CAM_CCP_BASE, &s->mr, 10);

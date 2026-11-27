@@ -52,12 +52,27 @@ void ngage_cam_init(NgageCam *c)
     c->ccp[CAM_CCP_MASK / 4] = 0x3ff;
     c->scl = c->sda = true;
     c->addr = CAM_I2C_ADDR;
+    c->cur = -1;
 }
 
 void ngage_cam_set_sensor(NgageCam *c, uint8_t addr, bool reg16)
 {
     c->addr = addr;
     c->reg16 = reg16;
+}
+
+uint8_t *ngage_cam_add_aux(NgageCam *c, uint8_t addr, uint8_t regw)
+{
+    NgageCamAux *a;
+
+    if (c->naux >= CAM_AUX_MAX) {
+        return NULL;
+    }
+    a = &c->aux[c->naux++];
+    memset(a, 0, sizeof(*a));
+    a->addr = addr;
+    a->regw = regw;
+    return a->mem;
 }
 
 static uint16_t cam_reg_mask(const NgageCam *c)
@@ -80,13 +95,40 @@ static bool cam_i2c_byte(NgageCam *c, uint8_t b)
 {
     if (c->tx == 0xfe) {                        /* the address byte of this transfer */
         c->tx = 0;
+        c->cur = -1;
         if (b >> 1 != c->addr) {
-            return false;
+            for (unsigned i = 0; i < c->naux; i++) {
+                if (c->aux[i].addr == b >> 1) {
+                    c->cur = i;
+                }
+            }
+            if (c->cur < 0) {
+                return false;
+            }
         }
         c->rd = b & 1;
+        if (c->cur >= 0) {
+            c->naddr = c->rd ? 0 : c->aux[c->cur].regw;
+            if (c->naddr || !c->aux[c->cur].regw) {
+                c->ptr = 0;                     /* a register-less part starts at 0 every transfer */
+            }
+            return true;
+        }
         c->naddr = c->rd ? 0 : c->reg16 ? 2 : 1;
         if (c->naddr) {
             c->ptr = 0;
+        }
+        return true;
+    }
+    if (c->cur >= 0) {                          /* another device on the bus */
+        NgageCamAux *a = &c->aux[c->cur];
+
+        if (c->naddr) {
+            c->ptr = b;
+            c->naddr--;
+        } else {
+            a->mem[c->ptr & 0xff] = b;
+            c->ptr = (c->ptr + 1) & 0xff;
         }
         return true;
     }
@@ -127,6 +169,13 @@ static void cam_cmd_exec(NgageCam *c)
 
 static void cam_i2c_load(NgageCam *c)
 {
+    if (c->cur >= 0) {
+        c->shift = c->aux[c->cur].mem[c->ptr & 0xff];
+        c->ptr = (c->ptr + 1) & 0xff;
+        c->nbits = 0;
+        c->s_sda_low = !(c->shift & 0x80);
+        return;
+    }
     if (c->cmdport && c->ptr == CAM_CMD_PORT) {
         c->shift = c->resp[c->nresp & 7];
         c->nresp++;
@@ -792,11 +841,20 @@ uint32_t ngage_cam_camx_jpeg_wh(uint8_t *dst, uint32_t cap, unsigned w, unsigned
     return o;
 }
 
+/* the frame header of the camx layout: 44 bytes (7610, 6670, 6630) unless the phone sets another (N90: 296) */
+static unsigned cam_hdr(const NgageCam *c)
+{
+    return c->hdr ? c->hdr : CAM_HDR_CAMX;
+}
+
 uint32_t ngage_cam_fill(NgageCam *c, uint8_t *dst, uint32_t bytes)
 {
     static const unsigned sizes[][2] = { { 160, 120 }, { 176, 144 }, { 640, 480 },
                                          /* 128 x 96: the 6260 viewfinder in swivel position 5 [V run] */
-                                         { 128, 96 } };
+                                         { 128, 96 },
+                                         /* the N90's other raw modes (campdd mode table 0x500d0a88) [V] */
+                                         { 320, 240 }, { 352, 288 }, { 800, 600 } };
+    unsigned hdr = cam_hdr(c);
     bool rgb444 = ngage_cam_rgb444(c);
     int fmt = rgb444 ? CAM_FMT_RGB444
             : c->reg16 && c->regs[CAM_REG_MODE] == 7 ? CAM_FMT_RGB565
@@ -821,15 +879,15 @@ uint32_t ngage_cam_fill(NgageCam *c, uint8_t *dst, uint32_t bytes)
     if (c->camx && bytes == (c->still_bytes ? c->still_bytes : CAM_CAMX_STILL)) {  /* the sensor's JPEG still */
         uint32_t len, o;
 
-        memset(dst, 0, CAM_HDR_CAMX);
-        o = ngage_cam_camx_jpeg_wh(dst + CAM_HDR_CAMX, bytes - CAM_HDR_CAMX, c->still_w ? c->still_w : CAM_CAMX_W,
+        memset(dst, 0, hdr);
+        o = ngage_cam_camx_jpeg_wh(dst + hdr, bytes - hdr, c->still_w ? c->still_w : CAM_CAMX_W,
                                    c->still_h ? c->still_h : CAM_CAMX_H, c->frames, !c->still_raw, &len);
         c->regs[CAM_REG_CAMX_LEN] = len >> 16;
         c->regs[CAM_REG_CAMX_LEN + 1] = len >> 8;
         c->regs[CAM_REG_CAMX_LEN + 2] = len;
         c->regs[CAM_REG_CAMX_LEN + 4] = 0xc0;
         cam_log(c, "camx JPEG still: %u bytes, %u sent", len, o);
-        return o ? CAM_HDR_CAMX + o : bytes;
+        return o ? hdr + o : bytes;
     }
     memset(dst, fmt <= CAM_FMT_RGB565 ? 0 : 0x80, bytes);
     for (unsigned i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
@@ -842,9 +900,9 @@ uint32_t ngage_cam_fill(NgageCam *c, uint8_t *dst, uint32_t bytes)
             cam_pattern_wh(dst + w * 2, w, h, c->frames, fmt, c->rot90);
             return bytes;
         }
-        if (bytes == w * h * 2 + CAM_HDR_CAMX) {    /* 7610/6670: a 44-byte header, then the picture */
-            memset(dst, 0, CAM_HDR_CAMX);
-            cam_pattern_wh(dst + CAM_HDR_CAMX, w, h, c->frames, fmt, c->rot90);
+        if (bytes == w * h * 2 + hdr) {             /* 7610/6670/6630: a 44-byte header (N90: 296), then the picture */
+            memset(dst, 0, hdr);
+            cam_pattern_wh(dst + hdr, w, h, c->frames, fmt, c->rot90);
             return bytes;
         }
     }
@@ -871,18 +929,47 @@ void ngage_cam_rm1_setup(NgageCam *c)
     c->regs[0x5f] = 0x02;
 }
 
-uint32_t ngage_cam_rm1_frame_len(uint32_t dma)
+void ngage_cam_n90_setup(NgageCam *c)
+{
+    uint8_t *adc;
+
+    ngage_cam_rm1_setup(c);
+    c->hdr = CAM_HDR_N90;
+    c->still_bytes = CAM_N90_STILL;
+    c->still_w = CAM_N90_W;
+    c->still_h = CAM_N90_H;
+    ngage_cam_set_sensor(c, CAM_I2C_ADDR, true);    /* 0x78 / 0x79, register high byte first [V campdd 0x500c6240] */
+    ngage_cam_add_aux(c, 0x3e, 1);                  /* 0x7C: one register byte [V 0x500c6290] */
+    adc = ngage_cam_add_aux(c, 0x64, 0);            /* 0xC8: no register [V 0x500c629c] */
+    /* campdd 0x500c4ec4 writes it 2 bytes, reads 4 and takes their rounded mean; 0 = failure [V]. What it measures: [I] */
+    memset(adc, 0x80, 4);
+    for (uint8_t page = 0; page < 4; page++) {      /* 0xA0..0xA6 by register >> 8 (table 0x500cd380) */
+        ngage_cam_add_aux(c, 0x50 + page, 1);
+    }
+}
+
+/*
+ * A DMA transfer of dma bytes carries a frame of n bytes: the 6630 arms the whole 16-byte DMA frames below n (0x9620
+ * for 0x962C) and reads the tail from the FIFO; the N90 arms up to 0x20 more than n (0x9740 for 0x9728) [V runs].
+ */
+static bool cam_rm1_dma_fits(uint32_t n, uint32_t dma)
+{
+    return (n & ~(CAM_RM1_DMA_FRAME - 1)) == dma || (dma > n && dma - n <= 2 * CAM_RM1_DMA_FRAME);
+}
+
+uint32_t ngage_cam_rm1_frame_len(const NgageCam *c, uint32_t dma)
 {
     static const unsigned sizes[][2] = { { 160, 120 }, { 320, 240 }, { 640, 480 }, { 128, 96 }, { 176, 144 },
-                                         { 352, 288 } };
+                                         { 352, 288 }, { 800, 600 } };
+    uint32_t still = c->still_bytes ? c->still_bytes : CAM_RM1_STILL;
 
-    if ((CAM_RM1_STILL & ~(CAM_RM1_DMA_FRAME - 1)) == dma) {
-        return CAM_RM1_STILL;
+    if (cam_rm1_dma_fits(still, dma)) {
+        return still;
     }
     for (unsigned i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
-        uint32_t n = CAM_HDR_CAMX + sizes[i][0] * sizes[i][1] * 2;
+        uint32_t n = cam_hdr(c) + sizes[i][0] * sizes[i][1] * 2;
 
-        if ((n & ~(CAM_RM1_DMA_FRAME - 1)) == dma) {
+        if (cam_rm1_dma_fits(n, dma)) {
             return n;
         }
     }
@@ -903,11 +990,12 @@ void ngage_cam_rm1_header(uint8_t *h)
 
 uint32_t ngage_cam_rm1_fill(NgageCam *c, uint8_t *dst, uint32_t dma)
 {
-    uint32_t n = ngage_cam_rm1_frame_len(dma);
+    uint32_t n = ngage_cam_rm1_frame_len(c, dma);
 
     memset(dst, 0, n);
     n = ngage_cam_fill(c, dst, n);
-    if (n > CAM_HDR_CAMX) {
+    if (n > cam_hdr(c)) {
+        memset(dst, 0x80, cam_hdr(c));
         ngage_cam_rm1_header(dst);
     }
     return n;

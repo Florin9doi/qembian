@@ -26,6 +26,7 @@ reply 35 00 01 00 00                                      # N-Gage: BB5: self-te
 reply 59 01 02 00 00                                      # N-Gage: self-test last step (N95: 59 42 -> 43, any payload) [I]
 reply 59 42 43 00 00                                      # the DSY's self-test (object 0x77, Startup -> RDosSelfTest::PerformSelfTest): unanswered, Startup showed "Phone start-up failed. Contact the retailer." [V run]; 43 with status 00 (the N95 pairing) [I]
 reply 3A 05 06 echo                                       # N-Gage: BB5: PN_LIGHT, echo the request with status 0
+reply 3A 03 04 00                                         # set brightness (light, res 0x3A), sent when the display is twisted into imaging mode (unanswered before) [V run]; answered as the 9500/7710 tables (ra2/rm12: parser takes msg 04/06, reads data[0]) [I for the N90]
 reply 15 0B 6E 00 00                                      # N-Gage: BB5: MTC_STARTUP_SYNQ_REQ -> RESP (MTC replies are id + 0x63)
 reply 15 02 65 01 01 00 00                                # N-Gage: BB5: MTC_STATE_QUERY: current NORMAL, target NORMAL
 reply 15 01 64 00 00                                      # N-Gage: BB5: MTC_STATE_REQ -> OK

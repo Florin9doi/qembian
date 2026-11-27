@@ -1,0 +1,55 @@
+diff -ru a/hw/dma/omap_dma.c b/hw/dma/omap_dma.c
+--- a/hw/dma/omap_dma.c	2026-11-27 20:30:53.283323293 +0200
++++ b/hw/dma/omap_dma.c	2026-11-27 20:38:25.389243508 +0200
+@@ -182,6 +182,13 @@
+     a->frames = ch->frames;
+     a->elements = ch->elements;
+     a->pck_elements = ch->frame_index[!ch->src_sync];
++    if (a->pck_elements <= 0) {
++        /*
++         * qembian: FS and BS with no packet size (the Nokia N90's camera channel: CCR 0x40E5 with
++         * CCR2 bit 2, frame indexes 0) divided by zero below; taken as one packet a frame [inferred].
++         */
++        a->pck_elements = a->elements;
++    }
+     a->frame = 0;
+     a->element = 0;
+     a->pck_element = 0;
+@@ -649,6 +656,13 @@
+     }
+ }
+ 
++/*
++ * qembian: a board's view of +0x34/+0x36 for a channel reading its device (src): the real DMA
++ * stalls on an empty peripheral FIFO and counts a partial frame, QEMU's frame-synchronised
++ * transfer always moves whole frames (the Nokia N90's camera, nokia6630_cam.c).
++ */
++uint32_t (*omap_dma_count_hook)(hwaddr src, uint32_t elements);
++
+ static int omap_dma_ch_reg_read(struct omap_dma_s *s,
+                 struct omap_dma_channel_s *ch, int reg, uint16_t *value)
+ {
+@@ -761,6 +775,23 @@
+                 ch->type;
+         break;
+ 
++    case 0x34:  /* qembian: OMAP1710 elements moved, low half */
++    case 0x36:  /* high half */
++        /*
++         * The Nokia N90's campdd counts a camera frame as 4 * (+0x34 | +0x36 << 16) bytes after it
++         * stops the channel (campdd 0x500cc6c8). Taken as the elements written to the destination
++         * since the channel was enabled (post-increment destinations only) [inferred].
++         */
++        {
++            uint32_t n = ch->data_type ?
++                (uint32_t)(ch->active_set.dest - ch->addr[1]) / ch->data_type : 0;
++            if (omap_dma_count_hook) {
++                n = omap_dma_count_hook(ch->addr[0], n);
++            }
++            *value = reg == 0x34 ? n & 0xffff : n >> 16;
++        }
++        break;
++
+     default:
+         return 1;
+     }

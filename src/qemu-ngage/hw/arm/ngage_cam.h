@@ -58,6 +58,15 @@
 #define CAM_CCP_FIFO      0x1012102c    /* the DMA engine's view of +0x2C (alias 0x1012xxxx = 0x0C12xxxx) [V run] */
 #define CAM_IRQ           86        /* IrqCCPStatus: interrupt name index 95 - 9 [V ekern 0x5030a9f4] */
 
+/* other devices on the sensor's I2C bus (the N90's camera module: an 8-bit-register part, a register-less part, an
+   EEPROM in 4 pages of 256 bytes) */
+#define CAM_AUX_MAX       8
+typedef struct NgageCamAux {
+    uint8_t addr;                   /* 7-bit */
+    uint8_t regw;                   /* register-number bytes after the address: 0 (none: reads and writes from 0) or 1 */
+    uint8_t mem[256];
+} NgageCamAux;
+
 typedef struct NgageCam {
     /* I2C: what the master pulls low, what the sensor pulls low */
     bool m_scl_low, m_sda_low, s_sda_low;
@@ -79,9 +88,13 @@ typedef struct NgageCam {
     uint16_t still_w, still_h;      /* camx: the still's picture size, 0 = CAM_CAMX_W x CAM_CAMX_H */
     bool still_raw;                 /* camx: the still's words in stream order (the 6630's campdd swaps only the
                                        44-byte header, 0x500a0934), not byte-reversed as for camxpdd */
+    uint16_t hdr;                   /* camx: the frame header's length, 0 = CAM_HDR_CAMX (44); the N90: CAM_HDR_N90 */
     bool rot90;                     /* the sensor lies on its side (6260): frames carry the picture turned 90 degrees
                                        clockwise (set by the board after init; ngage_cam_fill) */
     uint8_t regs[CAM_NREGS];
+    NgageCamAux aux[CAM_AUX_MAX];   /* ngage_cam_add_aux */
+    unsigned naux;
+    int cur;                        /* the device of this transfer: -1 = the sensor, else an aux index */
     /* CCP receiver */
     uint32_t ccp[CAM_CCP_SIZE / 4];
     uint16_t status;
@@ -95,6 +108,8 @@ void ngage_cam_init(NgageCam *c);
 /* 3230: the answer to a module command */
 void ngage_cam_cmd(NgageCam *c, const uint8_t *cmd, unsigned n, uint8_t resp[8]);
 void ngage_cam_set_sensor(NgageCam *c, uint8_t addr, bool reg16);
+/* another device on the bus (7-bit addr, regw register bytes 0/1); returns its memory or NULL (full) */
+uint8_t *ngage_cam_add_aux(NgageCam *c, uint8_t addr, uint8_t regw);
 /* GPIO port: the value written to 0x0C150210 (bits 7/8 = pull SCL/SDA low) */
 void ngage_cam_gpio_drive(NgageCam *c, uint16_t drive);
 /* GPIO port: the bus lines as 0x0C15020C shows them (bits 7/8; 1 = high) */
@@ -147,11 +162,20 @@ uint32_t ngage_cam_camx_jpeg_wh(uint8_t *dst, uint32_t cap, unsigned w, unsigned
 #define CAM_RM1_STILL     0xc802c   /* the still's transfer, header + 0xC8000: DMA CFN 0xC802 x 16 = 0xC8020 [V run] */
 #define CAM_RM1_W         1280      /* the 6630's still: 1.3 megapixels [I] */
 #define CAM_RM1_H         960
+#define CAM_HDR_N90       296       /* N90 campdd: frames start with 0x128 bytes; ISR 0x500c7324 wants more than that and
+                                       hands out count - 0x128 [V] */
+#define CAM_N90_STILL     0xe1128   /* the N90's JPEG still modes: expected size 0 (any), DMA 0xE1128 (mode table
+                                       0x500d0a88, 0x2C-byte entries: +0x24 expected, +0x28 DMA) [V] */
+#define CAM_N90_W         1600      /* 2 megapixels [I: the phone's still size] */
+#define CAM_N90_H         1200
 #define CAM_RM1_DMA_FRAME 16        /* the driver's DMA frame: 4 words (CEN 4, frame-synchronised) [V run] */
 /* after ngage_cam_init: the 7610 layout, the 6630's still (JPEG in stream order), the gain registers' power-on values */
 void ngage_cam_rm1_setup(NgageCam *c);
+/* Nokia N90 (RM-42): the 6630's receiver and frames, a sensor with 16-bit register numbers and the module's other
+   I2C parts (docs/devices/nokia-7650-nhl2/camera.md "Nokia N90") */
+void ngage_cam_n90_setup(NgageCam *c);
 /* the frame the sensor sends for a DMA transfer of dma bytes (whole DMA frames): header + picture, or the still */
-uint32_t ngage_cam_rm1_frame_len(uint32_t dma);
+uint32_t ngage_cam_rm1_frame_len(const NgageCam *c, uint32_t dma);
 /*
  * The 44-byte header: the sensor's embedded data, 7-bit fields with bit 7 set [V: campdd's own values 0x500a09c4
  * (B2 87 80 at +4..+6), its 21-bit field reader 0x500a0a98]. CamServerCore builds the picture's EXIF from it
