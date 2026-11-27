@@ -21,8 +21,10 @@ The phone keeps its flash (C:, settings) in build/ngage/phones/NAME.flash betwee
   press is a long press.
   Host keyboard: arrows, Enter = select, F1/F2 = left/right softkey, F3 = call (green),
   F4 = end (red), F5 = menu, Backspace = clear, Shift = edit, 0-9, * and #, F12 = power.
-- Nokia 6600 infrared: --irda a on one phone and --irda b on another (different --phone names) links them: Menu,
-  Connect., Infrared on one, Send, Via infrared on the other (docs/eka1-ngage.md "Infrared").
+- Infrared (6600, 6260, 9210 ...): --irda a on one phone and --irda b on another (different --phone names) links
+  them; eka1/tools/ngage_irsend.py takes end b for a phone on a. 6600: Menu, Connect., Infrared to receive, an
+  item's Send, Via infrared to send. 9210: Menu, Tools, Receive via infrared; File, Send, Via infrared
+  (docs/eka1-ngage.md "Infrared").
 - Nokia 7650: a Slide button (or F7) opens and closes the keypad slide (qom-set /machine slide-closed); the
   phone starts with it open. Closed, the keypad locks and the camera (behind the slide) is on stand-by; open,
   the camera shows the board's test pattern (ngage_cam.c, docs/devices/nokia-7650-nhl2/camera.md).
@@ -424,7 +426,7 @@ def main():
                          'nokia9500 = Nokia 9500 Communicator, p910i = Sony Ericsson P910i, nokia7710 = Nokia 7710, p800 = Sony Ericsson P800, p900 = Sony Ericsson P900, nokia3230 = Nokia 3230, nokia7610 = Nokia 7610, nokia6670 = Nokia 6670, nokia6260 = Nokia 6260)')
     ap.add_argument('--phone', help="which phone (its flash file); default: the model's name")
     ap.add_argument('--mmc', default='', help='memory card image (E:), made with eka1/tools/ngage_card.py')
-    ap.add_argument('--irda', default='', help='Nokia 6600 infrared: "a" or "b" joins two phones (one each), or a QEMU '
+    ap.add_argument('--irda', default='', help='infrared (6600, 9210 ...): "a" or "b" joins two phones (one each), or a QEMU '
                     'chardev spec (docs/eka1-ngage.md "Infrared")')
     ap.add_argument('--fresh', action='store_true', help='factory-fresh: forget the saved flash')
     ap.add_argument('--keep', action='store_true', help='leave the session running when the window closes')

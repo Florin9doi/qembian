@@ -143,6 +143,9 @@ unreachable" error, holding the main lock). Any other value is a QEMU chardev sp
 (`tcp:...,server=on,wait=off` with a client on the other side, a host serial port such as `/dev/ttyUSB0`, whose
 baud rate follows the phone's), and `ngage_sess.py start --irda` takes the same values. Without `--irda`, a session writes what the phone transmits to `serial2`.
 The 6260 beams the same way (`--model nokia6260`); the 7650, 3650/3660 and 3230 have the port on, not tried yet (`NgageModel.irda`).
+The **9210** (`--model nokia9210`, its own UART: `nokia9210_ir.h`) beams to and from `ngage_irsend.py`: Menu, Tools,
+Receive via infrared / an entry's File, Send, Via infrared ([devices/nokia-9210-rae3/bring-up.md](devices/nokia-9210-rae3/bring-up.md) "IrDA").
+The link code (UDP socket or chardev) is shared: `ngage_irlink.c`.
 
 ## How it fits together
 
@@ -152,7 +155,7 @@ The 6260 beams the same way (`--model nokia6260`); the 7650, 3650/3660 and 3230 
 | NOS stand-in | `src/qemu-ngage/nos-standin/nos_standin.S` | copied over the NOS entry; registers the variant interfaces as trap objects; each call goes to the board's NOS device (0x0C1F0000); also the RTC hand-over and the ISI delivery DFC |
 | ISI / PhoNet | `src/qemu-ngage/hw/arm/ngage_isi.c` | decodes NOSDRIVER sends; answers from `src/qemu-ngage/isi-replies.txt` (`reply RES REQ RESP BYTES`, `len=`, `echo`, `ind UNIT OBJ ...`) |
 | Keypad | `src/qemu-ngage/hw/arm/ngage_keys.c` | the matrix ekeyb scans; QEMU input → matrix |
-| Machine options | `-M ngage,ppm=DIR,isi=FILE,flash=FILE,mmc=FILE,irda=udp:HOST:PORT@[LHOST]:LPORT` | `irda=`: the IR link on the board's own UDP socket (models with IrDA) |
+| Machine options | `-M ngage,ppm=DIR,isi=FILE,flash=FILE,mmc=FILE,irda=udp:HOST:PORT@[LHOST]:LPORT` | `irda=`: the IR link on the board's own UDP socket (models with IrDA; also `-M nokia9210`) |
 
 Environment knobs (experiments):
 

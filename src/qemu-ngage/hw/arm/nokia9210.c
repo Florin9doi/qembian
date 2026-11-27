@@ -13,8 +13,9 @@
  *               0x05011000 (the DSP's API RAM; the bootstrap runs its flash-ID routine there [V])
  *   everything else: a catch-all that logs ("nokia9210: R/W addr size value pc"), keeps written values and
  *   ORs in the "ready" bits of nokia9210_ready[].
- * Options: -M nokia9210,ppm=DIR[,flash=FILE]  DIR = eka1/rae3/core (ROM.bin: eka1/tools/rae3_extract.py),
- *          FILE = the DataFlash (C:, 4 MB), created blank and kept
+ * Options: -M nokia9210,ppm=DIR[,flash=FILE][,irda=udp:HOST:PORT@[LHOST]:LPORT]  DIR = eka1/rae3/core (ROM.bin:
+ *          eka1/tools/rae3_extract.py), FILE = the DataFlash (C:, 4 MB), created blank and kept; irda = the IR
+ *          link's UDP socket (without it, IrDA is on QEMU's 2nd serial port)
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
@@ -36,6 +37,9 @@
 #include "ui/input.h"
 #include "nokia9210_keys.h"
 #include "ngage_rae5_doc_stub.h"
+#include "nokia9210_ir.h"
+#include "ngage_irlink.h"
+#include "system/system.h"
 
 #define RAE3_BANK0      0x00000000u
 #define RAE3_BANK0_SIZE (8 * MiB)
@@ -50,6 +54,7 @@ static char *rae3_dir;                  /* -M nokia9210,ppm=DIR */
 static char *rae3_flash_file;           /* -M nokia9210,flash=FILE: the DataFlash (C:), kept across boots;
                                          * -M nokia9210i: the DiskOnChip C: image (rae5_blk_*) */
 static bool rae3_is_i;                  /* -M nokia9210i (RAE-5) */
+static char *rae3_irda_spec;            /* -M nokia9210,irda=udp:HOST:PORT@[LHOST]:LPORT (else the 2nd -serial) */
 
 /* ---- catch-all for unmodelled addresses ---------------------------------------------------------- */
 
@@ -1106,6 +1111,139 @@ static const QemuInputHandler rae3_key_handler = {
     .event = rae3_key_event,
 };
 
+/* ---- IrDA (nokia9210_ir.h, docs/research/rae3-irda.md) ------------------------------------------------- */
+
+/*
+ * The SIR UART at 0x0500C000 on the IR link (ngage_irlink.c: irda=udp:... or QEMU's 2nd serial port; the
+ * phone's IrDA.prt frames SIR itself, so the link carries the raw SIR byte stream, as on the 6600). TX goes
+ * out at once; RX is paced at the phone's baud (16 bytes at a time, then their char time), as the PDD's
+ * receive interrupt would see it, so a whole frame from the peer never lands in EComm's buffer at once.
+ */
+#define RAE3_IR_CHUNK 16
+
+static Rae3Ir rae3_ir;
+static NgageIrLink rae3_ir_link;
+static QEMUTimer *rae3_ir_pace;
+static int64_t rae3_ir_next;            /* QEMU_CLOCK_VIRTUAL ns: when the line may deliver again */
+static uint32_t rae3_uarton[2];         /* 0x0500800C, 0x05008010 as written (the catch-all kept them before) */
+static unsigned rae3_ir_logged;
+
+static void rae3_ir_tx(void *opaque, uint8_t b)
+{
+    ngage_irlink_tx(&rae3_ir_link, b);
+}
+
+static void rae3_ir_set_baud(void *opaque, unsigned baud)
+{
+    ngage_irlink_set_baud(&rae3_ir_link, baud);
+}
+
+static void rae3_ir_level(void *opaque, bool level)
+{
+    rae3_set_source(RAE3_IR_SRC_RX, level);
+}
+
+static unsigned rae3_ir_link_room(void *opaque)
+{
+    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    unsigned room = rae3_ir_rx_room(&rae3_ir);
+
+    if (!rae3_ir_open(&rae3_ir)) {
+        return room;                    /* off: take everything, the core drops it */
+    }
+    if (now < rae3_ir_next || !room) {
+        timer_mod(rae3_ir_pace, MAX(rae3_ir_next, now + 10 * NANOSECONDS_PER_SECOND / MAX(rae3_ir.baud, 1200u)));
+        return 0;
+    }
+    return MIN(room, RAE3_IR_CHUNK);
+}
+
+static void rae3_ir_link_rx(void *opaque, const uint8_t *buf, unsigned n)
+{
+    if (rae3_ir_open(&rae3_ir)) {
+        rae3_ir_next = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) +
+                       (int64_t)n * 10 * NANOSECONDS_PER_SECOND / MAX(rae3_ir.baud, 1200u);
+    }
+    rae3_ir_rx(&rae3_ir, buf, n);
+}
+
+static void rae3_ir_pace_expire(void *opaque)
+{
+    ngage_irlink_kick(&rae3_ir_link);
+}
+
+static uint64_t rae3_ir_mmio_read(void *opaque, hwaddr a, unsigned size)
+{
+    return rae3_ir_read(&rae3_ir, a & ~3u);
+}
+
+static void rae3_ir_mmio_write(void *opaque, hwaddr a, uint64_t v, unsigned size)
+{
+    if (rae3_ir_logged < 32 && a != RAE3_IR_TXDATA) {
+        rae3_ir_logged++;
+        qemu_log_mask(LOG_UNIMP, "nokia9210-ir: W %08x = %08x pc=%08x\n", RAE3_IR_BASE + (unsigned)a,
+                      (unsigned)v, rae3_pc());
+    }
+    rae3_ir_write(&rae3_ir, a & ~3u, v);
+}
+
+static const MemoryRegionOps rae3_ir_ops = {
+    .read = rae3_ir_mmio_read,
+    .write = rae3_ir_mmio_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid = { .min_access_size = 1, .max_access_size = 4 },
+    .impl = { .min_access_size = 4, .max_access_size = 4 },
+};
+
+static uint64_t rae3_uarton_read(void *opaque, hwaddr a, unsigned size)
+{
+    return rae3_uarton[(a >> 2) & 1];
+}
+
+static void rae3_uarton_write(void *opaque, hwaddr a, uint64_t v, unsigned size)
+{
+    bool was = rae3_ir_open(&rae3_ir);
+
+    rae3_uarton[(a >> 2) & 1] = v;
+    if (a & 4) {
+        rae3_ir_power(&rae3_ir, v, 0);
+    } else {
+        rae3_ir_power(&rae3_ir, 0, v);
+    }
+    if (was != rae3_ir_open(&rae3_ir)) {
+        qemu_log_mask(LOG_UNIMP, "nokia9210-ir: port %s (tx %u rx %u dropped %u) pc=%08x\n",
+                      was ? "off" : "on", rae3_ir.tx_total, rae3_ir.rx_total, rae3_ir.rx_dropped, rae3_pc());
+        ngage_irlink_kick(&rae3_ir_link);
+    }
+}
+
+static const MemoryRegionOps rae3_uarton_ops = {
+    .read = rae3_uarton_read,
+    .write = rae3_uarton_write,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid = { .min_access_size = 4, .max_access_size = 4 },
+};
+
+static void rae3_ir_setup(MemoryRegion *sys)
+{
+    MemoryRegion *m;
+
+    rae3_ir_init(&rae3_ir);
+    rae3_ir.tx_byte = rae3_ir_tx;
+    rae3_ir.set_baud = rae3_ir_set_baud;
+    rae3_ir.rx_level = rae3_ir_level;
+    rae3_ir_pace = timer_new_ns(QEMU_CLOCK_VIRTUAL, rae3_ir_pace_expire, NULL);
+    ngage_irlink_init(&rae3_ir_link, "nokia9210-ir", rae3_irda_spec, serial_hd(1), rae3_ir_link_room,
+                      rae3_ir_link_rx, NULL);
+    rae3_set_source(RAE3_IR_SRC_TX, true);      /* the transmitter always takes bytes (TX is instant) */
+    m = g_new(MemoryRegion, 1);
+    memory_region_init_io(m, NULL, &rae3_ir_ops, NULL, "nokia9210.ir", RAE3_IR_SIZE);
+    memory_region_add_subregion_overlap(sys, RAE3_IR_BASE, m, 10);
+    m = g_new(MemoryRegion, 1);
+    memory_region_init_io(m, NULL, &rae3_uarton_ops, NULL, "nokia9210.uart-on", 8);
+    memory_region_add_subregion_overlap(sys, RAE3_UARTON_CLR, m, 10);
+}
+
 static void rae3_soc_init(MemoryRegion *sys, ARMCPU *cpu)
 {
     MemoryRegion *m;
@@ -1161,6 +1299,7 @@ static void rae3_soc_init(MemoryRegion *sys, ARMCPU *cpu)
     m = g_new(MemoryRegion, 1);
     memory_region_init_io(m, NULL, &rae3_timer_ops, (void *)1, "nokia9210.gpt32k", 0x20);
     memory_region_add_subregion(sys, 0x05016000, m);
+    rae3_ir_setup(sys);
 }
 
 /* ---- the machine -------------------------------------------------------------------------------- */
@@ -1243,6 +1382,17 @@ static void rae3_set_flash(Object *obj, const char *value, Error **errp)
     rae3_flash_file = *value ? g_strdup(value) : NULL;
 }
 
+static char *rae3_get_irda(Object *obj, Error **errp)
+{
+    return g_strdup(rae3_irda_spec ? rae3_irda_spec : "");
+}
+
+static void rae3_set_irda(Object *obj, const char *value, Error **errp)
+{
+    g_free(rae3_irda_spec);
+    rae3_irda_spec = *value ? g_strdup(value) : NULL;
+}
+
 static void nokia9210_class_init(ObjectClass *oc, const void *data)
 {
     MachineClass *mc = MACHINE_CLASS(oc);
@@ -1251,6 +1401,9 @@ static void nokia9210_class_init(ObjectClass *oc, const void *data)
     object_class_property_add_str(oc, "flash", rae3_get_flash, rae3_set_flash);
     object_class_property_set_description(oc, "flash", "the DataFlash (C:), kept across boots");
     object_class_property_set_description(oc, "ppm", "eka1/rae3/core (ROM.bin)");
+    object_class_property_add_str(oc, "irda", rae3_get_irda, rae3_set_irda);
+    object_class_property_set_description(oc, "irda", "the IR link on the board's own UDP socket: "
+                                          "udp:HOST:PORT@[LHOST]:LPORT (else QEMU's 2nd serial port)");
     mc->desc = "Nokia 9210 Communicator (RAE-3, Series 80 1st, Symbian 6.0 EKA1) bring-up board";
     mc->init = nokia9210_init;
     mc->ignore_memory_transaction_failures = true;

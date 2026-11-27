@@ -93,5 +93,6 @@ had gone: it read its socket blocking after such an error, holding QEMU's main l
 
 Beaming was tried on the 6600 and the 6260 (`--model nokia6260`, the same steps; its receiver listens about one
 minute). The 7650, 3650/3660 and 3230 have the port switched on with the same driver, not tried yet; the N-Gage QD
-is off (`NgageModel.irda` in `ngage.c`). The model does not
+is off (`NgageModel.irda` in `ngage.c`). The 9210 Communicator has its own UART model with the same `--irda` values
+(docs/devices/nokia-9210-rae3/bring-up.md "IrDA"); a 9210 to 6600 beam does not complete yet. The model does not
 simulate pulse timing, the transceiver's echo or receive errors (details in the research note).

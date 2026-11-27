@@ -16,8 +16,8 @@ screen, the QWERTY keyboard, the command buttons and the application keys work: 
 `build/evidence/rae3/01-home-city.png` .. `09-note-typed.png`.
 
 Not modelled: the cellular side's radio (cmt.ext runs on this CPU; its DSP is a boot-handshake stand-in, no network,
-no SIM), sound, the cover display and keypad (phone side), the memory card (the door reads open: no card), IrDA,
-the serial ports, the RTC (the clock starts at 01:01 or the last saved time).
+no SIM), sound, the cover display and keypad (phone side), the memory card (the door reads open: no card),
+the serial port, the RTC (the clock starts at 01:01 or the last saved time).
 
     python3 eka1/tools/ngage_phone.py --model nokia9210 --phone NAME [--fresh]   # the window (C: kept in build/ngage/phones/NAME.flash)
     python3 eka1/tools/ngage_sess.py -s NAME --model nokia9210 --catch pabt,dabt,undef --flash FILE start   # a debug session
@@ -99,13 +99,29 @@ Kernel words (code match against the N-Gage's 6.1 kernel): current thread **0x80
 | 19 | the inner screen | the LCD is in the 0x04000000 block: +0x20 frame start 0x03000000, frame data at +0x20 from it, 640 x 200 EColor4K (0000RRRRGGGGBBBB) [V ECust + the bootstrap; docs/research/rae3-display.md] | a QEMU console: **the first-boot Home city dialog** |
 | 20 | keys | EKeyb.dll: a 10 x 10 matrix at 0x05013000 (+0x20 column drive, +0x04 rows active low), source 39 = any key down, scan codes table[c * 10 + r] at 0x508A17F1 [V docs/research/rae3-keys.md] | `nokia9210_keys.h`: the wizard (F1 = OK) and **the Desk**; a second boot from the kept DataFlash goes straight to the Desk |
 
+## IrDA (2026-11-27)
+
+**Beams both ways** with `eka1/tools/ngage_irsend.py` [V run]. Euart2.pdd (COMM::1) drives a SIR UART at 0x0500C000,
+with interrupts "IrqIrRx" / "IrqIrTx" = sources 13 / 14 (`nokia9210_ir.h`, H-rae3-ir; evidence
+[../../research/rae3-irda.md](../../research/rae3-irda.md)). The link is the same as the 6600's (`--irda a|b|udp:...|CHARDEV`,
+`ngage_irlink.c`):
+
+    python3 eka1/tools/ngage_phone.py --model nokia9210 --phone NAME --irda a
+    # receive: Menu (F9), Tools, Receive via infrared;  then on the host:
+    python3 eka1/tools/ngage_irsend.py FILE...          # lands as "Remote device: FILE" on the Desk
+    # send: Calendar (F12), an entry, Menu, File, Send, Via infrared;  on the host first:
+    python3 eka1/tools/ngage_irsend.py --out DIR        # gets cal.vcs
+
+The 9210 names itself "EPOC" (in Unicode). Tests: `tests/nokia9210_ir_test.c`, `tests/nokia9210_board_test.py` Rae3Irda.
+
 ## Next
 
 1. The cellular side: cmt.ext runs the GSM stack on this CPU against a DSP stand-in; no SIM, no network. Its SIM
    interface, the DSP's per-frame protocol and the CTSI frame interrupts are the next layer (the phone application
    opens, "No contacts").
-2. The cover display and keypad (phone side), sound, IrDA, the RTC (time at boot), the memory card (a card image
+2. The cover display and keypad (phone side), sound, the RTC (time at boot), the memory card (a card image
    behind the 0x0500A000 host).
+4. IrDA phone to phone: 9210 to an emulated 6600 stops at "Connecting…" (docs/research/rae3-irda.md "Phone to phone").
 3. The language area (device 8 below 0x24DE00 in the .13x files) is not loaded; the core ROM's English is used.
 
 ## Nokia 9210i (RAE-5, firmware 6.00) on `-M nokia9210i`

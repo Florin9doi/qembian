@@ -251,5 +251,48 @@ class Rae3Keys(unittest.TestCase):
             self.assertEqual(table[c * 10 + r], v, 'KEY %s (%d, %d)' % (k, c, r))
 
 
+class Rae3Irda(unittest.TestCase):
+    """IrDA (docs/research/rae3-irda.md): Euart2.pdd's UART at 0x0500C000 (nokia9210_ir.h, unit test
+    tests/nokia9210_ir_test.c), its interrupts by name, the IR link (irda=)."""
+
+    def test_board_wires_it(self):
+        s = BOARD.read_text()
+        self.assertIn('rae3_ir_setup(sys);', func('static void rae3_soc_init('))
+        self.assertIn('object_class_property_add_str(oc, "irda"', s)
+        self.assertIn('serial_hd(1)', func('static void rae3_ir_setup('))
+        self.assertIn('rae3_set_source(RAE3_IR_SRC_TX, true)', func('static void rae3_ir_setup('))
+        h = (REPO / 'src/qemu-ngage/hw/arm/nokia9210_ir.h').read_text()
+        self.assertIn('#define RAE3_IR_BASE      0x0500c000u', h)
+        self.assertIn('#define RAE3_IR_SRC_RX    13', h)
+        self.assertIn('#define RAE3_IR_SRC_TX    14', h)
+
+    def test_gpio_status_bits_stay_clear(self):
+        """0x05003000 bit 21 (RX error) / 22 (TX FIFO full) must not be among the "ready" bits: a set bit 22
+        stops the TX ISR for ever (it waits for room)"""
+        for m in re.finditer(r'\{ 0x05003000, (0x[0-9a-f]+) \}', BOARD.read_text()):
+            self.assertEqual(int(m.group(1), 16) & (3 << 21), 0)
+
+    @NEED_ROM
+    def test_rom_interrupt_names(self):
+        """FiqIrRx / FiqIrTx are entries 13 / 14 of the kernel's FIQ name table (FiqTimer0 at 0x5002750C), and
+        Euart2.pdd binds "IrqIrRx" (0x50097AB8) and "IrqIrTx" (0x50097AC0), the IRQ-side twins"""
+        rom = ROM.read_bytes()
+        names = re.findall(rb'Fiq[A-Za-z0-9]+', rom[0x2750c:0x27850])
+        self.assertEqual(names.index(b'FiqIrRx'), 13)
+        self.assertEqual(names.index(b'FiqIrTx'), 14)
+        self.assertEqual(names.index(b'FiqKeyPress'), 39)          # the keyboard's source, as a cross-check
+        self.assertEqual(rom[0x97ab8:0x97ac8], b'IrqIrRx\0IrqIrTx\0')
+
+    @NEED_ROM
+    def test_rom_register_accessors(self):
+        """the kernel's helpers Euart2 imports: +0x10 TX data, +0x1C RX data, +0x20 RX ready, +0x04 divisor"""
+        self.assertEqual(rom_word(0x500029f8), 0xc010)
+        self.assertEqual(rom_word(0x50002a0c), 0xc01c)
+        self.assertEqual(rom_word(0x50002a34), 0xc020)
+        self.assertEqual(rom_word(0x500029e4), 0xc004)
+        self.assertEqual(rom_word(0x50097ac8 + 14 * 4), 0x54a)     # 9600 = 13 MHz / 0x54A
+        self.assertEqual(rom_word(0x50097ac8 + 18 * 4), 0x71)      # 115200
+
+
 if __name__ == '__main__':
     unittest.main()

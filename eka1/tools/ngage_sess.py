@@ -17,7 +17,7 @@ Catch names: fatal = the kernel fatal-fault routine (0x5031e340), pabt / dabt / 
 exception vectors (VA 0x0c / 0x10 / 0x04, +0xffff0000 on a high-vector kernel), panic = RThread::Panic
 (models that know it). Any VA also works; VA=w:LABEL is a write watchpoint on that word. Session files are in
 build/ngage/sess-NAME/ (qemu.log, serial/serial2/serial3 = UART1..3, crash-N/; --irda SPEC puts the 2nd
-port, the 6600's IrDA, on a chardev instead). Offline: `ngage_sess.py dumpx DIR VA [N]`
+port, the IrDA link of the 6600 / 9210 ..., on a chardev instead). Offline: `ngage_sess.py dumpx DIR VA [N]`
 reads a crash dump's RAM through its page tables, with no machine running.
 """
 import argparse, json, os, re, pathlib, select, signal, socket, struct, subprocess, sys, time

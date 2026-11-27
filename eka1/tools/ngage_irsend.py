@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-"""Send files to an emulated phone over its IrDA link (qembian, -M nokia6600 with --irda).
+"""Send files to an emulated phone over its IrDA link (qembian: -M nokia6600, nokia6260, nokia9210 ... with --irda).
 
 The phone's 2nd serial port carries the raw SIR byte stream (docs/devices/nokia-6600-nhl10/infrared.md). This
 script is the other phone: a small IrDA primary written from the specs -- SIR framing + FCS, IrLAP (XID
@@ -209,6 +208,23 @@ def discovery_info(nickname, hints=None):
     return (DISCOVERY_HINTS if hints is None else hints) + b'\x00' + nickname
 
 
+def discovery_nickname(di):
+    """The device name in an XID discovery-info field: hint bytes (bit 7 = another follows), the charset, the name.
+    Charset 0xFF is Unicode: the 9210 sends its "EPOC" as UTF-16 little-endian (the spec leaves the byte order open:
+    the zero bytes tell). Other charsets are ASCII / ISO-8859-x."""
+    j = 0
+    while j < len(di) and di[j] & 0x80:
+        j += 1
+    if len(di) <= j + 1:
+        return '?'
+    cs, name = di[j + 1], di[j + 2:]
+    if cs == 0xFF:
+        name = name[:len(name) & ~1]
+        le = sum(1 for b in name[1::2] if b == 0) >= sum(1 for b in name[0::2] if b == 0)
+        return name.decode('utf-16-le' if le else 'utf-16-be', 'replace').rstrip('\0')
+    return name.decode('latin-1', 'replace').rstrip('\0')
+
+
 class IrLap:
     def __init__(self, link, slots=6, slot_time=0.25, ftimer=3.0, retries=10, idle=0.02, link_timeout=30.0):
         self.link, self.rd = link, SirReader()
@@ -260,11 +276,7 @@ class IrLap:
                         break
                     if len(f) >= 14 and f[1] & ~PF & 0xFF == XID_RSP and f[3 + 4:3 + 8] == self.saddr:
                         daddr, di = f[3:7], f[14:]
-                        j = 0
-                        while j < len(di) and di[j] & 0x80:
-                            j += 1
-                        name = di[j + 2:].decode('latin-1', 'replace') if len(di) > j + 1 else '?'
-                        found[daddr] = name
+                        found[daddr] = discovery_nickname(di)
             if found:
                 return list(found.items())[0]
             time.sleep(0.3)
@@ -337,11 +349,7 @@ class IrLap:
             if f[1] == XID_CMD | PF and len(f) >= 14 and f[7:11] in (b'\xff' * 4, self.saddr):
                 peer, flags, slot = f[3:7], f[11], f[12]
                 if slot == 0xFF:                      # end of the round: the phone's own name is in it
-                    di = f[14:]
-                    j = 0
-                    while j < len(di) and di[j] & 0x80:
-                        j += 1
-                    nick[peer] = di[j + 2:].decode('latin-1', 'replace') if len(di) > j + 1 else '?'
+                    nick[peer] = discovery_nickname(f[14:])
                     chosen, last_slot = None, -1
                     continue
                 if chosen is None or slot <= last_slot:   # a new round
@@ -377,9 +385,16 @@ class IrLap:
             if len(f) < 2:
                 continue
             if f[0] == 0xFF:
-                if f[1] == SNRM | PF and f[2:6] == self.daddr:    # our UA was lost: the phone asks again
-                    self._link_up(False)
+                if f[1] == SNRM | PF and f[2:6] == self.daddr and f[6:10] == self.saddr and f[10] >> 1 == self.ca:
+                    self._link_up(False)                           # our UA was lost: the phone asks again
                     self.send(self.ua)
+                    continue
+                if f[1] in (XID_CMD | PF, SNRM | PF):
+                    # the phone discovers or connects anew: its side of this link is gone (it gave up without a
+                    # DISC we saw). Hand the frame to listen() now instead of staying deaf until link_timeout.
+                    self.pending.insert(0, f)
+                    self.connected = False
+                    raise LinkLost('the phone started over (new discovery or connection)')
                 continue
             if f[0] >> 1 != self.ca or not f[0] & 1:
                 continue
@@ -1001,8 +1016,13 @@ def receive_files(a, link):
     end = None if a.wait is None else time.monotonic() + a.wait
     total = []
     log('waiting for the phone as "%s" (on the phone: Send, Via infrared); files go to %s' % (a.nick, a.out))
+    prev = None
     while True:
         lap = IrLap(link, ftimer=a.ftimer, link_timeout=a.timeout)
+        if prev is not None:
+            # keep what already arrived: a discovery that came with (or ended) the last link is the next attempt
+            lap.pending, lap.rd = prev.pending, prev.rd
+            lap.saddr = prev.saddr          # the same device to the phone: a reconnect to it still reaches us
         dl = end if end is not None else time.monotonic() + 3600
         dev = lap.listen(dl, nick)
         if not dev:
@@ -1018,7 +1038,7 @@ def receive_files(a, link):
             log('link lost: %s' % e)
         if a.once:
             break
-        lap.flush()
+        prev = lap
     log('%d file(s) received' % len(total))
     return 0 if total or not a.once else 1
 

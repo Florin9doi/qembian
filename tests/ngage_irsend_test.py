@@ -101,5 +101,53 @@ class Framing(unittest.TestCase):
         self.assertEqual(I.SirReader().feed(bytes(w)), [])
 
 
+class ReceiverDeafAfterAbandonedLink(unittest.TestCase):
+    """nokia9210_second_send_fails: the phone gave up a link without a DISC the script saw; the receiver stayed in
+    respond() until link_timeout (60 s), ignoring the phone's new discovery, so every retry in that time failed
+    ("No other infrared device found")."""
+
+    XID = bytes([0xFF, I.XID_CMD | I.PF, 0x01]) + b'PHON' + b'\xff' * 4 + bytes([0x00, 0x00, 0x00])
+
+    def secondary(self, link):
+        lap = connected_lap(link)
+        lap.primary, lap.link_timeout = False, 5.0
+        lap.ua = bytes([lap.ca << 1, I.UA | I.PF])
+        return lap
+
+    def test_new_discovery_ends_the_session_at_once(self):
+        lap = self.secondary(FakeLink([[self.XID]]))
+        t0 = time.monotonic()
+        with self.assertRaises(I.LinkLost):
+            lap.respond([])
+        self.assertLess(time.monotonic() - t0, 1.0)
+        self.assertEqual(lap.pending[0], self.XID)      # left for listen() to answer
+        self.assertFalse(lap.connected)
+
+    def test_snrm_repeat_for_this_link_is_still_answered(self):
+        link = FakeLink()
+        lap = self.secondary(link)
+        snrm = bytes([0xFF, I.SNRM | I.PF]) + lap.daddr + lap.saddr + bytes([lap.ca << 1])
+        link.batches = [[snrm, bytes([lap.ca << 1 | 1, I.RR | I.PF])]]
+        lap.respond([])
+        self.assertIn(lap.ua, link.sent)
+
+
+class NicknameUnicode(unittest.TestCase):
+    """nokia9210_nickname_unicode: the 9210 announces "EPOC" in charset 0xFF (UTF-16, little-endian) and the
+    script printed it as "E P O C " (latin-1 with the zero bytes)."""
+
+    def test_9210_utf16le(self):
+        self.assertEqual(I.discovery_nickname(bytes([0x92, 0x24, 0xFF]) + 'EPOC'.encode('utf-16-le')), 'EPOC')
+
+    def test_utf16be(self):
+        self.assertEqual(I.discovery_nickname(bytes([0x04, 0xFF]) + 'EPOC'.encode('utf-16-be')), 'EPOC')
+
+    def test_ascii_6600(self):
+        self.assertEqual(I.discovery_nickname(bytes([0x92, 0x25, 0x00]) + b'Nokia 6600'), 'Nokia 6600')
+
+    def test_no_name(self):
+        self.assertEqual(I.discovery_nickname(bytes([0x92])), '?')
+
+
 if __name__ == '__main__':
     unittest.main()

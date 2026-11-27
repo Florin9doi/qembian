@@ -53,6 +53,7 @@
 #include "ngage_lprf.h"
 #include "ngage_cam.h"
 #include "ngage_sir.h"
+#include "ngage_irlink.h"
 #include "accel/tcg/cpu-loop.h"
 #include "tcg/insn-start-words.h"
 #include "exec/target_page.h"
@@ -407,119 +408,15 @@ static void ngage_lprf_setup(void)
 #define NGAGE_SIR_IRQ 26
 
 static NgageSir ngage_sir;
-static CharFrontend ngage_sir_chr;
+static NgageIrLink ngage_sir_link;          /* the UDP socket (irda=) or the 2nd serial port: ngage_irlink.c */
 static QEMUTimer *ngage_sir_timer;
 static qemu_irq ngage_sir_line;
 static MemoryRegion ngage_sir_mr[2];
-
-/*
- * -M ...,irda=udp:HOST:PORT@[LHOST]:LPORT: the board's own UDP socket for the IR link, in place of a udp chardev
- * on the 2nd serial port. QEMU's udp chardev connects its socket and reads it blocking: when the peer is gone
- * (ngage_irsend.py exited), the ICMP port-unreachable for the phone's next byte woke the read watch, a TX write
- * from the vCPU thread consumed the error first, and the main loop sat in recvmsg holding the BQL until another
- * datagram came: the phone, its monitor and gdb stub froze. This socket is not connected (Linux reports no ICMP
- * errors to it) and never blocks; any sender reaches the phone. No SO_REUSEADDR: a second phone on the same end
- * fails to start instead of sharing the port.
- */
-static char *ngage_irda_spec;
-static int ngage_irda_fd = -1;
-static struct sockaddr_storage ngage_irda_peer;
-static socklen_t ngage_irda_peer_len;
-static uint8_t ngage_irda_buf[4096];
-static unsigned ngage_irda_len, ngage_irda_pos;     /* the datagram being fed to the SIR FIFO */
-
-static void ngage_irda_readable(void *opaque);
-
-/* feed what the RX FIFO takes; read the socket again only once the datagram is all in */
-static void ngage_irda_feed(void)
-{
-    while (ngage_irda_pos < ngage_irda_len) {
-        unsigned room = ngage_sir_rx_room(&ngage_sir);
-        unsigned n = MIN(room, ngage_irda_len - ngage_irda_pos);
-
-        if (!n) {
-            break;
-        }
-        ngage_sir_rx(&ngage_sir, ngage_irda_buf + ngage_irda_pos, n);
-        ngage_irda_pos += n;
-    }
-    qemu_set_fd_handler(ngage_irda_fd, ngage_irda_pos < ngage_irda_len ? NULL : ngage_irda_readable, NULL, NULL);
-}
-
-static void ngage_irda_readable(void *opaque)
-{
-    while (ngage_irda_pos >= ngage_irda_len) {
-        ssize_t n = recv(ngage_irda_fd, ngage_irda_buf, sizeof(ngage_irda_buf), 0);
-
-        if (n < 0 && errno == EINTR) {
-            continue;
-        }
-        if (n <= 0) {
-            break;                  /* EAGAIN, or an empty datagram */
-        }
-        ngage_irda_len = n;
-        ngage_irda_pos = 0;
-        ngage_irda_feed();
-    }
-}
-
-static struct addrinfo *ngage_irda_resolve(const char *hp, bool passive)
-{
-    struct addrinfo hints = { .ai_family = AF_UNSPEC, .ai_socktype = SOCK_DGRAM,
-                              .ai_flags = passive ? AI_PASSIVE : 0 };
-    struct addrinfo *res = NULL;
-    const char *colon = strrchr(hp, ':');
-    g_autofree char *host = colon ? g_strndup(hp, colon - hp) : NULL;
-
-    if (!colon || !colon[1] || getaddrinfo(*host ? host : (passive ? NULL : "127.0.0.1"), colon + 1, &hints,
-                                           &res) != 0) {
-        return NULL;
-    }
-    return res;
-}
-
-static void ngage_irda_open(const char *spec)
-{
-    g_autofree char *remote = NULL;
-    const char *at;
-    struct addrinfo *r, *l;
-
-    if (!g_str_has_prefix(spec, "udp:") || !(at = strchr(spec, '@'))) {
-        error_report("irda=%s: give udp:HOST:PORT@[LHOST]:LPORT", spec);
-        exit(1);
-    }
-    remote = g_strndup(spec + 4, at - (spec + 4));
-    r = ngage_irda_resolve(remote, false);
-    l = ngage_irda_resolve(at + 1, true);
-    if (!r || !l) {
-        error_report("irda=%s: cannot resolve %s", spec, r ? at + 1 : remote);
-        exit(1);
-    }
-    ngage_irda_fd = qemu_socket(l->ai_family, SOCK_DGRAM, 0);
-    if (ngage_irda_fd < 0 || bind(ngage_irda_fd, l->ai_addr, l->ai_addrlen) < 0) {
-        error_report("irda=%s: cannot bind %s: %s (another phone on this end?)", spec, at + 1, strerror(errno));
-        exit(1);
-    }
-    if (!qemu_set_blocking(ngage_irda_fd, false, &error_fatal)) {
-        exit(1);
-    }
-    memcpy(&ngage_irda_peer, r->ai_addr, r->ai_addrlen);
-    ngage_irda_peer_len = r->ai_addrlen;
-    freeaddrinfo(r);
-    freeaddrinfo(l);
-    qemu_set_fd_handler(ngage_irda_fd, ngage_irda_readable, NULL, NULL);
-}
+static char *ngage_irda_spec;               /* -M ...,irda=udp:HOST:PORT@[LHOST]:LPORT */
 
 static void ngage_sir_tx_byte(void *opaque, uint8_t b)
 {
-    /* never blocks the CPU: a peer that does not read loses the byte, as light nobody sees */
-    if (ngage_irda_fd >= 0) {
-        if (sendto(ngage_irda_fd, &b, 1, 0, (struct sockaddr *)&ngage_irda_peer, ngage_irda_peer_len) < 0) {
-            /* nobody there, or the queue is full: the byte is lost */
-        }
-        return;
-    }
-    qemu_chr_fe_write(&ngage_sir_chr, &b, 1);
+    ngage_irlink_tx(&ngage_sir_link, b);
 }
 
 static void ngage_sir_burst(void *opaque, unsigned n)
@@ -536,10 +433,7 @@ static void ngage_sir_expire(void *opaque)
 
 static void ngage_sir_set_baud(void *opaque, unsigned baud)
 {
-    QEMUSerialSetParams p = { .speed = baud, .parity = 'N', .data_bits = 8, .stop_bits = 1 };
-
-    qemu_log_mask(LOG_UNIMP, "ngage-sir: %u baud\n", baud);
-    qemu_chr_fe_ioctl(&ngage_sir_chr, CHR_IOCTL_SERIAL_SET_PARAMS, &p);   /* only ttys take it */
+    ngage_irlink_set_baud(&ngage_sir_link, baud);
 }
 
 static void ngage_sir_set_irq(void *opaque, bool level)
@@ -547,14 +441,14 @@ static void ngage_sir_set_irq(void *opaque, bool level)
     qemu_set_irq(ngage_sir_line, level);
 }
 
-static int ngage_sir_can_receive(void *opaque)
+static unsigned ngage_sir_link_room(void *opaque)
 {
     return ngage_sir_rx_room(&ngage_sir);
 }
 
-static void ngage_sir_receive(void *opaque, const uint8_t *buf, int size)
+static void ngage_sir_link_rx(void *opaque, const uint8_t *buf, unsigned n)
 {
-    ngage_sir_rx(&ngage_sir, buf, size);
+    ngage_sir_rx(&ngage_sir, buf, n);
 }
 
 static uint64_t ngage_sir_mmio_read(void *opaque, hwaddr a, unsigned size)
@@ -563,8 +457,8 @@ static uint64_t ngage_sir_mmio_read(void *opaque, hwaddr a, unsigned size)
     uint16_t v = ngage_sir_read(&ngage_sir, addr);
     static uint16_t count[0x60];
 
-    if ((addr & ~1u) == SIR_RXDATA && ngage_irda_pos < ngage_irda_len) {
-        ngage_irda_feed();                      /* room again in the FIFO: the rest of the datagram */
+    if ((addr & ~1u) == SIR_RXDATA) {
+        ngage_irlink_kick(&ngage_sir_link);     /* room again in the FIFO: the rest of the datagram */
     }
 
     if (ngage_log_hot(&count[(addr >> 1) % 0x60]) && addr != SIR_RXDATA) {
@@ -601,13 +495,8 @@ static void ngage_sir_setup(MemoryRegion *sys, qemu_irq line)
     ngage_sir.irq = ngage_sir_set_irq;
     ngage_sir_line = line;
     ngage_sir_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, ngage_sir_expire, NULL);
-    if (ngage_irda_spec) {
-        ngage_irda_open(ngage_irda_spec);
-    } else if (serial_hd(1)) {
-        qemu_chr_fe_init(&ngage_sir_chr, serial_hd(1), &error_abort);
-        qemu_chr_fe_set_handlers(&ngage_sir_chr, ngage_sir_can_receive, ngage_sir_receive, NULL, NULL,
-                                 NULL, NULL, true);
-    }
+    ngage_irlink_init(&ngage_sir_link, "ngage-sir", ngage_irda_spec, serial_hd(1), ngage_sir_link_room,
+                      ngage_sir_link_rx, NULL);
     /* the CTSI FIQ enables/status words (0x0C15000C..0F) and the UART (0x0C150510..63) */
     memory_region_init_io(&ngage_sir_mr[0], NULL, &ngage_sir_ops, (void *)(uintptr_t)SIR_CTSI_DISABLE,
                           "ngage.sir-ctsi", 4);
