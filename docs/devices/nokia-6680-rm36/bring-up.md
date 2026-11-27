@@ -11,6 +11,9 @@ variant) in `eka1/rm36_rom/`. The board is the 6630's (`-M nokia6680`: `rm1_boar
 First boot (no flash file): logo, ~7 min of formatting C: (white screen with the date bar), then the home-city list,
 time and date queries, the **S60 home screen** (active standby, Messag./Camera) and the **Menu grid** (Messaging,
 Contacts, Calendar, Gallery, Camera, Imaging, Clock, Web, Office). No panic reports (`38 0E`) after the fix below.
+**Camera** (2026-11-27, the 6630's test pattern, from a copy of a kept NAND): viewfinder, capture, the picture saved
+under Gallery > Images (31 kB) [V run]; video and the front camera not done (docs/devices/nokia-7650-nhl2/camera.md
+"Nokia 6680").
 
 ## Files
 

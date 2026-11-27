@@ -240,7 +240,8 @@ Same list as the 6600 below (ISI after idle, starting with the self-test `59 02`
 every boot; first-boot hint; camera, IrDA, Bluetooth, sound). docs/devices/nokia-7650-nhl2/bring-up.md.
 Camera done with a test pattern (2026-11-26, docs/devices/nokia-7650-nhl2/camera.md); the host camera as a source is next if wanted.
 Camera also on the 6260, 7610 and 6670 (2026-11-26, same document); the 3230's camera module (a command port) is open.
-Camera on the 6630 (2026-11-27, OMAP1610 board: same document, "Nokia 6630").
+Camera on the 6630 (2026-11-27, OMAP1610 board: same document, "Nokia 6630"); the 6680 with the same model (photos only,
+"Nokia 6680"). N90: frames reach the driver, the viewfinder stays blank (video set-up, likely the DSP; "Nokia N90").
 
 ## Nokia 6600 (NHL-10, EKA1): boots, not really working yet (owner, 2026-11-18)
 

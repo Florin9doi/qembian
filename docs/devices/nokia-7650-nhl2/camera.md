@@ -221,6 +221,34 @@ both streams on its C55x DSP: H.263 in `VENCODER_NOKIA` (VideoEncoderSocket_Dyn.
 AmrEncHwDeviceTI.dll ("DSP->AMR Encoder") [V strings in the core ROFS]. Options: a DSP model (large), or stand-ins at
 the DevVideo / hw-device level that produce H.263 and AMR on the ARM side [I: not tried].
 
+## Nokia 6680 (2026-11-27)
+
+`-M nokia6680` takes the 6630's model as it is (`rm1_phone_6680` camera `RM1_CAM_6630`): campdd.pdd (0x500A00E0, 26 KB)
+is another build of the 6630's driver: the same receiver set-up table (sync codes at +10..+40 of VA 0x58105000), I2C
+pins (GPIO1 line 11 / GPIO4 line 14), 44-byte header frame sizes and frame count (64 KB markers, not the N90's DMA
+count) [V static]; it also touches GPIO2 (0x580BEC00) and 0x58080082 [V; meaning I]. Camera (right softkey) shows the
+viewfinder, Select takes the picture ("27112026") and Gallery > Images lists it (31 kB) [V run, copy of a kept NAND].
+Not done: video (the 6630's DSP wall) and the front camera: camparifpdd.pdd ("Lv1_CameraIF", registers 0x58105804/808,
+raw frames with no header, 160x120 .. 640x480) [V static].
+
+## Nokia N90 (2026-11-27, viewfinder not working yet)
+
+`-M nokian90` (`RM1_CAM_N90`: `ngage_cam_n90_setup`, `nokia6630_cam.c`). campdd.pdd (0x500C2AE0, 60 KB) has the 6630's
+receiver and pins, but [V static + runs]:
+
+| What | N90 |
+|---|---|
+| I2C | four parts on the bus (0x500c6098 write / 0x500c615c read, device 0..3): 0x78 the sensor, **16-bit register numbers** high byte first; 0x7C one register byte (a 256-byte table written at power-up); 0xC8 no register (written 2 bytes, read 4, their rounded mean must not be 0, 0x500c4ec4); 0xA0..0xA6 an EEPROM paged by register >> 8 (table 0x500cd380: calibration reads 0x000, 0x010, 0x111, 0x020, 0x122, 0x126). A missing 0x7C gave "Hardware failure: Restart Camera" |
+| frames | a **296-byte header** (0x128; ISR 0x500c7324: count > 0x128, picture = count - 0x128); mode table 0x500d0a88 (0x2C-byte entries, +0x24 expected, +0x28 DMA): 160x120 (0x9728), 320x240, 640x480, 800x600, 128x96, 176x144, 352x288; JPEG stills expected 0, DMA 0xE1128 |
+| DMA | channel 4, CSDP 0x800A (source port 2 = OCP-T1, QEMU's "imif": the board accepts the receiver window there), CCR 0x40E5 (**request 5**, frame-synchronised), CCR2 BS, 16 x 32-bit frames; armed for 0x9740 (frame rounded up) |
+| count | 4 x (DMA +0x34 \| +0x36 << 16) after the channel stops (0x500cc6c8, through ekern 0x5000E79C) plus up to 4 FIFO words; must equal the expected size. Frames end inside a 64-byte DMA frame (0x9728 = 604 x 64 + 40), which the real DMA counts partly; QEMU patch 0029 decodes +0x34/+0x36 and lets the board clamp it to the words the FIFO gave (`omap_dma_count_hook`); the N90's DMA drains the whole frame |
+
+With that, ~20 frames/s land in the buffer and the ISR's error paths (0x500c73f8, 0x500c743c, 0x500c7458) are never
+taken [V breakpoints]. Still blank: twisting the display starts Camera with the video recorder loaded
+(CCMRVideoRecorderThread, CCMRAudioThread, CAMCH263EHWDDSP) and the app and CamServerCore sit idle, no "Options"
+softkey: the 6630's video wall, likely the DSP [I: not proven]. Imaging has no Camera item; the twist is the way in.
+`3A 03` (set brightness, sent on the twist) is now answered; it did not change this.
+
 ## Open
 
 - Host camera as a source (a later step; the owner asked for a pattern only).

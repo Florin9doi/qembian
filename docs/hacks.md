@@ -399,8 +399,10 @@ ISI reply table are the 6630's (every H-rm1-* that is not a core patch applies u
 | **H-rm36-dsp-boot, -dsp-timeout, -bal-run, -eapgwc, -secenvinit, -drmhelper:** the 6630's core patches (H-rm1-*, same reasons) at RM-36 5.04.40's addresses (+0x7BD0 for DSP/Bal/EapGwc), old words checked | `nokia9500.c` `rm1_patches_6680` | as H-rm1-* |
 | **H-rm36-rofx-rebase:** the variant `RM36_5.050440_B5.v27` was built against a core ROFS other than the `.C0R`'s: it lists every core file (same names, sizes and UIDs), but past the first 0x17E6D4 bytes its addresses fall 4..288 bytes short, growing through the image, because a few compressed executables differ in size (libgles_cm.dll, Photoring.app, ...) [V]. "Dll Preload List" was read from 12 bytes before its start, EFile's loader panicked FSCLIENT 25 on the garbage name, EComServer then panicked USER 22 over and over and the boot stopped at the logo [V catch]. The NAND builder points each such entry (1023) at the core entry with the same name, size and UIDs at or just after the old address; a matching ROFx (6630, N70) is unchanged | `eka1/tools/rm1_nand.py` `rebase_rofx`; test `tests/rm1_nand_test.py` | the `.C0R` and `.v27` of one build (the variant the core was released with) |
 
+| **H-rm36-camera (2026-11-27):** the 6630's camera model unchanged (H-rm1-camera, H-rm1-imei): campdd.pdd (0x500A00E0) is another build of the 6630's driver with the same receiver, I2C pins, 44-byte frame layout and frame count (64 KB markers); test pattern only. The front camera (camparifpdd.pdd, "Lv1_CameraIF", raw frames with no header) is not modelled | `nokia9500.c` `rm1_phone_6680` (`RM1_CAM_6630`); test `tests/rm1_camera_test.py` `Firmware6680` | as H-rm1-camera |
+
 Not modelled / not working (6680): as the 6630 (sound, network and SIM, DRM and the secure environment, Bluetooth,
-camera, USB, the boot-loader chain); the files the variant meant for the other core's executables are those of this core.
+the front camera, camera video, USB, the boot-loader chain); the files the variant meant for the other core's executables are those of this core.
 
 ## Nokia 9210 Communicator (RAE-3, Series 80 1st, Symbian 6.0, EKA1) on its own board (-M nokia9210, src/qemu-ngage/hw/arm/nokia9210.c)
 

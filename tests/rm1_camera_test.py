@@ -55,8 +55,9 @@ class Board(unittest.TestCase):
         self.assertIn('rm1_gpio_set_dir_hook(3, rm1_cam_sda_dir', c)
         self.assertIn('ngage_cam_rm1_setup', c)
         b = (HW / 'nokia9500.c').read_text()
-        m = re.search(r'rm1_phone_6630 = \{([^}]*)\}', b)
-        self.assertTrue(m and m.group(1).strip().endswith('true'), 'the 6630 has .camera set')
+        for phone, variant in (('6630', 'RM1_CAM_6630'), ('6680', 'RM1_CAM_6630'), ('n90', 'RM1_CAM_N90')):
+            m = re.search(r'rm1_phone_%s = \{([^}]*)\}' % phone, b)
+            self.assertTrue(m and m.group(1).strip().endswith(variant), 'the %s has camera %s' % (phone, variant))
         self.assertIn('if (ph->camera) {', b)
 
     def test_gpio_direction_hook(self):
@@ -93,6 +94,34 @@ class Firmware(unittest.TestCase):
         self.assertIn(b'Lv2_Gpio4\x00\x00\x00Lv2_SPI\x00Lv2_CCPStatus\x00', self.rom)
         b, n = CAMPDD
         self.assertIn(b'Lv2_CCPStatus', self.rom[b - 0x50000000:b - 0x50000000 + n])
+
+
+ROM_6680 = REPO / 'eka1/rm36/core/ROM.bin'
+CAMPDD_6680 = (0x500a00e0, 26232)       # System/Libs/campdd.pdd in the 6680's core (files.json)
+
+
+class Firmware6680(unittest.TestCase):
+    """The 6680 (RM-36) takes the 6630's model unchanged (docs/devices/nokia-7650-nhl2/camera.md "Nokia 6680"):
+    its campdd is another build of the 6630's driver with the same receiver, pins and 44-byte frame layout."""
+    def setUp(self):
+        if not ROM_6680.exists():
+            self.skipTest('eka1/rm36/core/ROM.bin not extracted')
+        b, n = CAMPDD_6680
+        r = ROM_6680.read_bytes()[b - 0x50000000:b - 0x50000000 + n]
+        self.w = [struct.unpack_from('<I', r, i)[0] for i in range(0, n - 3, 4)]
+
+    def test_same_receiver_and_pins(self):
+        i = self.w.index(0x58105010)
+        self.assertEqual(self.w[i:i + 8], [0x58105010, 0xff000002, 0x58105020, 0xff000003,
+                                           0x58105030, 0xff000000, 0x58105040, 0xff000001])
+        for va in (0x580bbc2c, 0x580bbc34, 0x580be42c, 0x580be434):
+            self.assertIn(va, self.w)
+
+    def test_44_byte_header_frames(self):
+        """the 6630's sizes (header 44 + w x h x 2), not the N90's 296-byte header"""
+        for w, h in ((160, 120), (640, 480), (176, 144)):
+            self.assertIn(44 + w * h * 2, self.w)
+            self.assertNotIn(296 + w * h * 2, self.w)
 
 
 if __name__ == '__main__':
