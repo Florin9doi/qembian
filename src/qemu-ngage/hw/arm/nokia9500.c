@@ -1473,8 +1473,8 @@ static void rm1_patches_n72(uint8_t *core, gsize len)
 
 static const Rm1Phone rm1_phone_6630 = { "nokia6630", "eka1/rm1/core", rm1_patches_6630, false, 0, 0, false, RM1_CAM_6630 };
 static const Rm1Phone rm1_phone_6680 = { "nokia6680", "eka1/rm36/core", rm1_patches_6680, false, 0, 0, false, RM1_CAM_6630 };
-static const Rm1Phone rm1_phone_n70 = { "nokian70", "eka1/rm84/core", rm1_patches_n70, true };
-static const Rm1Phone rm1_phone_n72 = { "nokian72", "eka1/rm180/core", rm1_patches_n72, true };
+static const Rm1Phone rm1_phone_n70 = { "nokian70", "eka1/rm84/core", rm1_patches_n70, true, 0, 0, false, RM1_CAM_N70 };
+static const Rm1Phone rm1_phone_n72 = { "nokian72", "eka1/rm180/core", rm1_patches_n72, true, 0, 0, false, RM1_CAM_N70 };
 /* H-rm42-display: the N90's 352x416 main display behind a controller on SoSSI (genericlcd_lcd.ldd) */
 static const Rm1Phone rm1_phone_n90 = { "nokian90", "eka1/rm42/core", rm1_patches_n90, true, 352, 416, true, RM1_CAM_N90 };
 

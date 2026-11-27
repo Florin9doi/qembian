@@ -34,7 +34,7 @@ void rm1_gpio_set_output_hook(int module, void (*fn)(void *opaque, uint16_t out)
 void rm1_gpio_set_dir_hook(int module, void (*fn)(void *opaque, uint16_t dir), void *opaque);
 
 /* camera (nokia6630_cam.c): the sensor's I2C on GPIO1 line 11 / GPIO4 line 14, the CCP receiver (0x2007D000) */
-enum { RM1_CAM_NONE, RM1_CAM_6630, RM1_CAM_N90 };
+enum { RM1_CAM_NONE, RM1_CAM_6630, RM1_CAM_N90, RM1_CAM_N70 };
 void rm1_cam_init(MemoryRegion *sys, struct omap_mpu_state_s *mpu, int variant);
 
 /* modem link: SSI (0x30000000) + the modem's end of xbus.ldd's protocol; ISI = reply table or NULL */

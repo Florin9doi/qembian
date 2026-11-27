@@ -14,7 +14,9 @@ the Active Standby home screen (clock, shortcut bar, "No calendar entries for to
 (F5) with its grid (Messaging, Contacts, Calendar, Radio, Gallery, Imaging, Clock, Web, My own), folders open (Imaging:
 Camera, Movie, RealPlayer, Img. print). No sound, network, SIM, DRM, secure environment or memory card. Clock: the RTC
 time read `19 0A` is answered with QEMU's clock in UTC (H-rm84-rtc, [docs/research/n70-rtc.md](../../research/n70-rtc.md));
-later boots skip the Time and Date queries. **Not checked
+later boots skip the Time and Date queries. **Camera** (2026-11-28, test pattern, fresh boot): Imaging > Camera or
+hold F10 (0xE3) shows the viewfinder; F10 takes a 1600x1200 picture ("01012007", 56 kB, shown after the capture)
+[V run]; not checked in Gallery (the Menu stayed blank after leaving Camera in that run [I cause]); docs/devices/nokia-7650-nhl2/camera.md "Nokia N70". **Not checked
 yet: a second boot from a kept NAND** (the 6630's open stall 26). How it was done: [how-it-was-done.md](how-it-was-done.md).
 
     python3 eka1/tools/ngage_phone.py --model nokian70 --phone NAME [--fresh]   # the window (NAND kept in build/ngage/phones/NAME.flash)

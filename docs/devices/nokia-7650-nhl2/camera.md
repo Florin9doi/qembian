@@ -231,6 +231,30 @@ viewfinder, Select takes the picture ("27112026") and Gallery > Images lists it 
 Not done: video (the 6630's DSP wall) and the front camera: camparifpdd.pdd ("Lv1_CameraIF", registers 0x58105804/808,
 raw frames with no header, 160x120 .. 640x480) [V static].
 
+## Nokia N70 (2026-11-28)
+
+`-M nokian70` (`RM1_CAM_N70`: `ngage_cam_n70_setup`, the soc sensor in `ngage_cam.c`). campdd.pdd (0x500B6710, 45 KB) has
+the 6630's receiver, pins, DMA (channel 2, CSDP 0x800A, CCR 0x40E3 = request 3) and frame count (64 KB markers), but
+**raw frames with no header** and its own sensor [V static + runs]:
+
+| What | N70 |
+|---|---|
+| sensor | I2C 0xBA (else 0x90, probe 0x500b9160): 8-bit register numbers, **16-bit values** high byte first, a STOP before a read (0x500b6bb4 / 0x500b6c14); page register 0xF0; MCU variables through page-1 0xC6 (address: bits 12:8 driver, 7:0 offset, bit 15 8-bit) / 0xC8 (data); the driver's access functions take page << 8 \| reg, with "pages" >= 4 meaning variable driver (page - 4) (0x500b69e8). A Micron MT9D111 layout [I] |
+| power-up | the driver writes its settings, then reads the whole variable space back into three 7 KB shadows (16 bits a variable byte at 0x800 + driver x 0x200 + offset x 2); values it never writes must be the sensor's power-on ones |
+| frames | mode table 0x500c1460: viewfinder 176x132 (46464 bytes) and 160x120, raw 320x240..640x480, 128x96, 176x144, 352x288; JPEG stills expected 0, DMA 0xFA000 |
+| still | the sensor sends the **entropy-coded scan only**: the driver writes SOI, APP0, DQT (Annex K tables x q-scale: q = (T x qs + 16) >> 5, 0x500ba8cc), SOF0 (Y 2x1, size from variables 7:0x07/0x09), DHT, SOS, appends FF D9 (0x500bab70); the scan arrives in the 7610's 0xA5 transport (decoder 0x500b8a5c); page-2 registers 2..4 (2 bit 0 = done, bits 1-5 errors, bits 7:6 which q-scale) and the length in 9:0x0F (bits 23:16) / 9:0x10 must match the decoded length (0x500b8680) |
+| EXIF | exposure from page-0 0x04/0x05 or 0x07/0x09/0x0A/0x0C/0x23 and AE variables 2:0x1F/0x24 (0x500b81c0); CamServerCore takes their logarithm |
+
+Model: the pattern as the viewfinder; a still = our encoder's JPEG cut to its scan (the same layout and Huffman tables;
+q-scale 16 makes the driver's DQT our quality-75 tables, so the composed file decodes exactly: checked from a RAM dump).
+The way there: the viewfinder showed stripes until 176x132 was a known size; stills were retaken while the length
+variables were 0, then while the page-2 status was 0, then while the next still had already replaced the length the
+driver was checking (published at the frame's end and kept until read); the composed JPEG had a 0x0 SOF and an all-zero
+DQT (capture size and q-scales are power-on variables); CamServerCore panicked USER-EXEC 3 on the zero exposure
+registers. Result [V run, fresh boot]: viewfinder, capture ("01012007", 56 kB) shown after the capture. Not checked:
+Gallery (the Menu stayed blank after leaving Camera in that run), video, the front camera (camparifpdd.pdd, as the
+6680's), the night mode and other sizes.
+
 ## Nokia N90 (2026-11-27, viewfinder not working yet)
 
 `-M nokian90` (`RM1_CAM_N90`: `ngage_cam_n90_setup`, `nokia6630_cam.c`). campdd.pdd (0x500C2AE0, 60 KB) has the 6630's

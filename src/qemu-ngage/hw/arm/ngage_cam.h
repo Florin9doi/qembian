@@ -89,12 +89,22 @@ typedef struct NgageCam {
     bool still_raw;                 /* camx: the still's words in stream order (the 6630's campdd swaps only the
                                        44-byte header, 0x500a0934), not byte-reversed as for camxpdd */
     uint16_t hdr;                   /* camx: the frame header's length, 0 = CAM_HDR_CAMX (44); the N90: CAM_HDR_N90 */
+    bool no_hdr;                    /* camx: frames carry no header (the N70) */
     bool rot90;                     /* the sensor lies on its side (6260): frames carry the picture turned 90 degrees
                                        clockwise (set by the board after init; ngage_cam_fill) */
     uint8_t regs[CAM_NREGS];
     NgageCamAux aux[CAM_AUX_MAX];   /* ngage_cam_add_aux */
     unsigned naux;
     int cur;                        /* the device of this transfer: -1 = the sensor, else an aux index */
+    /* soc: a system-on-chip sensor with 16-bit register values (the N70's, MT9D111-like): pages selected by 0xF0,
+       MCU variables through 0xC6 (address) / 0xC8 (data); ngage_cam_n70_setup */
+    bool soc;
+    bool soc_lo;                    /* the next byte is a value's low byte */
+    uint8_t soc_hi;
+    uint16_t soc_reg[4][256];
+    uint8_t soc_var[32][256];       /* MCU variables: driver id x offset, 16-bit ones big-endian */
+    uint32_t soc_pending;           /* a still's length + 1, published at its frame's end; 0 = none */
+    bool soc_unread;                /* the published length has not been read yet */
     /* CCP receiver */
     uint32_t ccp[CAM_CCP_SIZE / 4];
     uint16_t status;
@@ -168,12 +178,20 @@ uint32_t ngage_cam_camx_jpeg_wh(uint8_t *dst, uint32_t cap, unsigned w, unsigned
                                        0x500d0a88, 0x2C-byte entries: +0x24 expected, +0x28 DMA) [V] */
 #define CAM_N90_W         1600      /* 2 megapixels [I: the phone's still size] */
 #define CAM_N90_H         1200
+#define CAM_I2C_ADDR_N70  0x5d      /* N70 campdd: 0xBA / 0xBB, else 0x90 (0x500b9160) [V] */
+#define CAM_N70_STILL     0xfa000   /* the N70's JPEG still modes: expected 0, DMA 0xFA000 (mode table 0x500c1460) [V] */
+#define CAM_N70_W         1600      /* 2 megapixels [I] */
+#define CAM_N70_H         1200
 #define CAM_RM1_DMA_FRAME 16        /* the driver's DMA frame: 4 words (CEN 4, frame-synchronised) [V run] */
 /* after ngage_cam_init: the 7610 layout, the 6630's still (JPEG in stream order), the gain registers' power-on values */
 void ngage_cam_rm1_setup(NgageCam *c);
 /* Nokia N90 (RM-42): the 6630's receiver and frames, a sensor with 16-bit register numbers and the module's other
    I2C parts (docs/devices/nokia-7650-nhl2/camera.md "Nokia N90") */
 void ngage_cam_n90_setup(NgageCam *c);
+/* Nokia N70 (RM-84): the 6630's receiver, raw frames (no header), a soc sensor at 0xBA */
+void ngage_cam_n70_setup(NgageCam *c);
+uint16_t ngage_cam_soc_read(NgageCam *c, uint8_t reg);
+void ngage_cam_soc_write(NgageCam *c, uint8_t reg, uint16_t v);
 /* the frame the sensor sends for a DMA transfer of dma bytes (whole DMA frames): header + picture, or the still */
 uint32_t ngage_cam_rm1_frame_len(const NgageCam *c, uint32_t dma);
 /*

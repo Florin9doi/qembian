@@ -107,6 +107,7 @@ static bool cam_i2c_byte(NgageCam *c, uint8_t b)
             }
         }
         c->rd = b & 1;
+        c->soc_lo = false;
         if (c->cur >= 0) {
             c->naddr = c->rd ? 0 : c->aux[c->cur].regw;
             if (c->naddr || !c->aux[c->cur].regw) {
@@ -135,6 +136,7 @@ static bool cam_i2c_byte(NgageCam *c, uint8_t b)
     if (c->naddr) {                             /* the register pointer, high byte first */
         c->ptr = (uint16_t)(c->ptr << 8 | b) & cam_reg_mask(c);
         c->naddr--;
+        c->soc_lo = false;
         if (c->cmdport && c->ptr == CAM_CMD_PORT) {
             c->ncmd = 0;
             c->nresp = 0;                       /* an answer is read from its first byte */
@@ -142,6 +144,15 @@ static bool cam_i2c_byte(NgageCam *c, uint8_t b)
     } else if (c->cmdport && c->ptr == CAM_CMD_PORT) {
         if (c->ncmd < sizeof(c->cmd)) {
             c->cmd[c->ncmd++] = b;
+        }
+    } else if (c->soc) {
+        if (!c->soc_lo) {
+            c->soc_hi = b;
+            c->soc_lo = true;
+        } else {
+            c->soc_lo = false;
+            ngage_cam_soc_write(c, c->ptr & 0xff, c->soc_hi << 8 | b);
+            c->ptr = (c->ptr + 1) & 0xff;
         }
     } else {
         c->regs[c->ptr] = b;
@@ -172,6 +183,21 @@ static void cam_i2c_load(NgageCam *c)
     if (c->cur >= 0) {
         c->shift = c->aux[c->cur].mem[c->ptr & 0xff];
         c->ptr = (c->ptr + 1) & 0xff;
+        c->nbits = 0;
+        c->s_sda_low = !(c->shift & 0x80);
+        return;
+    }
+    if (c->soc) {                               /* 16-bit values, high byte first */
+        if (!c->soc_lo) {
+            uint16_t v = ngage_cam_soc_read(c, c->ptr & 0xff);
+            c->shift = v >> 8;
+            c->soc_hi = v;
+            c->soc_lo = true;
+        } else {
+            c->shift = c->soc_hi;
+            c->soc_lo = false;
+            c->ptr = (c->ptr + 1) & 0xff;
+        }
         c->nbits = 0;
         c->s_sda_low = !(c->shift & 0x80);
         return;
@@ -332,8 +358,11 @@ void ngage_cam_frame_start(NgageCam *c)
     }
 }
 
+static void soc_still_done(NgageCam *c);
+
 void ngage_cam_frame_end(NgageCam *c)
 {
+    soc_still_done(c);
     c->status |= CAM_ST_FRAME_END;
     c->frames++;
 }
@@ -802,19 +831,14 @@ uint32_t ngage_cam_camx_jpeg(uint8_t *dst, uint32_t cap, uint32_t frame, uint32_
     return ngage_cam_camx_jpeg_wh(dst, cap, CAM_CAMX_W, CAM_CAMX_H, frame, true, jpeg_len);
 }
 
-uint32_t ngage_cam_camx_jpeg_wh(uint8_t *dst, uint32_t cap, unsigned w, unsigned h, uint32_t frame, bool swap,
-                                uint32_t *jpeg_len)
+/* bytes in the sensor's transport (see ngage_cam_camx_jpeg_wh); returns the stream's length, 0 = no room */
+static uint32_t camx_escape(uint8_t *dst, uint32_t cap, const uint8_t *src, uint32_t n, bool swap)
 {
-    static uint8_t jpg[CAM_CAMX_STILL];
-    uint32_t n = ngage_cam_jpeg(jpg, sizeof(jpg), w, h, frame), o = 0;
+    uint32_t o = 0;
     uint8_t p1 = 0, p2 = 0;                     /* the decoder's last two bytes (r1 / r2 start at 0) */
 
-    *jpeg_len = n;
-    if (!n) {
-        return 0;
-    }
     for (uint32_t i = 0; i < n; i++) {
-        uint8_t ch = jpg[i];
+        uint8_t ch = src[i];
         if (o + 2 > cap) {
             return 0;
         }
@@ -841,10 +865,76 @@ uint32_t ngage_cam_camx_jpeg_wh(uint8_t *dst, uint32_t cap, unsigned w, unsigned
     return o;
 }
 
+uint32_t ngage_cam_camx_jpeg_wh(uint8_t *dst, uint32_t cap, unsigned w, unsigned h, uint32_t frame, bool swap,
+                                uint32_t *jpeg_len)
+{
+    static uint8_t jpg[CAM_CAMX_STILL];
+    uint32_t n = ngage_cam_jpeg(jpg, sizeof(jpg), w, h, frame);
+
+    *jpeg_len = n;
+    return n ? camx_escape(dst, cap, jpg, n, swap) : 0;
+}
+
+/*
+ * N70 still: campdd builds SOI, APP0, DQT, SOF0 (Y 2x1, Cb/Cr 1x1), DHT and SOS itself and appends FF D9 (0x500bab70,
+ * 0x500b8858) [V]; the sensor sends the entropy-coded scan in the 7610's transport (0xA5 escapes, decoder 0x500b8a5c)
+ * and the length the decoder must reach in MCU variables 9:0x0F (bits 23:16) and 9:0x10 (bits 15:0) (0x500b8680) [V]. Ours comes from ngage_cam_jpeg (the same
+ * layout and standard Huffman tables; its quantisation differs from the driver's DQT, which changes only the contrast).
+ */
+/*
+ * The length and status describe the still the driver is decoding: set while the frame was built, or at every frame's
+ * end, the next still (the model keeps sending them; the driver issues no capture command) changed them before the
+ * driver had read the previous one, and its length check failed ("n70_still_length_race") [V run]. A new length is
+ * published only once the last one was read (variable 9:0x10).
+ */
+static void soc_still_done(NgageCam *c)
+{
+    uint32_t len = c->soc_pending - 1;
+
+    if (!c->soc_pending || c->soc_unread) {
+        return;                                 /* the driver has not read the last one yet: it keeps it */
+    }
+    c->soc_pending = 0;
+    c->soc_unread = true;
+    c->soc_var[9][0x0f] = len >> 16;
+    c->soc_var[9][0x10] = len >> 8;
+    c->soc_var[9][0x11] = len;
+    /* page 2 registers 2..4, read before the length (0x500b8664): 2 bit 0 = done, else bits 1-5 an error and
+       bits 7:6 the q-scale used (0x500b87c0) [V]; 3/4 the length [I] */
+    c->soc_reg[2][2] = 1;
+    c->soc_reg[2][3] = len >> 16;
+    c->soc_reg[2][4] = len;
+}
+
+static uint32_t cam_soc_still(NgageCam *c, uint8_t *dst, uint32_t bytes)
+{
+    static uint8_t jpg[CAM_N70_STILL];
+    uint32_t n = ngage_cam_jpeg(jpg, sizeof(jpg), c->still_w, c->still_h, c->frames), i = 2, len, o;
+
+    while (n && i + 4 <= n && jpg[i] == 0xff && jpg[i + 1] != 0xda) {     /* to the SOS segment */
+        i += 2 + (jpg[i + 2] << 8 | jpg[i + 3]);
+    }
+    if (!n || i + 4 > n) {
+        cam_log(c, "soc JPEG still: no room (%u of %u)", n, bytes);
+        return bytes;
+    }
+    i += 2 + (jpg[i + 2] << 8 | jpg[i + 3]);
+    len = n - i - 2;                            /* the scan, without FF D9 */
+    memset(dst, 0, bytes);
+    o = camx_escape(dst, bytes, jpg + i, len, false);
+    if (!o) {
+        cam_log(c, "soc JPEG still: no room (%u of %u)", len, bytes);
+        return bytes;
+    }
+    c->soc_pending = len + 1;                   /* published at the frame's end (soc_still_done) */
+    cam_log(c, "soc JPEG still: %u scan bytes, %u sent", len, o);
+    return o;
+}
+
 /* the frame header of the camx layout: 44 bytes (7610, 6670, 6630) unless the phone sets another (N90: 296) */
 static unsigned cam_hdr(const NgageCam *c)
 {
-    return c->hdr ? c->hdr : CAM_HDR_CAMX;
+    return c->no_hdr ? 0 : c->hdr ? c->hdr : CAM_HDR_CAMX;
 }
 
 uint32_t ngage_cam_fill(NgageCam *c, uint8_t *dst, uint32_t bytes)
@@ -853,7 +943,9 @@ uint32_t ngage_cam_fill(NgageCam *c, uint8_t *dst, uint32_t bytes)
                                          /* 128 x 96: the 6260 viewfinder in swivel position 5 [V run] */
                                          { 128, 96 },
                                          /* the N90's other raw modes (campdd mode table 0x500d0a88) [V] */
-                                         { 320, 240 }, { 352, 288 }, { 800, 600 } };
+                                         { 320, 240 }, { 352, 288 }, { 800, 600 },
+                                         /* the N70's viewfinder (46464 bytes) [V run] */
+                                         { 176, 132 } };
     unsigned hdr = cam_hdr(c);
     bool rgb444 = ngage_cam_rgb444(c);
     int fmt = rgb444 ? CAM_FMT_RGB444
@@ -875,6 +967,9 @@ uint32_t ngage_cam_fill(NgageCam *c, uint8_t *dst, uint32_t bytes)
         }
         cam_log(c, "JPEG frame: %u bytes", n, 0);
         return bytes;
+    }
+    if (c->soc && bytes == c->still_bytes) {    /* N70: the scan data only, the driver writes the headers */
+        return cam_soc_still(c, dst, bytes);
     }
     if (c->camx && bytes == (c->still_bytes ? c->still_bytes : CAM_CAMX_STILL)) {  /* the sensor's JPEG still */
         uint32_t len, o;
@@ -957,10 +1052,115 @@ static bool cam_rm1_dma_fits(uint32_t n, uint32_t dma)
     return (n & ~(CAM_RM1_DMA_FRAME - 1)) == dma || (dma > n && dma - n <= 2 * CAM_RM1_DMA_FRAME);
 }
 
+/* ---- Nokia N70 (RM-84): a system-on-chip sensor (MT9D111-like [I]) ---------------------------------------------- */
+
+#define SOC_PAGE      0xf0      /* register page (0 sensor, 1 colour pipe, 2 camera control) */
+#define SOC_VAR_ADDR  0xc6      /* page 1: MCU variable address: bits 12:8 driver, 7:0 offset, bit 15 8-bit access */
+#define SOC_VAR_DATA  0xc8      /* page 1: MCU variable data */
+#define SOC_SEQ       1         /* the sequencer driver: offset 3 command, 4 state */
+
+static unsigned soc_page(const NgageCam *c)
+{
+    return c->soc_reg[0][SOC_PAGE] & 3;
+}
+
+uint16_t ngage_cam_soc_read(NgageCam *c, uint8_t reg)
+{
+    unsigned page = soc_page(c);
+
+    if (reg == SOC_PAGE) {
+        return page;
+    }
+    if (page == 1 && reg == SOC_VAR_DATA) {
+        uint16_t a = c->soc_reg[1][SOC_VAR_ADDR];
+        uint8_t d = (a >> 8) & 31, o = a;
+        uint16_t v = (a & 0x8000) ? c->soc_var[d][o] : c->soc_var[d][o] << 8 | c->soc_var[d][(uint8_t)(o + 1)];
+
+        if (d == 9 && o == 0x10) {
+            c->soc_unread = false;
+        }
+        return v;
+    }
+    return c->soc_reg[page][reg];
+}
+
+void ngage_cam_soc_write(NgageCam *c, uint8_t reg, uint16_t v)
+{
+    unsigned page = soc_page(c);
+
+    if (reg == SOC_PAGE) {
+        for (int p = 0; p < 4; p++) {
+            c->soc_reg[p][SOC_PAGE] = v;
+        }
+        return;
+    }
+    if (page == 1 && reg == SOC_VAR_DATA) {
+        uint16_t a = c->soc_reg[1][SOC_VAR_ADDR];
+        uint8_t d = (a >> 8) & 31, o = a;
+
+        cam_log(c, "soc var write %04x = %04x", a, v);
+        if (a & 0x8000) {
+            c->soc_var[d][o] = v;
+        } else {
+            c->soc_var[d][o] = v >> 8;
+            c->soc_var[d][(uint8_t)(o + 1)] = v;
+        }
+        if (d == SOC_SEQ && o == 3) {           /* seq.cmd: done at once; 1 preview -> state 3, 2 capture -> 7 [I] */
+            c->soc_var[SOC_SEQ][3] = 0;
+            if (v == 1 || v == 2) {
+                c->soc_var[SOC_SEQ][4] = v == 1 ? 3 : 7;
+            }
+        }
+        return;
+    }
+    c->soc_reg[page][reg] = v;
+    cam_log(c, "soc reg %03x = %04x", page << 8 | reg, v);
+}
+
+void ngage_cam_n70_setup(NgageCam *c)
+{
+    ngage_cam_rm1_setup(c);
+    c->no_hdr = true;
+    c->still_bytes = CAM_N70_STILL;
+    c->still_w = CAM_N70_W;
+    c->still_h = CAM_N70_H;
+    ngage_cam_set_sensor(c, CAM_I2C_ADDR_N70, false);
+    c->soc = true;
+    c->soc_reg[0][0] = 0x1519;                  /* chip version [I: the MT9D111's] */
+    /*
+     * Power-on variables campdd reads back and never writes (it copies the whole variable space into shadows, 16 bits
+     * a variable byte at 0x800 + driver * 0x200 + offset * 2): the capture size 7:0x07 / 7:0x09 becomes the JPEG's
+     * SOF and the q-scales 9:0x0A..0x0C (one picked by page-2 register 2 bits 7:6) its DQT, q = (T * qs + 16) >> 5 on
+     * the Annex K tables (0x500ba8cc); both were 0: a 0x0 picture with an all-zero DQT, nothing saved [V run,
+     * "n70_still_zero_sof"]. 16 gives our encoder's quality-75 tables exactly.
+     */
+    c->soc_var[7][0x07] = CAM_N70_W >> 8;
+    c->soc_var[7][0x08] = CAM_N70_W & 0xff;
+    c->soc_var[7][0x09] = CAM_N70_H >> 8;
+    c->soc_var[7][0x0a] = CAM_N70_H & 0xff;
+    c->soc_var[9][0x0a] = c->soc_var[9][0x0b] = c->soc_var[9][0x0c] = 16;
+    /*
+     * The exposure campdd reads for each still (0x500b81c0: page-0 registers 0x04, 0x09, 0x0C, 0x23, variables 2:0x1F,
+     * 2:0x24, page-2 registers 2/3) and CamServerCore turns into EXIF; all 0, CamServerCore panicked USER-EXEC 3 (the
+     * logarithm of 0, as the 6630's rm1_exif_zero_header) after a still ("n70_still_exif_zero") [V run]. Values [I]:
+     * window width 1600, shutter width 0x300, shutter delay 0x100, 0x23 = 0x20, AE index / virtual gain 0x20; the line
+     * length (width + horizontal blanking 0x05 / 0x07) x row speed (0x0A & 7, 0x500b81c0) [V use, I values].
+     */
+    c->soc_reg[0][0x04] = CAM_N70_W;
+    c->soc_reg[0][0x05] = 0x15c;
+    c->soc_reg[0][0x07] = 0x204;
+    c->soc_reg[0][0x0a] = 0x11;
+    c->soc_reg[0][0x09] = 0x300;
+    c->soc_reg[0][0x0c] = 0x100;
+    c->soc_reg[0][0x23] = 0x20;
+    c->soc_var[2][0x1f] = 0x20;
+    c->soc_var[2][0x24] = 0x20;
+}
+
 uint32_t ngage_cam_rm1_frame_len(const NgageCam *c, uint32_t dma)
 {
     static const unsigned sizes[][2] = { { 160, 120 }, { 320, 240 }, { 640, 480 }, { 128, 96 }, { 176, 144 },
-                                         { 352, 288 }, { 800, 600 } };
+                                         { 352, 288 }, { 800, 600 }, { 176, 132 } };
     uint32_t still = c->still_bytes ? c->still_bytes : CAM_RM1_STILL;
 
     if (cam_rm1_dma_fits(still, dma)) {
@@ -994,7 +1194,7 @@ uint32_t ngage_cam_rm1_fill(NgageCam *c, uint8_t *dst, uint32_t dma)
 
     memset(dst, 0, n);
     n = ngage_cam_fill(c, dst, n);
-    if (n > cam_hdr(c)) {
+    if (!c->no_hdr && n > cam_hdr(c)) {
         memset(dst, 0x80, cam_hdr(c));
         ngage_cam_rm1_header(dst);
     }

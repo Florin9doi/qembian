@@ -263,6 +263,8 @@ static void rm1_cam_reset(void *opaque)
     ngage_cam_init(&s->cam);
     if (s->variant == RM1_CAM_N90) {
         ngage_cam_n90_setup(&s->cam);
+    } else if (s->variant == RM1_CAM_N70) {
+        ngage_cam_n70_setup(&s->cam);
     } else {
         ngage_cam_rm1_setup(&s->cam);
     }
