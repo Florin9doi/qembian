@@ -64,10 +64,41 @@ minute of listening; sender: Send, Via infrared), same use as the 6600 (docs/dev
 shared on/off words (H-nhl10-sir) and a 0-count one-shot timer (H-ngage-timer-zero, ecomm.ldd's turnaround timer,
 because the 6260's irda.esk sets no irMinLinkTurnaroundTime). Notes: docs/research/6600-irda.md "Nokia 6260".
 
+## Swivel (2026-11-27)
+
+The fold and the swivel display are five sensor lines, GPIO 0x0C120C04 bits 22-26 (active low) [V code]. ekeyb's
+read helper 0x50394854 inverts them into virtual bits 25, 26, 27, 29, 30 (virtual bit 28 is not a GPIO line: a driver
+call, `(dev 1, reg 0x1F, mask 0x10)` bit 1, the UEM's power key [I]). 0x50392CA4 decodes a position, A..E = bit 22..26
+high:
+
+| D | E | other lines | position | scan code (0x50395690) | the phone [V run] |
+|---|---|---|---|---|---|
+| high | high | A, B, C high | 1 | 0xB7 | normal (power-on state) |
+| high | high | B, C high, A low | 2 | 0xB8 | no visible effect; keys work |
+| high | high | B or C low | 0 | 0xB6 | lights off (ISI PN_LIGHT 0x3A msg 05 `03 02 01 01`; 1 sends `03 01 01 01`): **closed** |
+| low | high | - | 3 | 0xBB | Camera starts, its view turned to the left (texts read bottom to top) |
+| high | low | B, C high | 4 | 0xBA | Camera starts, view turned to the right |
+| high | low | B or C low | 5 | 0xB9 | Camera, view turned right, a smaller viewfinder (128x96 frames instead of 176x144) |
+| low | low | - | none | - | - |
+
+The keypad DFC (0x503926C4) checks it on every scan; a new position must hold for 200 scans (position 4: 800; table
+0x503956B0) before ekeyb queues its scan code (EStdKeyApplication2..7) and keeps the scan timer running while it
+counts [V code]. The status pane stays upright in 3-5; only the application's area turns. Which physical position is
+2, 3, 4, 5 (open with the display turned 90 or 180 degrees, folded with the display outwards) is [I]; the line pattern
+the board uses for each position is one that decodes to it, not one read from a phone [I].
+
+Board: machine property `swivel` (0-5, ekeyb's numbers; 1 at power-on): `qom-set /machine swivel 0`, in ngage_phone.py
+the Fold/swivel list. A change raises the keypad's CTSI bit so ekeyb scans (H-rm25-switches). Tests:
+`tests/nokia6260_board_test.py` `Swivel` (a transcription of 0x50392CA4 pinned to the ROM's instructions; each board
+pattern decodes to its position).
+
 ## Open
 
-- GPIO bits 22-26 and the switch read through a driver call (virtual bit 28): the swivel/fold positions [I]; held at
-  "not asserted". Which position that means on the phone, and whether the screen or the keys depend on it, is not known.
+- Swivel positions 2-5: which physical position of the fold and display each one is (see "Swivel"); the pattern of
+  sensor lines the phone's magnets make in each one.
 - 0xA2 / 0xA3 / 0xAC on F7 / F8 / F6: names [I] (EStdKeyIncVolume / DecVolume, EStdKeyDevice8).
 - Sound, network: not tried. Camera (Menu > Camera) works with the test pattern (2026-11-26; H-rm25-camera,
-  H-dct4-selftest-stop); its image is turned 90 degrees by the phone, the model compensates [I why].
+  H-dct4-selftest-stop); its image is turned 90 degrees by the phone, the model compensates [I why]. In swivel position 5 Camera asks for
+  128x96 frames, which the model sends since 2026-11-27 (before: 160-pixel rows, slanted stripes; regression
+  `rm25_swivel5_viewfinder_garbled` in `tests/ngage_cam_test.c`). In 3-5 the pattern is turned against the view: the sensor
+  is in the swivel part and turns with it [I], and the model does not turn the scene per position.

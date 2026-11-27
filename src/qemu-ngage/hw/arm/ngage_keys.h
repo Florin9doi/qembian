@@ -25,5 +25,9 @@ void ngage_keys_gpio_peer(uint16_t (*lines)(void *opaque), void (*drive)(void *o
 /* 7650: the keypad slide on the switch line (0x0C15020C bit 9); present, and its position */
 void ngage_keys_slide(bool present, bool closed);
 bool ngage_keys_slide_closed(void);
+/* 6260: the swivel/fold position as ekeyb decodes it (0-5 -> scan codes 0xB6, B7, B8, BB, BA, B9); 1 at power-on */
+#define NGAGE_SWIVEL_POSITIONS 6
+void ngage_keys_swivel(int pos);
+int ngage_keys_swivel_pos(void);
 
 #endif

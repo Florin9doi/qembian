@@ -205,6 +205,8 @@ typedef struct {
     uint32_t gpio_line5;            /* rh51: GPIO bit of sense line 5 (7610: 18, 6260: 19) */
     uint32_t gpio_idle;             /* rh51: GPIO bits that idle high */
     uint32_t gpio_joy;              /* 7610/6670: pressed joystick GPIO bits */
+    uint32_t gpio_swivel;           /* 6260: swivel/fold lines held low (H-rm25-switches) */
+    int swivel;                     /* 6260: ekeyb's position 0-5 */
     uint16_t joy;                   /* pressed joystick lines (bits of 0x0C15020A) */
     uint16_t joy_ier;               /* joystick interrupt enables (CTSI status-2 bits) */
     uint16_t joy_regs[16];
@@ -342,6 +344,45 @@ bool ngage_keys_slide_closed(void)
     return kpd.slide_closed;
 }
 
+/*
+ * H-rm25-switches: the 6260's swivel/fold sensors, GPIO 0x0C120C04 bits 22-26 (active low; ekeyb's read helper
+ * 0x50394854 makes them virtual bits 25, 26, 27, 29, 30). ekeyb 0x50392CA4 turns them into a position, with
+ * A..E = bit 22..26 high:
+ *     D && E:  A && B && C -> 1,  B && C -> 2,  else 0
+ *     D && !E: B && C -> 4,  else 5
+ *     !D:      E -> 3,  else none (-1)
+ * and, once a position has held for 200 scans (position 4: 800; table 0x503956B0), queues the scan code of the
+ * table 0x50395690: 0 -> 0xB6, 1 -> 0xB7, 2 -> 0xB8, 3 -> 0xBB, 4 -> 0xBA, 5 -> 0xB9 (EStdKeyApplication2..7) [V code].
+ * The keypad DFC (0x503926C4) checks it on every scan and keeps scanning while it counts [V code]; a change here
+ * raises the keypad's CTSI bit to start a scan, as the 7610's GPIO joystick (H-rh51-joy-ctsi). Which line pattern
+ * the phone's magnets make in each mode is not known: each position gets one pattern that decodes to it [I].
+ */
+static const uint32_t rm25_swivel_low[NGAGE_SWIVEL_POSITIONS] = {
+    1u << 23,                       /* 0: B low */
+    0,                              /* 1: all high (the power-on state so far) */
+    1u << 22,                       /* 2: A low */
+    1u << 25,                       /* 3: D low */
+    1u << 26,                       /* 4: E low */
+    (1u << 23) | (1u << 26),        /* 5: B and E low */
+};
+
+void ngage_keys_swivel(int pos)
+{
+    if (pos < 0 || pos >= NGAGE_SWIVEL_POSITIONS || pos == kpd.swivel) {
+        return;
+    }
+    kpd.swivel = pos;
+    kpd.gpio_swivel = rm25_swivel_low[pos];
+    qemu_log_mask(LOG_UNIMP, "ngage-key: swivel position %d\n", pos);
+    kpd.ctsi |= NGAGE_CTSI_KPD;
+    kpd_update(&kpd);
+}
+
+int ngage_keys_swivel_pos(void)
+{
+    return kpd.swivel;
+}
+
 void ngage_ctsi2_raise(uint16_t bits)
 {
     kpd.ctsi2 |= bits;
@@ -356,7 +397,7 @@ static uint64_t gpio_read(void *opaque, hwaddr a, unsigned size)
 
     if ((a & ~3) == 0x04 && k->rh51) {
         v |= k->gpio_idle;                      /* idle: line 5, the joystick (and 6260 switch) lines high */
-        v &= ~k->gpio_joy;
+        v &= ~k->gpio_joy & ~k->gpio_swivel;
         if (kpd_cols(k) & 0x20) {
             v &= ~k->gpio_line5;
         }
@@ -509,6 +550,8 @@ void ngage_keys_init(MemoryRegion *sys, qemu_irq irq, NgageKpdLayout layout)
     kpd.gpio_line5 = layout == NGAGE_KPD_RM25 ? 1u << 19 : 1u << 18;
     kpd.gpio_idle = (1u << 19) | (1u << 18) | 0xf8
                     | (layout == NGAGE_KPD_RM25 ? 0x7c00000 : 0);        /* 6260: bits 22-26 not asserted [I] */
+    kpd.swivel = 1;                 /* 6260: all switch lines high */
+    kpd.gpio_swivel = 0;
     kpd.nhl10 = layout == NGAGE_KPD_NHL10 || layout == NGAGE_KPD_NEM4      /* NEM-4: the 6600's ports */
                 || kpd.rh51;                                                /* 7610: the 6600's matrix */
     kpd.rm51 = layout == NGAGE_KPD_RM51;

@@ -34,6 +34,7 @@
 #include "qemu/log.h"
 #include "qemu/error-report.h"
 #include "qapi/error.h"
+#include "qapi/visitor.h"
 #include "hw/arm/boot.h"
 #include "hw/arm/machines-qom.h"
 #include "hw/core/boards.h"
@@ -2596,10 +2597,15 @@ static void ngage_init_rh51(MachineState *machine)
     ngage_init(machine);
 }
 
+static uint8_t ngage_swivel = 1;                /* machine property swivel (6260), before the machine runs */
+static bool ngage_swivel_live;
+
 static void ngage_init_rm25(MachineState *machine)
 {
     ngm = &ngage_rm25;
     ngage_init(machine);
+    ngage_keys_swivel(ngage_swivel);
+    ngage_swivel_live = true;
 }
 
 static void ngage_init_rh67(MachineState *machine)
@@ -2796,12 +2802,39 @@ static const TypeInfo ngage_rh67_machine_type = {
     .interfaces = arm_machine_interfaces,
 };
 
-/* Nokia 6260 */
+/* Nokia 6260: its swivel/fold position, ekeyb's 0-5 (H-rm25-switches; 1 = all sensor lines high) */
+static void ngage_get_swivel(Object *obj, Visitor *v, const char *name, void *opaque, Error **errp)
+{
+    uint8_t p = ngage_swivel_live ? ngage_keys_swivel_pos() : ngage_swivel;
+
+    visit_type_uint8(v, name, &p, errp);
+}
+
+static void ngage_set_swivel(Object *obj, Visitor *v, const char *name, void *opaque, Error **errp)
+{
+    uint8_t p;
+
+    if (!visit_type_uint8(v, name, &p, errp)) {
+        return;
+    }
+    if (p >= NGAGE_SWIVEL_POSITIONS) {
+        error_setg(errp, "swivel: position 0-%d", NGAGE_SWIVEL_POSITIONS - 1);
+        return;
+    }
+    ngage_swivel = p;
+    if (ngage_swivel_live) {
+        ngage_keys_swivel(p);
+    }
+}
+
 static void ngage_rm25_class_init(ObjectClass *oc, const void *data)
 {
     MachineClass *mc = MACHINE_CLASS(oc);
 
     ngage_machine_class_init(oc, data);
+    object_class_property_add(oc, "swivel", "uint8", ngage_get_swivel, ngage_set_swivel, NULL, NULL);
+    object_class_property_set_description(oc, "swivel",
+        "the swivel/fold position as ekeyb decodes it, 0-5 (scan codes 0xB6, B7, B8, BB, BA, B9; 1 at power-on)");
     mc->desc = "Nokia 6260 (RM-25, DCT4 UPP, S60 2nd FP1, Symbian 7.0s EKA1) bring-up board";
     mc->init = ngage_init_rm25;
 }

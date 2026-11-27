@@ -794,7 +794,9 @@ uint32_t ngage_cam_camx_jpeg_wh(uint8_t *dst, uint32_t cap, unsigned w, unsigned
 
 uint32_t ngage_cam_fill(NgageCam *c, uint8_t *dst, uint32_t bytes)
 {
-    static const unsigned sizes[][2] = { { 160, 120 }, { 176, 144 }, { 640, 480 } };
+    static const unsigned sizes[][2] = { { 160, 120 }, { 176, 144 }, { 640, 480 },
+                                         /* 128 x 96: the 6260 viewfinder in swivel position 5 [V run] */
+                                         { 128, 96 } };
     bool rgb444 = ngage_cam_rgb444(c);
     int fmt = rgb444 ? CAM_FMT_RGB444
             : c->reg16 && c->regs[CAM_REG_MODE] == 7 ? CAM_FMT_RGB565

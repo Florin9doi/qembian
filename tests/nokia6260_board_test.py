@@ -139,5 +139,54 @@ class Keys(unittest.TestCase):
         self.assertEqual(0x7c00000, sum(1 << b for b in range(22, 27)))
 
 
+def ekeyb_swivel(high):
+    """ekeyb 0x50392CA4 transcribed: high = the set of GPIO bits 22-26 that read high -> position (-1 = none)."""
+    a, b, c, d, e = (bit in high for bit in range(22, 27))
+    if d:
+        if e:
+            return 1 if a and b and c else 2 if b and c else 0
+        return 4 if b and c else 5
+    return 3 if e else -1
+
+
+class Swivel(unittest.TestCase):
+    def patterns(self):
+        k = (HW / 'ngage_keys.c').read_text()
+        body = k.split('rm25_swivel_low[NGAGE_SWIVEL_POSITIONS] = {', 1)[1].split('};', 1)[0]
+        rows = []
+        for line in body.splitlines():
+            line = line.split('/*')[0].strip().rstrip(',')
+            if line:
+                rows.append(set(int(b) for b in re.findall(r'1u << (\d+)', line)))
+        return rows
+
+    def test_rm25_swivel_patterns_decode_to_their_position(self):
+        """Each position the board offers must pull low a set of lines that ekeyb decodes as that position."""
+        rows = self.patterns()
+        self.assertEqual(len(rows), 6)
+        for pos, low in enumerate(rows):
+            self.assertTrue(low <= set(range(22, 27)), pos)
+            self.assertEqual(ekeyb_swivel(set(range(22, 27)) - low), pos, pos)
+        self.assertEqual(rows[1], set())                        # power-on: all lines high (H-rm25-switches)
+        self.assertIn('kpd.swivel = 1;', (HW / 'ngage_keys.c').read_text())
+
+    @unittest.skipUnless(ROM.exists(), 'core ROM not extracted')
+    def test_rm25_swivel_decoder_and_scan_codes_in_rom(self):
+        """The transcription above is ekeyb's: virtual bits 25, 26, 27, 29, 30 (GPIO 22, 23, 24, 25, 26 inverted by
+        the read helper), its branch values, and the scan code table 0x50395690 (0xB6, B7, B8, BB, BA, B9)."""
+        rom = ROM.read_bytes()
+        self.assertEqual([word(rom, a) for a in (0x50392cb4, 0x50392cc0, 0x50392ccc, 0x50392cd8, 0x50392ce0)],
+                         [0xe1a03ca0, 0xe1a03d20, 0xe1a03da0, 0xe1a03ea0, 0xe1a00f20])  # lsr #25, 26, 27, 29, 30
+        self.assertEqual([rom[a - B] for a in (0x50392d10, 0x50392d24, 0x50392d40, 0x50392d48, 0x50392d54)],
+                         [1, 2, 4, 5, 3])                                               # mov r4, #pos
+        self.assertEqual([word(rom, a) for a in (0x503949b8, 0x503949c4, 0x503949d0, 0x503949dc, 0x503949e8)],
+                         [0xe3100501, 0xe3100502, 0xe3100401, 0xe3100402, 0xe3100301])  # GPIO bits 22-26
+        self.assertEqual([rom[0x50395690 - B + 4 * i] for i in range(6)], [0xb6, 0xb7, 0xb8, 0xbb, 0xba, 0xb9])
+
+    def test_rm25_swivel_property(self):
+        t = (HW / 'ngage.c').read_text()
+        self.assertIn('object_class_property_add(oc, "swivel", "uint8", ngage_get_swivel, ngage_set_swivel', t)
+
+
 if __name__ == '__main__':
     unittest.main()

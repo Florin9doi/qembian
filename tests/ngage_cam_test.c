@@ -531,6 +531,38 @@ static void test_fill_rot90(void)
     assert(memcmp(f, g, sizeof(g)) == 0);
 }
 
+/*
+ * Regression "rm25_swivel5_viewfinder_garbled" (6260): in swivel position 5 Camera asks for 128x96 viewfinder frames
+ * (24576 bytes); the fill knew only 160x120, 176x144 and 640x480 and wrote 160-pixel rows, so the picture came out as
+ * slanted thin stripes. A 128x96 frame must be the pattern at that size (turned, as every 6260 frame).
+ */
+static void test_fill_128x96(void)
+{
+    static uint8_t f[128 * 96 * 2];
+    const unsigned w = 128;
+    uint8_t p0[3], p1[3];
+
+    reset();
+    cam.rot90 = true;
+    assert(ngage_cam_fill(&cam, f, sizeof(f)) == sizeof(f));
+    /* upright 96 x 128, bar b spans x 12b..12b+11: white = frame rows y < 12, black = frame rows y >= 84 */
+    ngage_cam_yuv_to_rgb(f + (6 * w + 80) * 2, p0, p1);
+    assert(near(p0, 255, 255, 255));
+    ngage_cam_yuv_to_rgb(f + (90 * w + 80) * 2, p0, p1);
+    assert(near(p0, 0, 0, 0));
+    /* one bar along a whole frame row (an upright column): the same colour at both ends of the bars' span */
+    ngage_cam_yuv_to_rgb(f + (40 * w + 40) * 2, p0, p1);
+    uint8_t a[3] = { p0[0], p0[1], p0[2] };
+    ngage_cam_yuv_to_rgb(f + (40 * w + 120) * 2, p0, p1);
+    assert(near(p0, a[0], a[1], a[2]));
+    cam.rot90 = false;                      /* plain: bars 16 pixels wide, white on the left, black on the right */
+    ngage_cam_fill(&cam, f, sizeof(f));
+    ngage_cam_yuv_to_rgb(f + (40 * w + 8) * 2, p0, p1);
+    assert(near(p0, 255, 255, 255));
+    ngage_cam_yuv_to_rgb(f + (40 * w + 120) * 2, p0, p1);
+    assert(near(p0, 0, 0, 0));
+}
+
 /* camxpdd 0x503e6258 + 0x503e6290, ported instruction by instruction: the driver's view of a 7610 still. buf has
    size bytes of stream and room for the 3-byte terminator it appends; returns the JPEG length it finds */
 static uint32_t camx_decode_order(uint8_t *buf, uint32_t size, bool swap)
@@ -752,6 +784,7 @@ int main(void)
     test_frame_start();
     test_fill_camx_header();
     test_fill_rot90();
+    test_fill_128x96();
     test_camx_still();
     test_rm1_frame_len();
     test_rm1_still();

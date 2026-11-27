@@ -26,6 +26,10 @@ The phone keeps its flash (C:, settings) in build/ngage/phones/NAME.flash betwee
 - Nokia 7650: a Slide button (or F7) opens and closes the keypad slide (qom-set /machine slide-closed); the
   phone starts with it open. Closed, the keypad locks and the camera (behind the slide) is on stand-by; open,
   the camera shows the board's test pattern (ngage_cam.c, docs/devices/nokia-7650-nhl2/camera.md).
+- Nokia 6260: a Fold/swivel list sets the position of the fold and the swivel display (qom-set /machine swivel 0-5,
+  ekeyb's own position numbers; H-rm25-switches). Open (1) is the power-on state; Closed (0) turns the lights off;
+  3, 4 and 5 start Camera, each with its own screen orientation; 2 has no visible effect. Which real positions 2-5
+  are is [I] (docs/devices/nokia-6260-rm25/bring-up.md "Swivel").
 - Nokia 9500 Communicator: two screens, the cover (128x128, its own console: screendump
   device=cover) and the inner 640x200 (the OMAP LCD controller, console 0), and a Lid button
   (qom-set /machine cover-open). The phone starts with the lid closed. The host keyboard is the
@@ -51,6 +55,17 @@ import ngage_sess as ns  # noqa: E402
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 Qt = QtCore.Qt
+
+# Nokia 6260: ekeyb's swivel/fold positions (machine property swivel; scan codes 0xB6, B7, B8, BB, BA, B9) and what
+# the phone does in each [V run]; the physical position behind 2-5 is [I]
+SWIVEL_6260 = [
+    (1, 'Open (1)'),
+    (0, 'Closed: lights off (0)'),
+    (2, 'Position 2: no visible effect'),
+    (3, 'Camera, view turned left (3)'),
+    (4, 'Camera, view turned right (4)'),
+    (5, 'Camera, turned right, small viewfinder (5)'),
+]
 
 # (label, QEMU qcode) rows: the N-Gage QD's keys; the board maps each qcode (ngage.c NGAGE_KEYS)
 KEY_ROWS = [
@@ -236,6 +251,16 @@ class Phone(QtWidgets.QWidget):
             self.slide.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             self.slide.clicked.connect(self.toggle_slide)
             lay.addWidget(self.slide)
+        if model == 'nokia6260':
+            row = QtWidgets.QHBoxLayout()
+            row.addWidget(QtWidgets.QLabel('Fold/swivel:'))
+            self.swivel = QtWidgets.QComboBox()
+            self.swivel.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            for pos, label in SWIVEL_6260:
+                self.swivel.addItem(label, pos)
+            self.swivel.activated.connect(self.set_swivel)
+            row.addWidget(self.swivel, 1)
+            lay.addLayout(row)
         self.t0 = time.time()
         self.timer = QtCore.QTimer(self)
         self.timer.timeout.connect(self.tick)
@@ -296,6 +321,13 @@ class Phone(QtWidgets.QWidget):
             self.flip.setText('Open flip' if not closed else 'Close flip')
         except OSError as err:
             self.status.setText('flip: %s' % err)
+
+    def set_swivel(self, index):
+        """The 6260's fold and swivel: five sensor lines ekeyb decodes into a position (ngage_keys.c, H-rm25-switches)."""
+        try:
+            self.qmp.cmd('qom-set', path='/machine', property='swivel', value=self.swivel.itemData(index))
+        except OSError as err:
+            self.status.setText('swivel: %s' % err)
 
     def toggle_slide(self):
         """The 7650's keypad slide: the switch line ekeyb reads (ngage_keys.c, H-nhl2-slide)."""
