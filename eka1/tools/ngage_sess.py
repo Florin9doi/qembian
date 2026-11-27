@@ -134,9 +134,14 @@ class Daemon:
         s_ = socket.socket(); s_.bind(('127.0.0.1', 0)); port = s_.getsockname()[1]; s_.close()
         mach = nr.M['machine'] + (',ppm=%s' % a.ppm if a.ppm else '') + (',isi=%s' % a.isi if a.isi else '') \
             + (',flash=%s' % a.flash if a.flash else '') + (',mmc=%s' % a.mmc if a.mmc else '')
+        # a udp IR link is the board's own socket (irda=): QEMU's udp chardev froze the phone once its peer exited
+        irda_udp = a.irda.startswith('udp:')
+        if irda_udp:
+            mach += ',irda=%s' % a.irda
         cmd = [str(nr.QEMU), '-M', mach, '-bios', a.rom, '-rtc', os.environ.get('NGAGE_RTC', 'base=localtime'), '-display', 'none',
                '-serial', 'file:%s' % (d / 'serial'),
-               '-serial', a.irda or 'file:%s' % (d / 'serial2'), '-serial', 'file:%s' % (d / 'serial3'),
+               '-serial', (a.irda if a.irda and not irda_udp else 'file:%s' % (d / 'serial2')),
+               '-serial', 'file:%s' % (d / 'serial3'),
                '-monitor', 'unix:%s,server,nowait' % (d / 'mon'),
                '-qmp', 'unix:%s,server,nowait' % (d / 'qmp'),
                '-d', a.debug, '-D', str(d / 'qemu.log'), '-gdb', 'tcp:127.0.0.1:%d' % port, '-S'] \

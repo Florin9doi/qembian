@@ -43,26 +43,31 @@ Host keys in the window: F1/F2 = softkeys, F5 = Menu, arrows and Enter = joystic
 
 ## Linking options (`--irda`)
 
-The IrDA port is the phone's second serial port (QEMU `-serial`, the first one is the kernel's debug output). The
-bytes on it are the plain IrDA (SIR) stream: framing, checksums and the link protocol are done by the phone.
+The IrDA port carries the plain IrDA (SIR) stream: framing, checksums and the link protocol are done by the phone. A
+UDP link (`a`, `b`, `udp:...`) is the board's own socket (`-M ...,irda=udp:HOST:PORT@[LHOST]:LPORT`, set by the
+launchers); every other value is a QEMU chardev on the phone's second serial port (`-serial`, the first one is the
+kernel's debug output).
 
 | `--irda` | What it does |
 |---|---|
 | (none) | not linked: what the phone transmits goes to the session's `serial2` file (build/ngage/sess-NAME/) |
 | `a` / `b` | the two ends of a local UDP link (127.0.0.1 ports 7470 and 7471); one phone each [V for the UDP link, run with explicit specs; the shorthand itself not yet run] |
-| `udp:HOST:PORT@LHOST:LPORT` | any UDP link: send to HOST:PORT, receive on LHOST:LPORT; e.g. two machines on a LAN [I] |
+| `udp:HOST:PORT@LHOST:LPORT` | any UDP link: send to HOST:PORT, receive on LHOST:LPORT (LHOST may be empty: all addresses; the `@` part is required); e.g. two machines on a LAN [I]. The phone takes datagrams from any sender |
 | `tcp:HOST:PORT,server=on,wait=off` and `tcp:HOST:PORT` | a TCP link: one phone listens, the other connects (start the server first) [I] |
 | `/dev/ttyUSB0` (a host serial port) | a real serial IrDA adapter; the phone's baud rate (9600 to 115200) is set on the port [I] |
 
 Only one `a`/`b` pair can run on a machine at a time (fixed ports); for a second pair use explicit `udp:` specs with
-other ports. The same values work for a debug session:
+other ports. A second phone on an end already in use does not start ("cannot bind ... another phone on this end?"). The same values work for a debug session:
 
 ```sh
 python3 eka1/tools/ngage_sess.py -s ir-1 --model nokia6600 --flash build/ngage/ir-1.flash --irda a start
 ```
 
 Light is lossy and IrDA retries, so a dropped UDP packet costs a retry, not the transfer. A phone whose
-Infrared is off ignores what arrives, as a real one would.
+Infrared is off ignores what arrives, as a real one would. A peer that goes away (the other window closed,
+`ngage_irsend.py` exited) only loses the phone's bytes: the board's socket never blocks and ignores the "port
+unreachable" errors. It replaced QEMU's udp chardev, which froze the whole phone (and its monitor) when the peer
+had gone: it read its socket blocking after such an error, holding QEMU's main lock until the next datagram.
 
 ## Seeing what happens
 
@@ -80,6 +85,9 @@ Infrared is off ignores what arrives, as a real one would.
 | nothing arrives, both phones look fine | both phones were started with the same end (`a` and `a`), or another pair already uses ports 7470/7471 |
 | the window does not start, "session is running" | that phone (`--phone NAME`) is already running in another window or session |
 | a long white screen at start | the first boot of a new phone formats C: (about a minute); not a hang |
+| the whole phone (and its monitor) freezes once the IR peer, e.g. `ngage_irsend.py`, exits | a phone started before the board's own IR socket (QEMU's udp chardev, `-serial udp:...`): rebuild (`scripts/build-qemu-ngage.sh`) and restart it. Any datagram to its port wakes a frozen one |
+| a "computer" peer gets probed mid-push (IAS mRouter, IrCOMM, IrModem, IrLPT) | the phone's PC Suite link (mRouter) reacts to the Computer discovery hint; `ngage_irsend.py` advertises OBEX only (`--hints 8020`) |
+| "cannot bind ... another phone on this end?" at start | an earlier QEMU on that end is still running (its window gone): `pgrep -af qemu-system-arm` |
 
 ## Limits
 
