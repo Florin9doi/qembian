@@ -29,6 +29,11 @@ void rm1_spi_init(MemoryRegion *sys, struct omap_mpu_state_s *mpu);
 void rm1_wdt_init(MemoryRegion *sys);
 
 void rm1_gpio_set_output_hook(int module, void (*fn)(void *opaque, uint16_t out), void *opaque);
+/* called after every DIRECTION write of that module (1 = input) */
+void rm1_gpio_set_dir_hook(int module, void (*fn)(void *opaque, uint16_t dir), void *opaque);
+
+/* camera (nokia6630_cam.c): the sensor's I2C on GPIO1 line 11 / GPIO4 line 14, the CCP receiver (0x2007D000) */
+void rm1_cam_init(MemoryRegion *sys, struct omap_mpu_state_s *mpu);
 
 /* modem link: SSI (0x30000000) + the modem's end of xbus.ldd's protocol; ISI = reply table or NULL */
 void rm1_ssi_init(MemoryRegion *sys, struct omap_mpu_state_s *mpu, const char *isi);

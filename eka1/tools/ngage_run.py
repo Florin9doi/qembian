@@ -106,6 +106,7 @@ MODELS = {
         rom=ROOT / 'eka1/rm1/core/ROM.bin', ppm=ROOT / 'eka1/rm1/core',
         isi=ROOT / 'src/qemu-ngage/isi-replies-rm1.txt',
         fatal=0x5001e664,                   # the kernel's fault routine (IRQs off, reason, variant hook +0x210); Kern::Fault 0x5001e65c (reason + 0x10000) falls into it [V]
+        panic=0x500ce040,                   # EUser RThread::Panic, ported from the 9500 (12/12 words); caught CamServerCore's USER-EXEC 3 [V run]
         cur_thread=0x800018c8,              # ported from the 3230 (40 users agree)
         containers=0x8000048c,              # ported from the 3230 (13 users agree)
         code=(0x50009f9c, 0x50c00000),

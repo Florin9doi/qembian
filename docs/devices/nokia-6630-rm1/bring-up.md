@@ -11,7 +11,8 @@ Marks: **[V]** verified in the firmware or by a run, **[I]** inferred.
 **The S60 home screen and the Menu grid** on `-M nokia6630`, from the phone's own unmodified ROM: first boot
 (~3.5 min: the NAND is formatted, then the home-city list, Time and Date queries), the idle screen (wallpaper, clock,
 indicators, Messag./Camera softkeys), every keypad key, Calendar from the idle shortcut, the Menu (F5) with its
-grid. No sound, network, SIM, DRM or secure environment. **Open: a second boot from a kept NAND** (`--phone NAME`
+grid. **Camera** (2026-11-27, test pattern: viewfinder, capture, saved under Images; docs/devices/nokia-7650-nhl2/camera.md
+"Nokia 6630"). No sound, network, SIM, DRM or secure environment. **Open: a second boot from a kept NAND** (`--phone NAME`
 without `--fresh`) faults (stall 26). How it was done, techniques and traps: [how-it-was-done.md](how-it-was-done.md).
 
     python3 eka1/tools/ngage_phone.py --model nokia6630 --phone NAME --fresh     # the window (NAND kept in build/ngage/phones/NAME.flash)

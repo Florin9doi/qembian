@@ -74,6 +74,11 @@ typedef struct NgageCam {
     uint8_t cmd[8], ncmd, resp[8], nresp;
     bool camx;                      /* 7610/6670 camxpdd: frames carry a 44-byte header; stills are a JPEG in the
                                        sensor's transport (ngage_cam_camx_jpeg), its length in registers 0xF6-0xF8 */
+    uint32_t still_bytes;           /* camx: the JPEG still's whole transfer (header + stream room), 0 = the 7610's
+                                       CAM_CAMX_STILL; the 6630: CAM_RM1_STILL */
+    uint16_t still_w, still_h;      /* camx: the still's picture size, 0 = CAM_CAMX_W x CAM_CAMX_H */
+    bool still_raw;                 /* camx: the still's words in stream order (the 6630's campdd swaps only the
+                                       44-byte header, 0x500a0934), not byte-reversed as for camxpdd */
     bool rot90;                     /* the sensor lies on its side (6260): frames carry the picture turned 90 degrees
                                        clockwise (set by the board after init; ngage_cam_fill) */
     uint8_t regs[CAM_NREGS];
@@ -130,6 +135,41 @@ uint32_t ngage_cam_fill(NgageCam *c, uint8_t *dst, uint32_t bytes);     /* retur
  * length in *jpeg_len.
  */
 uint32_t ngage_cam_camx_jpeg(uint8_t *dst, uint32_t cap, uint32_t frame, uint32_t *jpeg_len);
+/* the same with the picture size given */
+uint32_t ngage_cam_camx_jpeg_wh(uint8_t *dst, uint32_t cap, unsigned w, unsigned h, uint32_t frame, bool swap,
+                                uint32_t *jpeg_len);
+
+/*
+ * Nokia 6630 (campdd.pdd, the OMAP1610 board's nokia6630_cam.c): the 7610's frame layout (44-byte header, then the
+ * picture or a JPEG still) through the system DMA in 16-byte frames; the ISR reads what is left (< 16 bytes) from the
+ * FIFO itself. docs/devices/nokia-7650-nhl2/camera.md "Nokia 6630".
+ */
+#define CAM_RM1_STILL     0xc802c   /* the still's transfer, header + 0xC8000: DMA CFN 0xC802 x 16 = 0xC8020 [V run] */
+#define CAM_RM1_W         1280      /* the 6630's still: 1.3 megapixels [I] */
+#define CAM_RM1_H         960
+#define CAM_RM1_DMA_FRAME 16        /* the driver's DMA frame: 4 words (CEN 4, frame-synchronised) [V run] */
+/* after ngage_cam_init: the 7610 layout, the 6630's still (JPEG in stream order), the gain registers' power-on values */
+void ngage_cam_rm1_setup(NgageCam *c);
+/* the frame the sensor sends for a DMA transfer of dma bytes (whole DMA frames): header + picture, or the still */
+uint32_t ngage_cam_rm1_frame_len(uint32_t dma);
+/*
+ * The 44-byte header: the sensor's embedded data, 7-bit fields with bit 7 set [V: campdd's own values 0x500a09c4
+ * (B2 87 80 at +4..+6), its 21-bit field reader 0x500a0a98]. CamServerCore builds the picture's EXIF from it
+ * (0x501fbce0): +0 bit 0 a mode flag, +4..+6 the exposure (ShutterSpeedValue: a logarithm), +8/+9 a 10-bit gain, +10.
+ * Zeros panicked CamServerCore right after a still (USER-EXEC 3 from EUSER's TRealX) [V run]. campdd byte-reverses the
+ * header's words only when CCP +0x60 reads 1 at that moment (0x500a0934): for the viewfinder, not for the still
+ * [V run], so every word is a byte palindrome. Values [I].
+ */
+void ngage_cam_rm1_header(uint8_t *h);
+/* a whole frame for a DMA transfer of dma bytes (dst has room for ngage_cam_rm1_frame_len); returns its length */
+uint32_t ngage_cam_rm1_fill(NgageCam *c, uint8_t *dst, uint32_t dma);
+/*
+ * The DMA request line with `left` bytes still in the FIFO: QEMU's omap_dma decides at the set-up of each DMA frame
+ * whether the next one runs (it stays active while the request is high), so the line means "another whole frame
+ * follows the one being read". Held while one frame was left, it ran one frame past the data and the driver counted
+ * 12-16 bytes too many (its JPEG length check failed) [V run].
+ */
+bool ngage_cam_rm1_drq(uint32_t left);
 #define CAM_REG_CAMX_LEN  0xf6      /* 7610/6670: 0xF6-0xF8 the still's JPEG length (high byte first), 0xFA status:
                                        bits 7 and 6 set = good (camxpdd 0x503e5e6c) [V] */
 /* a baseline JPEG (YCbCr 4:2:2, quality 75, the standard Huffman tables) of the test pattern; its length, 0 = no room */

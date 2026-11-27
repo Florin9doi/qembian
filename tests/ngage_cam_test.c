@@ -533,9 +533,9 @@ static void test_fill_rot90(void)
 
 /* camxpdd 0x503e6258 + 0x503e6290, ported instruction by instruction: the driver's view of a 7610 still. buf has
    size bytes of stream and room for the 3-byte terminator it appends; returns the JPEG length it finds */
-static uint32_t camx_decode(uint8_t *buf, uint32_t size)
+static uint32_t camx_decode_order(uint8_t *buf, uint32_t size, bool swap)
 {
-    for (int32_t i = (int32_t)size - 4; i >= 0; i -= 4) {     /* 6258: words big-endian -> little-endian */
+    for (int32_t i = (int32_t)size - 4; swap && i >= 0; i -= 4) {     /* 6258: words big-endian -> little-endian */
         uint8_t t = buf[i]; buf[i] = buf[i + 3]; buf[i + 3] = t;
         t = buf[i + 1]; buf[i + 1] = buf[i + 2]; buf[i + 2] = t;
     }
@@ -581,6 +581,12 @@ end:
     return wr - buf - 1;
 }
 
+/* camxpdd's view (words swapped first); the 6630's campdd runs the same decoder (0x500a0d6c) without the swap */
+static uint32_t camx_decode(uint8_t *buf, uint32_t size)
+{
+    return camx_decode_order(buf, size, true);
+}
+
 /*
  * Regression "camx_still_rejected" (7610/6670): taking a picture blanked the viewfinder and nothing was saved. Stills
  * are a JPEG in the sensor's transport; the driver decodes it in place and compares the length with registers
@@ -608,6 +614,127 @@ static void test_camx_still(void)
     assert(ngage_cam_fill(&cam, f, CAM_HDR_CAMX + 640 * 480 * 2) == CAM_HDR_CAMX + 640 * 480 * 2);
 }
 
+
+/* ---- Nokia 6630 (campdd.pdd) ------------------------------------------------------------------------------------- */
+
+/* the frame sizes from the DMA transfers seen in runs: whole 16-byte DMA frames, the ISR reads the rest */
+static void test_rm1_frame_len(void)
+{
+    assert(ngage_cam_rm1_frame_len(0x962 * 16) == CAM_HDR_CAMX + 160 * 120 * 2);    /* viewfinder, 0x962C */
+    assert(ngage_cam_rm1_frame_len(0xc802 * 16) == CAM_RM1_STILL);                  /* the JPEG still */
+    assert(ngage_cam_rm1_frame_len(CAM_HDR_CAMX + 640 * 480 * 2) == CAM_HDR_CAMX + 640 * 480 * 2);
+    assert(ngage_cam_rm1_frame_len(0x1000) == 0x1000);                              /* unknown: as it is */
+}
+
+/*
+ * Regression "rm1_still_word_order": the 6630's still was taken again and again and never saved; campdd decodes the
+ * JPEG in stream order (it byte-reverses only the 44-byte header), and the 7610's byte-reversed words decoded to a
+ * wrong length (its check against registers 0xF6-0xF8 failed).
+ */
+static void test_rm1_still(void)
+{
+    static uint8_t f[CAM_RM1_STILL + 4], jpg[CAM_CAMX_STILL];
+    uint32_t n = ngage_cam_jpeg(jpg, sizeof(jpg), CAM_RM1_W, CAM_RM1_H, 0);
+
+    reset();
+    ngage_cam_rm1_setup(&cam);
+    uint32_t sent = ngage_cam_rm1_fill(&cam, f, CAM_RM1_STILL & ~15u);
+    assert(n && sent > CAM_HDR_CAMX && sent < CAM_RM1_STILL && sent % 4 == 0);
+    uint32_t got = cam.regs[CAM_REG_CAMX_LEN] << 16 | cam.regs[CAM_REG_CAMX_LEN + 1] << 8 | cam.regs[CAM_REG_CAMX_LEN + 2];
+    assert(got == n && (cam.regs[CAM_REG_CAMX_LEN + 4] & 0xc0) == 0xc0);
+    assert(memcmp(f + CAM_HDR_CAMX, jpg, 4) == 0);                  /* FF D8 in stream order */
+    assert(camx_decode_order(f + CAM_HDR_CAMX, sent - CAM_HDR_CAMX, false) == n);
+    assert(memcmp(f + CAM_HDR_CAMX, jpg, n) == 0);
+    /* the 7610 keeps its byte-reversed words */
+    reset();
+    cam.camx = true;
+    sent = ngage_cam_fill(&cam, f, CAM_CAMX_STILL);
+    assert(f[CAM_HDR_CAMX] != 0xff && f[CAM_HDR_CAMX + 3] == 0xff);
+}
+
+/* CamServerCore's EXIF fields from the header (0x501fbce0): the exposure +4..+6 and the gain +8/+9 */
+static uint32_t rm1_exposure(const uint8_t *h)
+{
+    return (h[6] & 7u) << 14 | (h[5] & 0x7fu) << 7 | (h[4] & 0x7fu);
+}
+
+static uint32_t rm1_gain(const uint8_t *h)
+{
+    return (h[9] & 7u) << 7 | (h[8] & 0x7fu);
+}
+
+/*
+ * Regression "rm1_exif_zero_header": CamServerCore panicked (USER-EXEC 3, EUSER's TRealX: the logarithm of 0) right
+ * after a still; it takes the exposure and the gain from the frame header (all zero), and campdd rewrites +8/+9 from
+ * the sensor's power-on gain registers 0x5E/0x5F (zero too). campdd byte-reverses the header's words only sometimes
+ * (when CCP +0x60 reads 1), so the fields must survive either order.
+ */
+static void test_rm1_header(void)
+{
+    uint8_t h[CAM_HDR_CAMX], r[CAM_HDR_CAMX];
+
+    ngage_cam_rm1_header(h);
+    for (unsigned i = 0; i < CAM_HDR_CAMX; i++) {
+        assert(h[i] & 0x80);                                         /* embedded data: bit 7 set */
+        r[i] = h[(i & ~3u) + 3 - (i & 3)];                           /* each word byte-reversed */
+    }
+    assert(memcmp(h, r, sizeof(h)) == 0);
+    assert(rm1_exposure(h) && rm1_gain(h) && (h[10] & 0x7f));
+    assert(!(h[0] & 1));
+    /* the frames carry it (the viewfinder's and the still's) */
+    static uint8_t f[CAM_RM1_STILL + 4];
+    reset();
+    ngage_cam_rm1_setup(&cam);
+    assert(ngage_cam_rm1_fill(&cam, f, 0x962 * 16) == 0x962c && memcmp(f, h, sizeof(h)) == 0);
+    assert(ngage_cam_rm1_fill(&cam, f, CAM_RM1_STILL & ~15u) > CAM_HDR_CAMX && memcmp(f, h, sizeof(h)) == 0);
+    /* campdd's rewrite (0x500a09ac): +8 = shadow 0x5E | 0x80 (bit 6 clear), +9 = 0x80 | (0x5F & 3) << 1 | 0x5E >> 7 */
+    uint8_t s5e = cam.regs[0x5e], s5f = cam.regs[0x5f];
+    uint8_t b8 = (s5e & 0x40) ? s5e & 0x7f : s5e | 0x80, b9 = 0x80 | (s5f & 3) << 1 | s5e >> 7;
+    assert(((b9 & 7u) << 7 | (b8 & 0x7fu)) != 0);
+}
+
+/*
+ * QEMU's omap_dma as campdd uses it: frame-synchronised, 4 words a frame; at the set-up of each frame the channel stays
+ * active for the next one while the request line is high. Returns the bytes the driver counts: DMA bytes (words past
+ * the frame read as 0) plus the FIFO words the ISR reads itself (up to 4, while the status shows them).
+ */
+static uint32_t rm1_dma_run(uint32_t len, bool (*drq)(uint32_t))
+{
+    uint32_t pos = 0, moved = 0;
+    bool more = true;
+
+    while (more) {
+        more = drq(pos < len ? len - pos : 0);
+        for (int w = 0; w < 4; w++) {
+            pos += 4;
+            moved += 4;
+        }
+    }
+    for (int w = 0; w < 4 && pos < len; w++) {
+        pos += 4;
+        moved += 4;
+    }
+    return moved;
+}
+
+static bool rm1_drq_one_frame(uint32_t left)
+{
+    return left >= CAM_RM1_DMA_FRAME;
+}
+
+/*
+ * Regression "rm1_dma_one_frame_past": with the request held while one DMA frame was left, QEMU moved one frame past
+ * the data and campdd counted 12-16 bytes too many: the still failed its length check, again and again.
+ */
+static void test_rm1_drq(void)
+{
+    for (uint32_t len = 2 * CAM_RM1_DMA_FRAME; len < 4096; len += 4) {
+        assert(rm1_dma_run(len, ngage_cam_rm1_drq) == len);
+    }
+    assert(rm1_dma_run(0x962c, ngage_cam_rm1_drq) == 0x962c);
+    assert(rm1_dma_run(32156, rm1_drq_one_frame) != 32156);          /* the old rule */
+}
+
 int main(void)
 {
     test_identify();
@@ -626,6 +753,10 @@ int main(void)
     test_fill_camx_header();
     test_fill_rot90();
     test_camx_still();
+    test_rm1_frame_len();
+    test_rm1_still();
+    test_rm1_header();
+    test_rm1_drq();
     printf("ngage_cam_test: ok\n");
     return 0;
 }

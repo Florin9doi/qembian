@@ -225,3 +225,15 @@ no kernel change. Record/replay (3) is still open.
   small (`eka1/tools/rom_dis.py`). The Ghidra scripts now find the snap install themselves (`tools/ghidra/*.sh`).
 - **Leave finder:** a one-shot "who left with code N" (the CPU-state trace on User::Leave's first block, filtered
   and symbolised) instead of grepping qemu.log by hand.
+
+## From the 6630 camera (2026-11-27)
+
+- **A DMA register trace for qemu-ngage:** the camera's channel set-up (CSDP/CCR/addresses/counts) was found by
+  adding a `qemu_log_mask` to the build tree's `hw/dma/omap_dma.c` for one run. A `-d trace:omap_dma*`-style switch
+  (or a `--debug dma` in ngage_sess.py) would make it one flag.
+- **ngage_sess.py `stack` on a thread name with brackets / a library name** fails silently or times out; listing
+  which container a name is in (thread, chunk, library) would have saved a detour (CAESTILLCONVERTER is a DLL).
+- **Conditional breakpoints** (`VA=LABEL?EXPR`) stopped on the first hit regardless of EXPR here too (P910i note above).
+- **The ARM objdump** is at `build/toolchains/arm-2009q3/bin/arm-none-symbianelf-objdump` on this machine (the doc's
+  `~/gcc-builds` path does not exist); `nokia6630` now has a `panic` catch (RThread::Panic 0x500ce040).
+

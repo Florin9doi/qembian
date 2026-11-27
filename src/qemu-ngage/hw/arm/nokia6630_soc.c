@@ -377,6 +377,14 @@ typedef struct {
 static Gpio *rm1_gpio[4];
 static void (*rm1_gpio_hook[4])(void *opaque, uint16_t out);
 static void *rm1_gpio_hook_opaque[4];
+static void (*rm1_gpio_dir_hook[4])(void *opaque, uint16_t dir);
+static void *rm1_gpio_dir_hook_opaque[4];
+
+void rm1_gpio_set_dir_hook(int module, void (*fn)(void *opaque, uint16_t dir), void *opaque)
+{
+    rm1_gpio_dir_hook[module] = fn;
+    rm1_gpio_dir_hook_opaque[module] = opaque;
+}
 
 void rm1_gpio_set_output_hook(int module, void (*fn)(void *opaque, uint16_t out), void *opaque)
 {
@@ -483,6 +491,10 @@ static void gpio_write(void *opaque, hwaddr addr, uint64_t val, unsigned size)
         return;
     }
     gpio_edge(g, before);
+    if (rm1_gpio_dir_hook[g->index] && (addr & ~3) == 0x34) {
+        /* open-drain lines driven through the direction register (the 6630 camera's I2C, nokia6630_cam.c) */
+        rm1_gpio_dir_hook[g->index](rm1_gpio_dir_hook_opaque[g->index], g->dir);
+    }
     if (rm1_gpio_hook[g->index] && ((addr & ~3) == 0x30 || (addr & ~3) == 0xb0 || (addr & ~3) == 0xf0)) {
         /*
          * The output latch, whatever the direction: the Nokia N70's ssi.pdd sets AP wake (GPIO4 bit 3,

@@ -182,10 +182,50 @@ module firmware (0x5040d620) through the port, then sends `04` (identify: answer
 7610's frame-start/frame-end ISR design (0x50409688). The model (`cmdport`) answers every command "done" with zeros:
 Camera opens (Image mode) and closes the module again without a viewfinder. Next: the answers the driver checks.
 
+## Nokia 6630 (2026-11-27)
+
+`-M nokia6630` (OMAP1610 board, `nokia6630_cam.c` + `ngage_cam.c`): Camera (right softkey on the home screen, or the
+Menu) shows the viewfinder; Select takes a picture, the post-capture view shows it ("27112026") and Gallery > Images
+lists it (31 kB, thumbnail) [V run, from a kept NAND: `ngage_sess.py --model nokia6630 --flash COPY`]. campdd.pdd
+(0x5009F3A0) drives the 7650's sensor and receiver, with the 7610's frame layout, on other wiring:
+
+| What | 6630 |
+|---|---|
+| sensor I2C | 0x78 / 0x79 (0x3C), bit-banged, open drain: SCL GPIO1 line 11 (DATAIN 0xFFFBE42C, DIRECTION +0x34), SDA GPIO4 line 14 (0xFFFBBC2C / +0x34); a line is pulled low by making it an output (latch cleared at power-up) [V 0x5009fac8-0x5009fb9c] |
+| sensor registers | 8-bit; at power-up the PDD reads 1..0xEA once into a shadow (0x500a1200) [V] |
+| CCP receiver | physical 0x2007D000 (VA 0x58105000), the 7650's registers 0x10 apart: +10..+40 sync codes, +50 0x3FF, +60 bit 0 on (pulsed to restart), +70 FIFO, +80 status, +90 mask (0xFFFFFFE7: frame start and end, as the 7610), +A0 control [V table 0x500a5064 + run] |
+| interrupt | "Lv2_CCPStatus" = kernel id 0x52 = level-2 line 50 [V name table] |
+| ISR | 0x500a0248, the 7610's: frame start (bit 4) arms the DMA from a DFC, frame end (bit 3) stops it and counts the bytes: 64 KB markers 0xFF0000FF in the buffer plus the DMA's CDAC (0x500a33d8), then up to 4 words from the FIFO while status bit 10 is set (0x500a0344) [V] |
+| DMA | system DMA channel 2: source 0x2007D070 constant, destination the buffer (0x10F43000), 32-bit, 4 elements a frame, frame-synchronised on request 3; viewfinder 0x962 frames (0x9620 bytes of a 0x962C frame), still 0xC802 frames [V run] |
+| frames | 44-byte header + 160x120 YUV (the 7650's byte order) for the viewfinder; the still a JPEG in the 7610's transport (0xA5 escapes, length in registers 0xF6-0xF8, 0xFA bits 7/6) but **in stream order** (the same decoder 0x500a0d6c; only the header is byte-swapped, 0x500a0934, when CCP +0x60 reads 1) [V code + run] |
+| header | the sensor's embedded data, 7-bit fields with bit 7 set: +1..+3 a frame counter, +4..+6 exposure, +8/+9 gain, +10; the PDD rewrites +4..+10 from its shadow (gain = shadow 0x5E/0x5F) in one mode; CamServerCore turns them into EXIF (0x501fbce0: FNumber 3.2, FocalLength 4.5, ShutterSpeedValue = a logarithm) [V] |
+
+The way there (each a regression test):
+1. Camera blank, no hardware touched: CamServerCore waited for RMobilePhone::GetPhoneId; the TSY's `1B 00 {41}` (IMEI)
+   was unanswered. H-rm1-imei (`rm1_camera_waits_for_imei`); the string one byte early in the sub-block faulted the
+   kernel.
+2. The sensor talked and frames were generated, but every frame arrived empty (nothing fed the DMA), so the driver
+   retried and gave up (its interrupt then stayed masked; it looked like a missed enable). Fixed by feeding QEMU's
+   omap_dma from the FIFO with request 3; the first open now shows the viewfinder [V run].
+3. Stills retaken for ever: the 7610's word swap (`rm1_still_word_order`), then a count 12-16 bytes high: the request
+   was held while one DMA frame was left and QEMU ran one more (`rm1_dma_one_frame_past`).
+4. "Saving image", then CamServerCore gone: USER-EXEC 3 from EUSER's floating point, the EXIF exposure and gain were 0
+   in the header (`rm1_exif_zero_header`): a made-up header (palindromic words, as the PDD swaps it only sometimes)
+   and the gain registers' power-on values.
+
+Not done: night mode, the other still sizes; the header's real content.
+
+**Video (2026-11-27): needs the DSP.** Camera > Video starts the video recorder controller (CAMCCONTROLLER.DLL, threads
+CCMRVideoRecorderThread / CCMRAudioThread) and the viewfinder stays blank, no camera traffic [V run]. The 6630 encodes
+both streams on its C55x DSP: H.263 in `VENCODER_NOKIA` (VideoEncoderSocket_Dyn.o55l, behind DevVideo) and AMR in
+AmrEncHwDeviceTI.dll ("DSP->AMR Encoder") [V strings in the core ROFS]. Options: a DSP model (large), or stand-ins at
+the DevVideo / hw-device level that produce H.263 and AMR on the ARM side [I: not tried].
+
 ## Open
 
 - Host camera as a source (a later step; the owner asked for a pattern only).
 - 3230: the module's command protocol (above).
+- 6630: video (needs the DSP's H.263 and AMR encoders, or stand-ins for them); the real embedded-data header.
 - Sensor type 2 (the other module) is not exercised; neither are the night mode and the QCIF still size.
 - 3650/3660: the camcorder (176x144 video, mode state 6 with control 0 on the 3650 [I]) is untried; the 3660's sensor
   variant 2 is not exercised.

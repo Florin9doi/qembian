@@ -750,8 +750,14 @@ static bool camx_trigger(uint8_t a, uint8_t b)
 
 uint32_t ngage_cam_camx_jpeg(uint8_t *dst, uint32_t cap, uint32_t frame, uint32_t *jpeg_len)
 {
+    return ngage_cam_camx_jpeg_wh(dst, cap, CAM_CAMX_W, CAM_CAMX_H, frame, true, jpeg_len);
+}
+
+uint32_t ngage_cam_camx_jpeg_wh(uint8_t *dst, uint32_t cap, unsigned w, unsigned h, uint32_t frame, bool swap,
+                                uint32_t *jpeg_len)
+{
     static uint8_t jpg[CAM_CAMX_STILL];
-    uint32_t n = ngage_cam_jpeg(jpg, sizeof(jpg), CAM_CAMX_W, CAM_CAMX_H, frame), o = 0;
+    uint32_t n = ngage_cam_jpeg(jpg, sizeof(jpg), w, h, frame), o = 0;
     uint8_t p1 = 0, p2 = 0;                     /* the decoder's last two bytes (r1 / r2 start at 0) */
 
     *jpeg_len = n;
@@ -779,7 +785,7 @@ uint32_t ngage_cam_camx_jpeg(uint8_t *dst, uint32_t cap, uint32_t frame, uint32_
         }
         dst[o++] = 0xa5;
     }
-    for (uint32_t i = 0; i < o; i += 4) {       /* each word byte-reversed (0x503e6258 swaps them back) */
+    for (uint32_t i = 0; swap && i < o; i += 4) {  /* each word byte-reversed (0x503e6258 swaps them back) */
         uint8_t t = dst[i]; dst[i] = dst[i + 3]; dst[i + 3] = t;
         t = dst[i + 1]; dst[i + 1] = dst[i + 2]; dst[i + 2] = t;
     }
@@ -810,11 +816,12 @@ uint32_t ngage_cam_fill(NgageCam *c, uint8_t *dst, uint32_t bytes)
         cam_log(c, "JPEG frame: %u bytes", n, 0);
         return bytes;
     }
-    if (c->camx && bytes == CAM_CAMX_STILL) {       /* 7610/6670 still: the sensor's JPEG */
+    if (c->camx && bytes == (c->still_bytes ? c->still_bytes : CAM_CAMX_STILL)) {  /* the sensor's JPEG still */
         uint32_t len, o;
 
         memset(dst, 0, CAM_HDR_CAMX);
-        o = ngage_cam_camx_jpeg(dst + CAM_HDR_CAMX, bytes - CAM_HDR_CAMX, c->frames, &len);
+        o = ngage_cam_camx_jpeg_wh(dst + CAM_HDR_CAMX, bytes - CAM_HDR_CAMX, c->still_w ? c->still_w : CAM_CAMX_W,
+                                   c->still_h ? c->still_h : CAM_CAMX_H, c->frames, !c->still_raw, &len);
         c->regs[CAM_REG_CAMX_LEN] = len >> 16;
         c->regs[CAM_REG_CAMX_LEN + 1] = len >> 8;
         c->regs[CAM_REG_CAMX_LEN + 2] = len;
@@ -841,4 +848,70 @@ uint32_t ngage_cam_fill(NgageCam *c, uint8_t *dst, uint32_t bytes)
     }
     cam_pattern_wh(dst, 160, bytes / 320, c->frames, fmt, c->rot90);
     return bytes;
+}
+
+/* ---- Nokia 6630 (campdd.pdd on the OMAP1610 board, nokia6630_cam.c) -------------------------------------------- */
+
+void ngage_cam_rm1_setup(NgageCam *c)
+{
+    c->camx = true;                 /* the 7610's frame layout: a 44-byte header, then the picture or the JPEG */
+    c->still_bytes = CAM_RM1_STILL;
+    c->still_w = CAM_RM1_W;
+    c->still_h = CAM_RM1_H;
+    c->still_raw = true;
+    /*
+     * Power-on values of the gain registers: campdd reads registers 1..0xEA once into a shadow (0x500a1200) and fills
+     * header bytes +8/+9 from shadow 0x5E/0x5F when it rewrites the header (0x500a09ac); CamServerCore takes their
+     * 10-bit value into the EXIF data (0x501fbf98). Zero there panicked CamServerCore after a still (USER-EXEC 3, the
+     * logarithm of 0) [V run]. Values: what the driver programs later (0x18, 0x02) [I].
+     */
+    c->regs[0x5e] = 0x18;
+    c->regs[0x5f] = 0x02;
+}
+
+uint32_t ngage_cam_rm1_frame_len(uint32_t dma)
+{
+    static const unsigned sizes[][2] = { { 160, 120 }, { 320, 240 }, { 640, 480 }, { 128, 96 }, { 176, 144 },
+                                         { 352, 288 } };
+
+    if ((CAM_RM1_STILL & ~(CAM_RM1_DMA_FRAME - 1)) == dma) {
+        return CAM_RM1_STILL;
+    }
+    for (unsigned i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
+        uint32_t n = CAM_HDR_CAMX + sizes[i][0] * sizes[i][1] * 2;
+
+        if ((n & ~(CAM_RM1_DMA_FRAME - 1)) == dma) {
+            return n;
+        }
+    }
+    return dma;
+}
+
+void ngage_cam_rm1_header(uint8_t *h)
+{
+    static const uint8_t words[3][4] = {
+        { 0x80, 0x81, 0x81, 0x80 },     /* +0 flag (bit 0 clear), +1..+3 frame counter (constant) */
+        { 0xb2, 0x81, 0x81, 0xb2 },     /* +4..+6 exposure (+6 & 7) << 14 | (+5 & 0x7F) << 7 | (+4 & 0x7F) */
+        { 0x98, 0x81, 0x81, 0x98 },     /* +8/+9 gain (+9 & 7) << 7 | (+8 & 0x7F), +10 */
+    };
+
+    memset(h, 0x80, CAM_HDR_CAMX);
+    memcpy(h, words, sizeof(words));
+}
+
+uint32_t ngage_cam_rm1_fill(NgageCam *c, uint8_t *dst, uint32_t dma)
+{
+    uint32_t n = ngage_cam_rm1_frame_len(dma);
+
+    memset(dst, 0, n);
+    n = ngage_cam_fill(c, dst, n);
+    if (n > CAM_HDR_CAMX) {
+        ngage_cam_rm1_header(dst);
+    }
+    return n;
+}
+
+bool ngage_cam_rm1_drq(uint32_t left)
+{
+    return left >= 2 * CAM_RM1_DMA_FRAME;
 }

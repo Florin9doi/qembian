@@ -1187,6 +1187,7 @@ typedef struct Rm1Phone {
     bool omap1710;                          /* report the OMAP1710's ID registers (rm1_omap1710_ids) */
     unsigned lcd_w, lcd_h;                  /* the main display (0: the 6630's 176x208) */
     bool lcd_ctrl;                          /* behind a display controller (nokia6630_lcd.h "Controller mode") */
+    bool camera;                            /* campdd.pdd's camera (nokia6630_cam.c) */
 } Rm1Phone;
 static const Rm1Phone *rm1_phone;
 
@@ -1335,6 +1336,9 @@ static void rm1_board_init(MachineState *machine, const Rm1Phone *ph)
     rm1_gptimers_init(sys, mpu);
     rm1_display_init(sys, mpu, ph->lcd_w, ph->lcd_h, ph->lcd_ctrl);
     rm1_gpio_init(sys, mpu);
+    if (ph->camera) {
+        rm1_cam_init(sys, mpu);
+    }
     rm1_wdt_init(sys);
     rm1_ssi_init(sys, mpu, ra2_isi);
     rm1_keys_init(mpu, ph->omap1710);
@@ -1466,7 +1470,7 @@ static void rm1_patches_n72(uint8_t *core, gsize len)
     rm1_patch(core, len, "H-rm180-drmhelper", 0x50819bb4, 0x1c0444a5, 0x46c04770);
 }
 
-static const Rm1Phone rm1_phone_6630 = { "nokia6630", "eka1/rm1/core", rm1_patches_6630, false };
+static const Rm1Phone rm1_phone_6630 = { "nokia6630", "eka1/rm1/core", rm1_patches_6630, false, 0, 0, false, true };
 static const Rm1Phone rm1_phone_6680 = { "nokia6680", "eka1/rm36/core", rm1_patches_6680, false };
 static const Rm1Phone rm1_phone_n70 = { "nokian70", "eka1/rm84/core", rm1_patches_n70, true };
 static const Rm1Phone rm1_phone_n72 = { "nokian72", "eka1/rm180/core", rm1_patches_n72, true };
